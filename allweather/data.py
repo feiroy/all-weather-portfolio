@@ -295,10 +295,13 @@ def _load_with_index(etf_name: str, idx_name: str, annual_deduct: float = 0.0) -
 
 
 
-def load_panel(include_wti: bool = True) -> pd.DataFrame:
+def load_panel(include_wti: bool = True, end: str | None = None) -> pd.DataFrame:
     """加载 8 资产收盘价面板（含缝合，对齐到回测期间，前向填充）。
 
     2008+ 延长回测：ETF 上市前的期间用指数/国际价格拼接。
+
+    end: 面板截止日（默认 BACKTEST_END，回测用）；实盘再平衡传今天，
+    保留回测截止日之后新拉取的行情。
     """
     # 权益：ETF + 指数 proxy
     hs300 = _load_with_index("hs300", "hs300_idx", annual_deduct=0.0)
@@ -356,7 +359,8 @@ def load_panel(include_wti: bool = True) -> pd.DataFrame:
         panel["wti"] = wti_cny
     panel.index = pd.to_datetime(panel.index)
     panel = panel.sort_index()
-    panel = panel.loc[BACKTEST_START:BACKTEST_END].ffill()
+    panel_end = end if end is not None else BACKTEST_END
+    panel = panel.loc[BACKTEST_START:panel_end].ffill()
 
     # 找到所有资产都开始有数据的起始日，而非一个资产缺失就整行删除
     # 避免早期部分资产无 proxy 时截断太狠

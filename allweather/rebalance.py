@@ -19,7 +19,7 @@ from pathlib import Path
 from .config import (
     ROOT, DATA_DIR, ASSETS, ETF_META, PORTFOLIO_NAMES, STRATEGY_PARAMS,
     RISK_PARITY_WINDOW, RISK_PARITY_MAX_WEIGHT, RISK_PARITY_MIN_WEIGHT,
-    GOLD_DIP_THRESHOLD, GOLD_DIP_BOOST,
+    GOLD_DIP_THRESHOLD,
     HS300_DIP_THRESHOLD, HS300_DIP_BOOST, HS300_DIP_SMA,
     HS300_PB_ENTRY, HS300_PE_EXIT, HS300_DIP_EXIT_RECOVERY,
     SP500_TREND_WINDOW,
@@ -199,36 +199,21 @@ def apply_signal_overrides(strat_key, w, signals, prices=None):
             w["credit"] += w["nonferr"]
             w["nonferr"] = 0.0
 
-    # gold trend filter (only V3-B RP)
-    if strat_key == "B-RP":
+    # gold trend filter (V3-B RP 和 V3c；与回测引擎一致，B-Con 不加)
+    if strat_key in ("B-RP", "V3c"):
         if signals.get("gold_below_sma75", False) and "gold" in w.index and "credit" in w.index:
             if w["gold"] > 0:
                 w["credit"] += w["gold"]
                 w["gold"] = 0.0
 
-    # SP500 trend filter (all strategies now include it)
-    if signals.get("sp500_below_sma75", False) and "us_sp500" in w.index and "credit" in w.index:
+    # SP500 trend filter (V3-B RP 和 V3c；B-Con 回测否决不加)
+    if strat_key in ("B-RP", "V3c") and signals.get("sp500_below_sma75", False) \
+            and "us_sp500" in w.index and "credit" in w.index:
         if w["us_sp500"] > 0:
             w["credit"] += w["us_sp500"]
             w["us_sp500"] = 0.0
 
-    # Gold dip — 防止重复 boost（同一个月内不重复触发）
-    gold_dip_eligible = signals.get("gold_dip_active", False)
-    gold_already_boosted = strat_state.get("gold_boost_month") == this_month
-    if gold_dip_eligible and not gold_already_boosted and "gold" in w.index and "credit" in w.index:
-        if w["gold"] > 0:
-            boost = w["gold"] * GOLD_DIP_BOOST
-            if w["credit"] >= boost:
-                w["gold"] += boost
-                w["credit"] -= boost
-                strat_state["gold_boost_month"] = this_month
-                if strat_key == "B-Con":
-                    cap = 0.20
-                    if w["gold"] > cap:
-                        w["credit"] += w["gold"] - cap
-                        w["gold"] = cap
-    elif gold_already_boosted:
-        pass  # 本月已 boost，跳过
+    # Gold dip 抄底已在回测否决（gold-dip-negative），实盘不再执行
 
     # HS300 AND dip — 防止重复 boost
     hs300_eligible = signals.get("hs300_dip_ready", False)
@@ -271,7 +256,7 @@ def display_signal_dashboard(signals):
     print(f"  nonferr vs SMA75:  {_fmt_bool(signals['nonferr_below_sma75'])}")
     print(f"  gold vs SMA75:     {_fmt_bool(signals['gold_below_sma75'])}")
     print(f"  SP500 vs SMA{SP500_TREND_WINDOW}:   {_fmt_bool(signals['sp500_below_sma75'])}")
-    print(f"  Gold 回撤:         {au_dd*100:>5.1f}%  ({_fmt_bool(signals['gold_dip_active'], '可抄底', '未触发')})")
+    print(f"  Gold 回撤:         {au_dd*100:>5.1f}%  ({_fmt_bool(signals['gold_dip_active'], '深度回撤', '正常')})")
     print(f"  HS300 回撤:        {hs_dd*100:>5.1f}%  ({_fmt_bool(signals['hs300_dd_pct'] <= -HS300_DIP_THRESHOLD, '深度回撤', '正常')})")
 
     pb = signals.get("pb_pctile")
@@ -303,8 +288,6 @@ def display_weight_table(strat_key, w, signals):
             status.append("趋势过滤→credit")
         if a == "gold" and signals.get("gold_below_sma75", False) and pct == 0:
             status.append("趋势过滤→credit")
-        if a == "gold" and signals.get("gold_dip_active", False) and pct > 0:
-            status.append(f"抄底×{GOLD_DIP_BOOST:.0f}")
         if a == "us_sp500" and signals.get("sp500_below_sma75", False) and pct == 0:
             status.append("趋势过滤→credit")
         if a == "hs300" and signals.get("hs300_dip_ready", False) and pct > 0:
@@ -315,8 +298,8 @@ def display_weight_table(strat_key, w, signals):
             au = signals.get("gold_below_sma75", False)
             incoming = []
             if nf: incoming.append("nonferr")
-            if sp: incoming.append("SP500")
-            if au: incoming.append("gold")
+            if sp and strat_key in ("B-RP", "V3c"): incoming.append("SP500")
+            if au and strat_key in ("B-RP", "V3c"): incoming.append("gold")
             if incoming:
                 status.append(f"接收{'/'.join(incoming)}")
         s = ", ".join(status) if status else "—"
@@ -461,7 +444,8 @@ def load_hs300_pe():
 
 def load_prices():
     from .data import load_panel
-    return load_panel()
+    # 实盘用最新行情，不截断到 BACKTEST_END
+    return load_panel(end=pd.Timestamp.now().strftime("%Y-%m-%d"))
 
 
 # ============================================================
@@ -595,7 +579,7 @@ def _check_and_alert(signals, date_str):
     if signals.get("sp500_below_sma75", False):
         alerts.append(f"SP500 跌破 SMA{SP500_TREND_WINDOW} → 已清仓转移至 credit")
     if signals.get("gold_dip_active", False):
-        alerts.append(f"黄金回撤 {signals['gold_dd_pct']*100:.1f}% → 抄底已触发")
+        alerts.append(f"黄金深度回撤 {signals['gold_dd_pct']*100:.1f}%（无抄底规则，趋势信号为准）")
     if signals.get("hs300_dip_ready", False):
         alerts.append("HS300 AND 抄底信号已就绪！")
     if signals.get("hs300_dip_exit", False):

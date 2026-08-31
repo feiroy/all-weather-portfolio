@@ -69,7 +69,7 @@ SIGNAL_ACTIONS = [
         "condition": lambda s: s.get("gold_below_sma75", False),
         "sell": _au,
         "buy": _cr,
-        "strategies": ["B-RP"],
+        "strategies": ["B-RP", "V3c"],
         "type": "趋势过滤",
     },
     {
@@ -78,17 +78,8 @@ SIGNAL_ACTIONS = [
         "condition": lambda s: s.get("sp500_below_sma75", False),
         "sell": _sp,
         "buy": _cr,
-        "strategies": ["B-Con", "B-RP", "V3c"],
+        "strategies": ["B-RP", "V3c"],
         "type": "趋势过滤",
-    },
-    {
-        "key": "gold_dip_active",
-        "desc": f"黄金 1Y 回撤 > {GOLD_DIP_THRESHOLD:.0%}，触发抄底",
-        "condition": lambda s: s.get("gold_dip_active", False),
-        "sell": f"{_cr}（筹资）",
-        "buy": f"{_au} ×2.5",
-        "strategies": ["B-Con", "B-RP", "V3c"],
-        "type": "抄底加仓",
     },
     {
         "key": "hs300_dip_ready",
@@ -314,7 +305,7 @@ with tab1:
     with dd_col1:
         gold_dd = signals.get("gold_dd_pct", 0)
         st.metric("黄金 1Y 回撤", f"{gold_dd*100:.1f}%",
-                  delta=f"距抄底线 {(-GOLD_DIP_THRESHOLD*100):.0f}% 还差 {(gold_dd*100 + GOLD_DIP_THRESHOLD*100):.1f}%" if gold_dd > -GOLD_DIP_THRESHOLD else "已触发")
+                  delta=f"距深度回撤线 {(-GOLD_DIP_THRESHOLD*100):.0f}% 还差 {(gold_dd*100 + GOLD_DIP_THRESHOLD*100):.1f}%" if gold_dd > -GOLD_DIP_THRESHOLD else "深度回撤")
     with dd_col2:
         hs_dd = signals.get("hs300_dd_pct", 0)
         st.metric("沪深300 3Y 回撤", f"{hs_dd*100:.1f}%",
@@ -378,21 +369,19 @@ with tab2:
 
         if a == "nonferr" and signals.get("nonferr_below_sma75") and pct == 0:
             status_parts.append("趋势过滤→已清仓")
-        if a == "gold" and strat_key == "B-RP" and signals.get("gold_below_sma75") and pct == 0:
+        if a == "gold" and strat_key in ("B-RP", "V3c") and signals.get("gold_below_sma75") and pct == 0:
             status_parts.append("趋势过滤→已清仓")
-        if a == "us_sp500" and signals.get("sp500_below_sma75") and pct == 0:
+        if a == "us_sp500" and strat_key in ("B-RP", "V3c") and signals.get("sp500_below_sma75") and pct == 0:
             status_parts.append("趋势过滤→已清仓")
-        if a == "gold" and signals.get("gold_dip_active") and pct > 0:
-            status_parts.append("抄底×2.5")
         if a == "hs300" and signals.get("hs300_dip_ready") and pct > 0:
             status_parts.append("AND抄底×1.8")
         if a == "credit":
             incoming = []
             if signals.get("nonferr_below_sma75"):
                 incoming.append("有色")
-            if signals.get("sp500_below_sma75"):
+            if strat_key in ("B-RP", "V3c") and signals.get("sp500_below_sma75"):
                 incoming.append("标普")
-            if strat_key == "B-RP" and signals.get("gold_below_sma75"):
+            if strat_key in ("B-RP", "V3c") and signals.get("gold_below_sma75"):
                 incoming.append("黄金")
             if incoming:
                 status_parts.append(f"接收{'/'.join(incoming)}")
