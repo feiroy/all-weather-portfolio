@@ -337,6 +337,37 @@ details summary{ font-weight:600; }
 /* 分隔线 */
 hr{ margin:1.8rem 0; }
 
+/* ========== 跨页组件统一（表格/提示条/展开器/进度条/日期输入） ========== */
+/* 表格：默认 dataframe 与自定义 .tbl 同一套观感 */
+[data-testid="stDataFrame"]{
+  border:1px solid #e8eaed; border-radius:14px; overflow:hidden;
+  box-shadow:var(--shadow); background:#fff;
+}
+[data-testid="stDataFrame"] [role="grid"]{ font-size:13.5px; }
+.tbl tbody tr:hover td{ background:rgba(26,115,232,.04); }
+/* 提示条：MD  tonal 容器 */
+[data-testid="stAlert"]{
+  border-radius:12px; border:none !important; box-shadow:none;
+}
+[data-testid="stAlert"][kind="info"], div[data-testid="stAlert"]:has(.st-emotion-cache-0){
+}
+div[data-testid="stAlert"]{ background:#e8f0fe; }
+div[data-testid="stAlert"] p{ color:#174ea6; }
+/* 展开器：描边卡片化 */
+[data-testid="stExpander"]{
+  border:1px solid #e8eaed !important; border-radius:14px !important;
+  background:#fff; box-shadow:var(--shadow); overflow:hidden;
+}
+[data-testid="stExpander"] details summary{ padding:14px 18px; }
+[data-testid="stExpander"] details summary:hover{ background:#f8f9fa; }
+/* 日期输入 */
+[data-testid="stDateInput"] input{ border-radius:12px !important; min-height:44px; }
+/* 进度条：全圆角 */
+[data-testid="stProgress"] > div{ border-radius:999px; overflow:hidden; }
+[data-testid="stProgress"] > div > div{ border-radius:999px; }
+/* 数字输入的步进按钮保持同高 */
+[data-testid="stNumberInput"] button{ border-radius:0 12px 12px 0; }
+
 /* ========== 隐藏不需要的 UI ========== */
 [data-testid="stAppDeployButton"]{ display:none; }
 [data-testid="stDeployButton"]{ display:none; }
@@ -425,13 +456,13 @@ h3{margin:0;font-size:17px;font-weight:600;color:#202124;display:flex;align-item
 #updating{font-size:12px;color:#5f6368;visibility:hidden}#wrap[aria-busy="true"] #updating{visibility:visible}
 .controls{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-top:18px;border-bottom:1px solid #e8eaed}
 #range-controls{display:flex;gap:8px;min-width:0}
-button[data-range]{font:inherit;border:0;border-bottom:2px solid transparent;border-radius:0;background:transparent;
-  color:#5f6368;padding:10px 12px;white-space:nowrap;cursor:pointer;min-height:40px}
-button[data-range]:hover{background:#f1f3f4}
-button[data-range][aria-pressed="true"]{font-weight:600;color:#202124;border-bottom-color:#202124}
-button:focus-visible,select:focus-visible,#chart:focus-visible{outline:2px solid #5f6368;outline-offset:2px}
-select{font:inherit;border:1px solid #dadce0;border-radius:8px;background:#fff;color:#334155;padding:6px 10px;min-height:36px;cursor:pointer}
-#period{margin-bottom:4px;min-width:86px}
+button[data-range]{font:inherit;font-size:14px;border:0;border-bottom:2px solid transparent;border-radius:0;background:transparent;
+  color:#5f6368;padding:10px 12px;white-space:nowrap;cursor:pointer;min-height:42px}
+button[data-range]:hover{background:rgba(26,115,232,.05);color:#202124}
+button[data-range][aria-pressed="true"]{font-weight:600;color:#b3261e;border-bottom-color:#d93025}
+button:focus-visible,select:focus-visible,#chart:focus-visible{outline:2px solid #1a73e8;outline-offset:2px}
+select{font:inherit;font-size:14px;border:1px solid #dadce0;border-radius:12px;background:#fff;color:#202124;padding:6px 12px;min-height:42px;cursor:pointer}
+#period{margin-bottom:4px;min-width:96px}#period:hover{border-color:#b8bdc4}
 .state-line{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin:12px 0 8px;font-size:12px;color:#5f6368}
 .date-line{display:flex;align-items:center;gap:6px}#selection{color:#5f6368}#selection[data-custom="true"]{font-weight:600}
 #range{font-variant-numeric:tabular-nums}#notice{min-height:20px;font-size:12px;color:#5f6368}
