@@ -125,14 +125,17 @@ hr{ border-color:#eef1f6; }
 
 /* ========== Tabs（Streamlit 1.66 是自定义 tab，不是 baseweb） ========== */
 [data-testid="stTabs"] [role="tab"]{
-  padding:9px 4px 11px; margin-right:22px; font-size:14px; color:var(--sub);
-  letter-spacing:-.1px; transition:color .15s ease;
+  padding:10px 2px 12px; margin-right:26px; font-size:14px; color:var(--sub);
+  letter-spacing:-.1px; white-space:nowrap; transition:color .15s ease;
 }
 [data-testid="stTabs"] [role="tab"]:hover{ color:var(--ink); }
 [data-testid="stTabs"] [role="tab"][aria-selected="true"]{
   color:var(--ink) !important; font-weight:650;
 }
-[data-testid="stTabs"] [role="tablist"]{ gap:0; border-bottom:1px solid var(--line); }
+[data-testid="stTabs"] [role="tablist"]{
+  gap:0; border-bottom:1px solid var(--line); overflow-x:auto; scrollbar-width:none;
+}
+[data-testid="stTabs"] [role="tablist"]::-webkit-scrollbar{ display:none; }
 [data-testid="stTabs"] [data-testid="stTabPanel"]{ padding-top:16px; }
 
 /* ========== 卡片容器（st.container(border=True)） ========== */
@@ -168,10 +171,40 @@ hr{ border-color:#eef1f6; }
 /* ========== 提示条 ========== */
 [data-testid="stAlert"]{ border-radius:12px; border:1px solid var(--line); }
 
-/* ========== 侧边栏 ========== */
+/* ========== 侧边栏（品牌化分组重排） ========== */
 [data-testid="stSidebar"]{ background:var(--card); border-right:1px solid var(--line); }
-[data-testid="stSidebar"] .block-container{ padding-top:1.2rem; }
-[data-testid="stSidebar"] [role="radiogroup"] label{ font-size:13px; }
+[data-testid="stSidebar"] .block-container{ padding:1.1rem 1.05rem 2rem; }
+.sb-brand{
+  display:flex; align-items:center; gap:9px; margin:2px 0 18px;
+  font-size:15px; font-weight:650; letter-spacing:-.2px; color:var(--ink);
+}
+.sb-brand .mark{
+  width:22px; height:22px; border-radius:7px; display:inline-flex; align-items:center; justify-content:center;
+  background:linear-gradient(135deg,#ffd9a0,#ffb199); font-size:12px;
+}
+.sb-label{ font-size:11px; color:var(--sub); letter-spacing:.5px; margin:14px 0 3px; }
+.sb-divider{ border-top:1px solid var(--line); margin:18px 0 12px; }
+.sb-status{
+  display:inline-flex; align-items:center; gap:7px; font-size:12px; padding:5px 10px;
+  border-radius:999px; border:1px solid var(--line); background:#f8fafc; color:#374151;
+}
+.sb-status .dot{ width:7px; height:7px; border-radius:50%; background:#22c55e; }
+.sb-status.warn .dot{ background:#f59e0b; }
+.sb-status.err .dot{ background:#ef4444; }
+/* 单选组做成“列表项”，选中项浅底高亮 */
+[data-testid="stSidebar"] [role="radiogroup"]{ gap:4px; }
+[data-testid="stSidebar"] [role="radiogroup"] label{
+  border:1px solid transparent; border-radius:9px; padding:6px 10px;
+  font-size:13px; transition:background .12s; cursor:pointer;
+}
+[data-testid="stSidebar"] [role="radiogroup"] label:hover{ background:#f4f6fa; }
+[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked){
+  background:#f0f2f7; border-color:#e4e8f0; font-weight:600;
+}
+[data-testid="stSidebar"] [data-testid="stButton"]>button{
+  width:100%; justify-content:flex-start; color:var(--sub); font-weight:500;
+}
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"]{ font-size:11px; margin-top:6px; }
 
 /* ========== 自定义表格 ========== */
 .tbl{
@@ -800,19 +833,27 @@ def _check_data_staleness():
 # ============================================================
 # Sidebar
 # ============================================================
-st.sidebar.title("🌤️ 全天候再平衡")
+st.sidebar.markdown(
+    '<div class="sb-brand"><span class="mark">🌤️</span>全天候再平衡</div>',
+    unsafe_allow_html=True,
+)
 
 _strat_display = {"B-Con": "V3-B 保守增强", "B-RP": "V3-B 风险平价", "V3c": "V3c 多元"}
+st.sidebar.markdown('<div class="sb-label">策略</div>', unsafe_allow_html=True)
 strat_key = st.sidebar.radio(
     "策略",
     ["B-Con", "B-RP", "V3c"],
     format_func=lambda k: _strat_display[k],
+    label_visibility="collapsed",
 )
+st.sidebar.markdown('<div class="sb-label">现金档位</div>', unsafe_allow_html=True)
 tier = st.sidebar.radio(
     "现金档位",
     ["100", "85", "70"],
     format_func=lambda t: f"{t}% RP",
+    label_visibility="collapsed",
 )
+st.sidebar.markdown('<div class="sb-divider"></div>', unsafe_allow_html=True)
 
 # 自动拉取：数据超过 1 天就增量更新
 staleness_days, staleness_asset = _check_data_staleness()
@@ -829,13 +870,19 @@ if staleness_days is not None and staleness_days > 1 and not st.session_state.au
 
 if staleness_days is not None:
     if staleness_days > 7:
-        st.sidebar.warning(f"数据 {staleness_days} 天未更新")
+        _sb_cls, _sb_txt = "err", f"数据滞后 {staleness_days} 天"
+    elif staleness_days > 1:
+        _sb_cls, _sb_txt = "warn", f"数据滞后 {staleness_days} 个交易日"
     else:
-        st.sidebar.success(f"数据新鲜（滞后 {staleness_days} 个交易日）")
+        _sb_cls, _sb_txt = "", "数据已是最新"
 else:
-    st.sidebar.error("数据缺失")
+    _sb_cls, _sb_txt = "err", "数据缺失"
+st.sidebar.markdown(
+    f'<span class="sb-status {_sb_cls}"><span class="dot"></span>{_sb_txt}</span>',
+    unsafe_allow_html=True,
+)
 
-if st.sidebar.button("🔄 拉取最新数据"):
+if st.sidebar.button("拉取最新数据", icon="🔄", type="secondary", use_container_width=True):
     with st.sidebar:
         with st.spinner("正在拉取..."):
             from allweather.fetch import fetch_all
@@ -918,34 +965,34 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# 首屏迷你走势（所选策略近 120 个交易日，带名称与涨跌，避免"不知道画的是什么"）
-_bench_full = _bench_curve(strat_key)
-if _bench_full is not None and len(_bench_full) > 30:
-    _seg = _bench_full.tail(120)
-    _seg_ret = float(_seg.iloc[-1] / _seg.iloc[0] - 1)
-    _c_sp, _c_meta = st.columns([3, 1])
-    with _c_sp:
-        st.markdown(
-            f'<div class="mini-title">{_strat_display[strat_key]} · 近 120 个交易日走势</div>',
-            unsafe_allow_html=True,
-        )
-        st.altair_chart(_sparkline(_seg, height=64))
-    with _c_meta:
-        st.metric("区间涨跌", f"{_seg_ret*100:+.2f}%")
-        st.caption(f"{_cn_date(_seg.index[0])} → {_cn_date(_seg.index[-1])}")
-
 # ============================================================
 # Main Tabs
 # ============================================================
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
-    ["📊 信号仪表盘", "📋 目标权重", "🏗️ 建仓清单", "🔄 调仓清单",
-     "📝 实操记录", "📈 基金走势"]
+    ["信号仪表盘", "目标权重", "建仓清单", "调仓清单",
+     "实操记录", "基金走势"]
 )
 
 # ============================================================
 # Tab 1: 信号仪表盘
 # ============================================================
 with tab1:
+    # 策略净值迷你走势归入仪表盘内，不再占据首页顶部
+    _bench_full = _bench_curve(strat_key)
+    if _bench_full is not None and len(_bench_full) > 30:
+        _seg = _bench_full.tail(120)
+        _seg_ret = float(_seg.iloc[-1] / _seg.iloc[0] - 1)
+        with st.container(border=True):
+            _c_sp, _c_meta = st.columns([4.2, 1], vertical_alignment="center")
+            with _c_sp:
+                st.markdown(
+                    f'<div class="mini-title">策略净值 · {_strat_display[strat_key]} · 近 120 个交易日</div>',
+                    unsafe_allow_html=True,
+                )
+                st.altair_chart(_sparkline(_seg, height=72))
+            with _c_meta:
+                st.metric("区间涨跌", f"{_seg_ret*100:+.2f}%")
+                st.caption(f"{_seg.index[0]:%Y/%m/%d} → {_seg.index[-1]:%Y/%m/%d}")
     triggered = []
     calm = []
     not_applicable = []
