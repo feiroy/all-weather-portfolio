@@ -1,0 +1,15 @@
+{
+ "strategy": "V3c",
+ "capital": 500000.0,
+ "created": "2026-08-01",
+ "trades": [
+  {
+   "date": "2026-09-04",
+   "asset": "hs300",
+   "side": "买入",
+   "shares": 100.0,
+   "price": 1.9002,
+   "fee": 0.0
+  }
+ ]
+}
