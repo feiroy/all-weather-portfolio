@@ -35,7 +35,7 @@ RANGES = {"近1月": ("days", 30), "近3月": ("months", 3),
 STAGES = {"近1月": ("days", 30), "近3月": ("months", 3),
           "近1年": ("years", 1), "今年来": ("ytd", 0)}
 PERIODS = ("日", "月", "年")
-CHART_SOURCE_SHA256 = "0c940ef5b20fa301d35520155d07eaaee14f22c69284f1a9cbba5a83a75a9c30"
+CHART_SOURCE_SHA256 = "c6a8a00d47e5d975e34521076e69a5fa54558f69be51398518525101f6dd6df1"
 NAMES = {"_scroll_chart_html", "_trend_aggregate", "_trend_window_start",
          "_stage_rows", "_stage_summary_html", "_trend_chart_data"}
 CONSTANTS = {"_TREND_RANGES", "_TREND_STAGES"}

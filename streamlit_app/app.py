@@ -284,6 +284,59 @@ hr{ border-color:#e8eaed; }
 .sig.calm{ border-left-color:#188038; }
 .sig.off{ border-left-color:#dadce0; opacity:.72; }
 
+/* ========== MD 排版与节奏（字体/间距/控件） ========== */
+html{ font-size:15px; }
+[data-testid="stAppViewContainer"] p, [data-testid="stAppViewContainer"] li,
+[data-testid="stMarkdownContainer"]{ line-height:1.7; }
+.block-container{ padding-top:1.6rem; padding-bottom:4rem; }
+[data-testid="stAppViewContainer"] .block-container > [data-testid="stVerticalBlock"]{ gap:1.4rem; }
+/* 标题层级拉开：页面主标题 / 区块标题 */
+.hero-title{ font-size:34px; font-weight:700; letter-spacing:-1px; line-height:1.25; }
+.hero-sub{ font-size:13.5px; margin-top:6px; }
+[data-testid="stHeadingWithActionElements"] h2{ font-size:1.35rem; font-weight:650; letter-spacing:-.3px; }
+[data-testid="stHeadingWithActionElements"] h3{ font-size:1.15rem; font-weight:650; }
+/* MD 卡片：更大内边距与圆角，悬浮抬升 */
+[data-testid="stVerticalBlockBorderWrapper"]{ border-radius:16px; }
+[data-testid="stVerticalBlockBorderWrapper"] > [data-testid="stVerticalBlock"]{ padding:6px 4px; }
+[data-testid="stVerticalBlockBorderWrapper"]:hover{ box-shadow:var(--shadow2); }
+/* 指标卡：大号数值 + 小号全字距标签 */
+[data-testid="stMetric"]{ padding:16px 18px; border-radius:16px; }
+[data-testid="stMetricLabel"] p{
+  font-size:11.5px !important; letter-spacing:.6px; color:var(--sub) !important; font-weight:500;
+}
+[data-testid="stMetricValue"]{ font-size:27px !important; font-weight:650; letter-spacing:-.6px; }
+/* 控件统一 44px 触控高度、12px 圆角 */
+[data-testid="stSelectbox"] [data-baseweb="select"] > div{
+  border-radius:12px !important; min-height:44px; border-color:#dadce0 !important;
+}
+[data-testid="stSelectbox"] [data-baseweb="select"] > div:focus-within{
+  border-color:#1a73e8 !important; box-shadow:0 0 0 1px #1a73e8 !important;
+}
+[data-testid="stTextInput"] input, [data-testid="stNumberInput"] input{
+  border-radius:12px !important; min-height:44px;
+}
+/* 按钮：MD 填充按钮 */
+.stButton>button, .stDownloadButton>button{ min-height:42px; padding:.5rem 1.3rem; font-size:14px; }
+/* Tab：更大的字与点击区 */
+[data-testid="stTabs"] [role="tab"]{ font-size:15px; padding:12px 4px 14px; margin-right:30px; }
+/* 表格：行高与字号 */
+[data-testid="stDataFrame"]{ font-size:13.5px; }
+.tbl{ font-size:14px; }
+.tbl th{ font-size:12px; letter-spacing:.4px; padding:11px 14px; }
+.tbl td{ padding:11px 14px; }
+/* 侧边栏：呼吸感 */
+[data-testid="stSidebar"] .block-container{ padding:1.4rem 1.2rem 2.4rem; }
+.sb-brand{ font-size:17px; margin-bottom:24px; }
+.sb-label{ font-size:11px; letter-spacing:1px; margin:20px 0 5px; }
+[data-testid="stSidebar"] [role="radiogroup"] label{
+  padding:9px 12px; font-size:14px; border-radius:999px;
+}
+/* 提示条与展开器圆角统一 */
+[data-testid="stExpander"]{ border-radius:14px; }
+details summary{ font-weight:600; }
+/* 分隔线 */
+hr{ margin:1.8rem 0; }
+
 /* ========== 隐藏不需要的 UI ========== */
 [data-testid="stAppDeployButton"]{ display:none; }
 [data-testid="stDeployButton"]{ display:none; }
@@ -430,7 +483,13 @@ box-shadow:0 4px 16px rgba(60,64,67,.18);font-variant-numeric:tabular-nums}
   const valid = v => v !== null && Number.isFinite(v);
   const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   const x = i => L + (i + .5 - start) * PW / count;
-  const bounds = () => count <= 0 ? [0, -1] : [Math.max(0, Math.ceil(start - .5 + 1e-8)), Math.min(n - 1, Math.floor(start + count - .5 - 1e-8))];
+  const bounds = () => {
+    if (count <= 0) return [0, -1];
+    let first = Math.max(0, Math.ceil(start - .5 + 1e-8));
+    let last = Math.min(n - 1, Math.floor(start + count - .5 - 1e-8));
+    if (last < first) first = last = clamp(Math.round(start + count / 2 - .5), 0, n - 1); // 窗口中点落在两期之间时取最近一期
+    return [first, last];
+  };
   const pct = v => valid(v) ? (v > 0 ? '+' : '') + v.toFixed(2) + '%' : '—';
   const color = v => !valid(v) || Math.abs(v) < 1e-10 ? '#5f6368' : (v > 0 ? '#d93025' : '#188038');
   const price = v => valid(v) ? v.toFixed(4) : '—';
