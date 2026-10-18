@@ -91,6 +91,11 @@ def _fetch_etf_nav(code, start, end):
             data_json = r.json()
         temp_df = pd.DataFrame(data_json["Data"]["LSJZList"])
         df_list.append(temp_df)
+    if not df_list:
+        # 区间内无数据（周末/节假日/无新净值）：返回空表，
+        # 让上层 fetch_one 降级到 _fetch_etf_hist 或标记"已最新"，
+        # 避免 pd.concat([]) 抛 "No objects to concatenate"
+        return pd.DataFrame(columns=["date", "close"])
     big_df = pd.concat(df_list, ignore_index=True)
     col_map = {
         "FSRQ": "date", "DWJZ": "unit_nav", "LJJZ": "close",
@@ -111,12 +116,16 @@ def _fetch_etf_nav(code, start, end):
 
 
 def _fetch_etf_hist(code, start, end):
+    """ETF 行情兜底：改用新浪接口（东财行情域名 push2his 常无法连接）。"""
     import akshare as ak
-    df = ak.fund_etf_hist_em(symbol=code, period="daily",
-                             start_date=start, end_date=end, adjust="hfq")
-    df = df.rename(columns={"日期": "date", "收盘": "close"})
+    prefix = "sh" if str(code).startswith("5") else "sz"
+    df = ak.fund_etf_hist_sina(symbol=f"{prefix}{code}")
     df["date"] = pd.to_datetime(df["date"])
-    return df[["date", "close"]].sort_values("date")
+    df = df[["date", "close"]]
+    s = pd.to_datetime(start, format="%Y%m%d")
+    e = pd.to_datetime(end, format="%Y%m%d")
+    df = df[(df["date"] >= s) & (df["date"] <= e)]
+    return df.sort_values("date").reset_index(drop=True)
 
 
 def _fetch_fut_dce(sym, start, end):
@@ -212,10 +221,15 @@ def _fetch_fx_boc(start, end):
     """美元人民币汇率 (currency_boc_sina)，取央行中间价。"""
     import akshare as ak
     df = ak.currency_boc_sina(symbol="美元", start_date=start, end_date=end)
+    if df is None or df.empty:
+        return pd.DataFrame(columns=["date", "close"])
     df = df.rename(columns={"日期": "date", "央行中间价": "close"})
     df["date"] = pd.to_datetime(df["date"])
     df["close"] = pd.to_numeric(df["close"], errors="coerce") / 100.0  # 分→元
     close_mid = df["close"].median()
+    if pd.isna(close_mid):
+        # 区间内无有效汇率（周末/节假日），返回空表，由上层标记"已最新"
+        return pd.DataFrame(columns=["date", "close"])
     if not (5 < close_mid < 10):
         raise ValueError(f"USDCNY 中间价中位数={close_mid}，预期 ~7 元，可能单位已变更")
     df = df.dropna(subset=["date", "close"])
@@ -248,6 +262,19 @@ def fetch_cgb_yields():
         return None
 
 
+def _last_trading_day(end: str) -> str:
+    """把结束日期回退到最近的工作日（周六/周日回退到周五）。
+
+    作用：周末点击"拉取最新数据"时，数据本来就没有新净值，
+    回退后 next_date >= end，可直接标记"已最新"，避免无谓网络请求。
+    注意：只处理周末，不处理法定节假日（节假日仍会请求，但返回空会走"已最新"）。
+    """
+    d = pd.Timestamp(end)
+    while d.weekday() >= 5:  # 5=周六, 6=周日
+        d -= pd.Timedelta(days=1)
+    return d.strftime("%Y%m%d")
+
+
 def fetch_all(force: bool = False, start: str = DEFAULT_START, end: str = DEFAULT_END):
     """拉取所有目标资产。支持增量更新 —— 已有文件只补充缺失日期。
 
@@ -257,13 +284,28 @@ def fetch_all(force: bool = False, start: str = DEFAULT_START, end: str = DEFAUL
         end:   结束日期，格式 YYYYMMDD，默认 20260530
     """
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+    _end_orig = end
+    end = _last_trading_day(end)
     print(f"[fetch] 数据目录: {DATA_DIR}")
-    print(f"[fetch] 拉取区间: {start} ~ {end}")
+    if end != _end_orig:
+        print(f"[fetch] 拉取区间: {start} ~ {end}（{_end_orig} 非交易日，已回退到最近工作日）")
+    else:
+        print(f"[fetch] 拉取区间: {start} ~ {end}")
 
     ok, errors, up_to_date = {}, [], []
 
     for name, (kind, sym) in TARGETS.items():
         path = DATA_DIR / f"{name}.csv"
+        # 全量接口（不支持增量）：treasury/sp500/fx 等每次调用都会下全量，
+        # 若今天已经拉过（文件 mtime 是今天），直接跳过，避免重复下载。
+        FULL_FETCH_KINDS = {"treasury", "sp500"}
+        if (not force) and kind in FULL_FETCH_KINDS and path.exists():
+            import datetime as _dt
+            mday = _dt.date.fromtimestamp(path.stat().st_mtime)
+            if mday == _dt.date.today():
+                up_to_date.append(name)
+                print(f"  >> {name} 今日已更新，跳过（全量接口）", flush=True)
+                continue
         if path.exists() and not force:
             # 增量模式 —— 跳过已有日期，只拉新数据
             existing = pd.read_csv(path, parse_dates=["date"])
@@ -282,6 +324,7 @@ def fetch_all(force: bool = False, start: str = DEFAULT_START, end: str = DEFAUL
             next_date = last_date + pd.Timedelta(days=1)
             if next_date >= pd.Timestamp(end):
                 up_to_date.append(name)
+                print(f"  -- {name} 已最新（已有至 {last_date.date()}，无需请求）", flush=True)
                 continue
             inc_start = next_date.strftime("%Y%m%d")
             print(f"  >> {name} 增量 {inc_start}~{end}（已有至 {last_date.date()}）", flush=True)
@@ -309,21 +352,33 @@ def fetch_all(force: bool = False, start: str = DEFAULT_START, end: str = DEFAUL
             except Exception as e:
                 errors.append(f"{name}: {str(e)[:200]}")
 
-    # 尝试拉取中债国债收益率曲线
-    print(f"  >> cgb_yields (bond_china_yield)", flush=True)
-    yield_df = fetch_cgb_yields()
-    if yield_df is not None and not yield_df.empty:
-        yield_path = DATA_DIR / "cgb_yields.csv"
-        yield_df.to_csv(yield_path, index=False, encoding="utf-8")
-        print(f"    ok  n={len(yield_df)}")
+    # 尝试拉取中债国债收益率曲线（bond_china_yield 不支持日期参数，全量接口）
+    # 当日缓存：今天已经拉过就跳过，避免每次点击都重新下载
+    import datetime as _dt
+    yield_path = DATA_DIR / "cgb_yields.csv"
+    _skip_yield = (
+        (not force)
+        and yield_path.exists()
+        and _dt.date.fromtimestamp(yield_path.stat().st_mtime) == _dt.date.today()
+    )
+    if _skip_yield:
+        print(f"  >> cgb_yields 今日已更新，跳过（全量接口）", flush=True)
     else:
-        print(f"    WARN  中债收益率曲线拉取失败，将使用久期放大回退方案合成 30Y")
+        print(f"  >> cgb_yields (bond_china_yield)", flush=True)
+        yield_df = fetch_cgb_yields()
+        if yield_df is not None and not yield_df.empty:
+            yield_df.to_csv(yield_path, index=False, encoding="utf-8")
+            print(f"    ok  n={len(yield_df)}")
+        else:
+            print(f"    WARN  中债收益率曲线拉取失败，将使用久期放大回退方案合成 30Y")
 
     print(f"\n=== 拉取摘要 ===")
     print(f"  成功: {len(ok)}    已最新: {len(up_to_date)}    失败: {len(errors)}")
     if ok:
         for name, (mn, mx, n) in ok.items():
             print(f"    {name}: {mn.date()} → {mx.date()}  ({n} 行)")
+    if up_to_date:
+        print(f"  已最新（未发起请求）: {', '.join(up_to_date)}")
     if errors:
         print("  失败明细:")
         for e in errors:
