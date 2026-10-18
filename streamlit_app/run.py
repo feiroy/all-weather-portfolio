@@ -17,7 +17,9 @@ def server_ready():
         return False
 
 proc = subprocess.Popen(
-    [sys.executable, "-m", "streamlit", "run", str(APP_FILE), "--server.headless=false"],
+    # headless=true：不让 streamlit 自己开浏览器，
+    # 由下面的 webbrowser.open 在服务就绪后统一打开一次（否则会开两个标签页）
+    [sys.executable, "-m", "streamlit", "run", str(APP_FILE), "--server.headless=true"],
     cwd=str(PROJECT_DIR),
 )
 
