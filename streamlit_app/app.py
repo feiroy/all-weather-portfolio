@@ -40,10 +40,11 @@ st.set_page_config(page_title="全天候再平衡", page_icon="🌤️", layout=
 st.markdown("""<style>
 /* ========== 设计变量 ========== */
 :root{
-  --ink:#111827; --sub:#6b7280; --line:#e8ebf2; --card:#ffffff;
-  --bg:#f6f7fb; --brand:#ff4b4b; --radius:16px;
-  --red:#d14b4b; --green:#1a9e6b;
-  --shadow:0 1px 2px rgba(16,24,40,.04), 0 4px 14px rgba(16,24,40,.04);
+  --ink:#202124; --sub:#5f6368; --line:#e8eaed; --card:#ffffff;
+  --bg:#f8f9fa; --brand:#d93025; --radius:16px;
+  --red:#d93025; --green:#188038;
+  --shadow:0 1px 2px rgba(60,64,67,.12), 0 1px 3px rgba(60,64,67,.08);
+  --shadow2:0 4px 8px rgba(60,64,67,.14), 0 1px 3px rgba(60,64,67,.10);
 }
 
 /* ========== 基础排版 ========== */
@@ -55,8 +56,8 @@ html, body, [data-testid="stAppViewContainer"]{
 [data-testid="stHeader"]{ background:transparent; }
 .block-container{ padding-top:1.1rem; padding-bottom:3rem; max-width:1180px; }
 h1,h2,h3{ letter-spacing:-.3px; color:var(--ink); }
-hr{ border-color:#eef1f6; }
-.up{ color:var(--red); } .down{ color:#1a9e6b; }
+hr{ border-color:#e8eaed; }
+.up{ color:var(--red); } .down{ color:#188038; }
 
 /* ========== 顶部 Hero ========== */
 .hero{
@@ -76,14 +77,14 @@ hr{ border-color:#eef1f6; }
 .fh-name{ font-size:17px; font-weight:650; letter-spacing:-.3px; }
 .fh-code{ font-size:12px; color:var(--sub); font-variant-numeric:tabular-nums; }
 .fh-tag{
-  font-size:11px; color:#374151; background:#f2f4f8; border-radius:999px;
-  padding:2px 9px; border:1px solid #e8ebf2;
+  font-size:11px; color:#3c4043; background:#f1f3f4; border-radius:999px;
+  padding:2px 9px; border:1px solid #e8eaed;
 }
 .fh-price{ display:flex; align-items:baseline; gap:12px; margin-top:12px; }
 .fh-price .px{ font-size:32px; font-weight:700; letter-spacing:-1.2px; line-height:1; }
 .fh-price .chg{ font-size:15px; font-weight:650; }
 .fh-price .chg.up{ color:var(--red); }
-.fh-price .chg.down{ color:#1a9e6b; }
+.fh-price .chg.down{ color:#188038; }
 .fh-price .fh-date{ margin-left:8px; }
 .fh-date{ font-size:12px; color:var(--sub); margin-left:auto; }
 
@@ -106,7 +107,7 @@ hr{ border-color:#eef1f6; }
 .grid4 .cell .k{ font-size:11.5px; color:var(--sub); }
 .grid4 .cell .v{ font-size:15px; font-weight:600; margin-top:3px; font-variant-numeric:tabular-nums; }
 .stats-row .item b.up, .grid4 .cell .v.up{ color:var(--red); }
-.stats-row .item b.down, .grid4 .cell .v.down{ color:#1a9e6b; }
+.stats-row .item b.down, .grid4 .cell .v.down{ color:#188038; }
 
 /* 阶段涨跌幅胶囊 */
 .stage{ display:flex; flex-wrap:wrap; gap:8px; margin:12px 0 2px; }
@@ -118,9 +119,9 @@ hr{ border-color:#eef1f6; }
 .chip{
   display:inline-flex; align-items:center; gap:6px; padding:5px 11px;
   border-radius:999px; background:var(--card); border:1px solid var(--line);
-  font-size:12px; color:#374151; box-shadow:0 1px 1px rgba(16,24,40,.03);
+  font-size:12px; color:#3c4043; box-shadow:0 1px 1px rgba(16,24,40,.03);
 }
-.chip .dot{ width:7px; height:7px; border-radius:50%; background:#22c55e; }
+.chip .dot{ width:7px; height:7px; border-radius:50%; background:#188038; }
 .chip .dot.warn{ background:#f59e0b; }
 
 /* ========== Tabs（Streamlit 1.66 是自定义 tab，不是 baseweb） ========== */
@@ -130,7 +131,7 @@ hr{ border-color:#eef1f6; }
 }
 [data-testid="stTabs"] [role="tab"]:hover{ color:var(--ink); }
 [data-testid="stTabs"] [role="tab"][aria-selected="true"]{
-  color:var(--ink) !important; font-weight:650;
+  color:#b3261e !important; font-weight:650;
 }
 [data-testid="stTabs"] [role="tablist"]{
   gap:0; border-bottom:1px solid var(--line); overflow-x:auto; scrollbar-width:none;
@@ -155,10 +156,10 @@ hr{ border-color:#eef1f6; }
 
 /* ========== 按钮 ========== */
 .stButton>button, .stDownloadButton>button{
-  border-radius:10px; border:1px solid var(--line); font-weight:500;
+  border-radius:999px; border:1px solid var(--line); font-weight:500;
   padding:.45rem .95rem; transition:all .15s ease;
 }
-.stButton>button:hover{ border-color:#cfd5e2; transform:translateY(-1px); }
+.stButton>button:hover{ border-color:#b8bdc4; transform:translateY(-1px); box-shadow:var(--shadow); }
 .stButton>button[kind="primary"]{
   background:var(--ink); border-color:var(--ink); color:#fff;
 }
@@ -186,9 +187,9 @@ hr{ border-color:#eef1f6; }
 .sb-divider{ border-top:1px solid var(--line); margin:18px 0 12px; }
 .sb-status{
   display:inline-flex; align-items:center; gap:7px; font-size:12px; padding:5px 10px;
-  border-radius:999px; border:1px solid var(--line); background:#f8fafc; color:#374151;
+  border-radius:999px; border:1px solid var(--line); background:#f8f9fa; color:#3c4043;
 }
-.sb-status .dot{ width:7px; height:7px; border-radius:50%; background:#22c55e; }
+.sb-status .dot{ width:7px; height:7px; border-radius:50%; background:#188038; }
 .sb-status.warn .dot{ background:#f59e0b; }
 .sb-status.err .dot{ background:#ef4444; }
 /* 单选组做成“列表项”，选中项浅底高亮 */
@@ -197,9 +198,9 @@ hr{ border-color:#eef1f6; }
   border:1px solid transparent; border-radius:9px; padding:6px 10px;
   font-size:13px; transition:background .12s; cursor:pointer;
 }
-[data-testid="stSidebar"] [role="radiogroup"] label:hover{ background:#f4f6fa; }
+[data-testid="stSidebar"] [role="radiogroup"] label:hover{ background:#f1f3f4; }
 [data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked){
-  background:#f0f2f7; border-color:#e4e8f0; font-weight:600;
+  background:rgba(217,48,37,.08); border-color:rgba(217,48,37,.25); color:#b3261e; font-weight:600;
 }
 [data-testid="stSidebar"] [data-testid="stButton"]>button{
   width:100%; justify-content:flex-start; color:var(--sub); font-weight:500;
@@ -213,14 +214,14 @@ hr{ border-color:#eef1f6; }
   overflow:hidden; box-shadow:var(--shadow);
 }
 .tbl th{
-  background:#fafbfd; color:var(--sub); font-weight:500; font-size:12px;
+  background:#f8f9fa; color:var(--sub); font-weight:500; font-size:12px;
   text-align:left; padding:9px 12px; border-bottom:1px solid var(--line);
 }
-.tbl td{ padding:9px 12px; border-bottom:1px solid #f2f4f8; }
+.tbl td{ padding:9px 12px; border-bottom:1px solid #f1f3f4; }
 .tbl tbody tr:last-child td{ border-bottom:none; }
-.tbl tr.total td{ font-weight:650; background:#fafbfd; }
+.tbl tr.total td{ font-weight:650; background:#f8f9fa; }
 .tbl td.num, .tbl th.num{ text-align:right; font-variant-numeric:tabular-nums; }
-.tbl .up{ color:var(--red); } .tbl .down{ color:#1a9e6b; }
+.tbl .up{ color:var(--red); } .tbl .down{ color:#188038; }
 .tbl .muted{ color:var(--sub); }
 /* 宽表横向滚动容器（月度矩阵） */
 .tblwrap{ overflow-x:auto; border-radius:12px; box-shadow:var(--shadow); }
@@ -229,7 +230,7 @@ hr{ border-color:#eef1f6; }
 .tbl.wide th:first-child, .tbl.wide td:first-child{
   position:sticky; left:0; background:var(--card); z-index:1;
 }
-.tbl.wide th:first-child{ background:#fafbfd; }
+.tbl.wide th:first-child{ background:#f8f9fa; }
 
 /* ========== 基金走势页：含阶段数字的概览 / 走势分析 ========== */
 .st-key-trend_head, .st-key-trend_chart{
@@ -278,10 +279,10 @@ hr{ border-color:#eef1f6; }
 .sig .main{ flex:1; min-width:0; }
 .sig .t{ font-weight:600; font-size:14px; }
 .sig .m{ font-size:11.5px; color:var(--sub); margin-top:2px; }
-.sig .side{ font-size:12.5px; color:#374151; white-space:nowrap; text-align:right; }
+.sig .side{ font-size:12.5px; color:#3c4043; white-space:nowrap; text-align:right; }
 .sig .side b{ display:block; font-size:11px; color:var(--sub); font-weight:400; margin-bottom:1px; }
-.sig.calm{ border-left-color:#22c55e; }
-.sig.off{ border-left-color:#cbd5e1; opacity:.72; }
+.sig.calm{ border-left-color:#188038; }
+.sig.off{ border-left-color:#dadce0; opacity:.72; }
 
 /* ========== 隐藏不需要的 UI ========== */
 [data-testid="stAppDeployButton"]{ display:none; }
@@ -300,7 +301,7 @@ _BENCH_COL = {
     "B-Con": "V3-B 保守增强(20d)_100% RP",
     "V3c": "V3c 多元_100% RP",
 }
-_UP, _DOWN, _BRAND, _SUB = "#d14b4b", "#1a9e6b", "#ff4b4b", "#6b7280"
+_UP, _DOWN, _BRAND, _SUB = "#d93025", "#188038", "#d93025", "#5f6368"
 
 
 def _cn_date(v):
@@ -366,33 +367,33 @@ def _scroll_chart_html(labels, values, win, height=540, rets=None, revision=0, h
 html,body{margin:0;padding:0;background:#fff;color:#334155;font:13px/1.6 -apple-system,"PingFang SC",sans-serif}
 *{box-sizing:border-box}#wrap{position:relative;width:100%}
 .heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
-h3{margin:0;font-size:17px;font-weight:600;color:#111827;display:flex;align-items:center;gap:8px}
+h3{margin:0;font-size:17px;font-weight:600;color:#202124;display:flex;align-items:center;gap:8px}
 .icon{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.5;vertical-align:middle}
-#updating{font-size:12px;color:#64748b;visibility:hidden}#wrap[aria-busy="true"] #updating{visibility:visible}
-.controls{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-top:18px;border-bottom:1px solid #e8ebf2}
+#updating{font-size:12px;color:#5f6368;visibility:hidden}#wrap[aria-busy="true"] #updating{visibility:visible}
+.controls{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-top:18px;border-bottom:1px solid #e8eaed}
 #range-controls{display:flex;gap:8px;min-width:0}
 button[data-range]{font:inherit;border:0;border-bottom:2px solid transparent;border-radius:0;background:transparent;
-  color:#64748b;padding:10px 12px;white-space:nowrap;cursor:pointer;min-height:40px}
-button[data-range]:hover{background:#f5f7fa}
-button[data-range][aria-pressed="true"]{font-weight:600;color:#111827;border-bottom-color:#111827}
-button:focus-visible,select:focus-visible,#chart:focus-visible{outline:2px solid #475569;outline-offset:2px}
-select{font:inherit;border:1px solid #dce1e9;border-radius:8px;background:#fff;color:#334155;padding:6px 10px;min-height:36px;cursor:pointer}
+  color:#5f6368;padding:10px 12px;white-space:nowrap;cursor:pointer;min-height:40px}
+button[data-range]:hover{background:#f1f3f4}
+button[data-range][aria-pressed="true"]{font-weight:600;color:#202124;border-bottom-color:#202124}
+button:focus-visible,select:focus-visible,#chart:focus-visible{outline:2px solid #5f6368;outline-offset:2px}
+select{font:inherit;border:1px solid #dadce0;border-radius:8px;background:#fff;color:#334155;padding:6px 10px;min-height:36px;cursor:pointer}
 #period{margin-bottom:4px;min-width:86px}
-.state-line{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin:12px 0 8px;font-size:12px;color:#64748b}
-.date-line{display:flex;align-items:center;gap:6px}#selection{color:#475569}#selection[data-custom="true"]{font-weight:600}
-#range{font-variant-numeric:tabular-nums}#notice{min-height:20px;font-size:12px;color:#64748b}
+.state-line{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin:12px 0 8px;font-size:12px;color:#5f6368}
+.date-line{display:flex;align-items:center;gap:6px}#selection{color:#5f6368}#selection[data-custom="true"]{font-weight:600}
+#range{font-variant-numeric:tabular-nums}#notice{min-height:20px;font-size:12px;color:#5f6368}
 #chart{display:block;width:100%;touch-action:pan-y;cursor:grab;user-select:none}
 #chart.dragging{cursor:grabbing}
-#tip{position:absolute;pointer-events:none;background:#fff;color:#0f172a;border:1px solid #cbd5e1;
+#tip{position:absolute;pointer-events:none;background:#fff;color:#202124;border:1px solid #dadce0;
 font-size:12px;line-height:1.8;padding:10px 14px;border-radius:8px;display:none;z-index:10;width:240px;max-width:calc(100% - 8px);
-box-shadow:0 4px 16px #0f172a18;font-variant-numeric:tabular-nums}
-#tip .tip-row{display:flex;justify-content:space-between;gap:18px}#tip .tip-label{color:#64748b}
-#stats{border-top:1px solid #e8ebf2;margin-top:8px;padding:16px 0 4px}
+box-shadow:0 4px 16px rgba(60,64,67,.18);font-variant-numeric:tabular-nums}
+#tip .tip-row{display:flex;justify-content:space-between;gap:18px}#tip .tip-label{color:#5f6368}
+#stats{border-top:1px solid #e8eaed;margin-top:8px;padding:16px 0 4px}
 .summary-main{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
 .summary-result{display:flex;align-items:baseline;gap:12px}.summary-result b{font-size:24px;font-weight:600;letter-spacing:-.5px}
 .summary-prices{display:flex;gap:10px;align-items:center;font-size:13px;font-variant-numeric:tabular-nums}
-.summary-prices small{color:#64748b;margin-right:4px}.summary-prices b{font-weight:500}
-.amp-row{display:flex;align-items:center;gap:8px 16px;flex-wrap:wrap;margin-top:10px;color:#64748b;font-size:12px}
+.summary-prices small{color:#5f6368;margin-right:4px}.summary-prices b{font-weight:500}
+.amp-row{display:flex;align-items:center;gap:8px 16px;flex-wrap:wrap;margin-top:10px;color:#5f6368;font-size:12px}
 .amp-row b{color:#334155;font-size:14px;font-weight:600}.amp-row small{font-size:11px}
 @media(max-width:520px){#range-controls{gap:0;justify-content:space-between;width:100%}
   button[data-range]{padding:8px 9px;font-size:12px}.controls{flex-wrap:wrap;gap:6px}#period{margin-left:auto}
@@ -431,7 +432,7 @@ box-shadow:0 4px 16px #0f172a18;font-variant-numeric:tabular-nums}
   const x = i => L + (i + .5 - start) * PW / count;
   const bounds = () => count <= 0 ? [0, -1] : [Math.max(0, Math.ceil(start - .5 + 1e-8)), Math.min(n - 1, Math.floor(start + count - .5 - 1e-8))];
   const pct = v => valid(v) ? (v > 0 ? '+' : '') + v.toFixed(2) + '%' : '—';
-  const color = v => !valid(v) || Math.abs(v) < 1e-10 ? '#64748b' : (v > 0 ? '#d14b4b' : '#1a9e6b');
+  const color = v => !valid(v) || Math.abs(v) < 1e-10 ? '#5f6368' : (v > 0 ? '#d93025' : '#188038');
   const price = v => valid(v) ? v.toFixed(4) : '—';
   function requestDraw() { if (!frame) frame = requestAnimationFrame(() => {frame = 0; draw();}); }
   function update(nextStart, nextCount) {
@@ -504,24 +505,24 @@ box-shadow:0 4px 16px #0f172a18;font-variant-numeric:tabular-nums}
     const startPx = valid(P.prices[first]) ? P.prices[first] : null;
     const relAt = i => (startPx && startPx > 0 && valid(P.prices[i])) ? (P.prices[i]/startPx - 1) * 100 : null;
     const stepAt = i => P.rets[i];
-    let grid = '', marks = '', ticks = `<text x="${L}" y="18" font-size="12" fill="#475569">收盘价</text>`;
+    let grid = '', marks = '', ticks = `<text x="${L}" y="18" font-size="12" fill="#5f6368">收盘价</text>`;
     for (let k = 0; k <= 4; k++) {
       const v = lo + (hi - lo) * k / 4, yy = y(v);
-      grid += `<line x1="${L}" y1="${yy}" x2="${W-R}" y2="${yy}" stroke="#edf1f7"/>`;
-      ticks += `<text x="${L-8}" y="${yy+4}" text-anchor="end" font-size="10" fill="#64748b">${v.toFixed(4)}</text>`;
+      grid += `<line x1="${L}" y1="${yy}" x2="${W-R}" y2="${yy}" stroke="#eceff1"/>`;
+      ticks += `<text x="${L-8}" y="${yy+4}" text-anchor="end" font-size="10" fill="#5f6368">${v.toFixed(4)}</text>`;
     }
     const step = PW / count;
     const pts = [], bw = Math.min(20, Math.max(.8, step * .45));
     for (let i = first; i <= last; i++) if (valid(P.prices[i])) pts.push(`${x(i)},${y(P.prices[i])}`);
-    marks += `<polyline points="${pts.join(' ')}" fill="none" stroke="#326ce5" stroke-width="2" stroke-linejoin="round"/>`;
+    marks += `<polyline points="${pts.join(' ')}" fill="none" stroke="#1a73e8" stroke-width="2" stroke-linejoin="round"/>`;
     for (let i = first; i <= last; i++) if (valid(P.prices[i])) {
-      marks += `<circle data-index="${i}" cx="${x(i)}" cy="${y(P.prices[i])}" r="${Math.min(3.5,Math.max(1,step*.12))}" fill="#326ce5"/>`;
+      marks += `<circle data-index="${i}" cx="${x(i)}" cy="${y(P.prices[i])}" r="${Math.min(3.5,Math.max(1,step*.12))}" fill="#1a73e8"/>`;
     }
     // 起点：价格面板上画一条虚线并圈出该点，相对起点柱全部以它为 0% 基准
     const y0 = startPx ? y(startPx) : null;
     if (y0 !== null && y0 >= T && y0 <= T + AH) {
-      grid += `<line x1="${L}" y1="${y0}" x2="${W-R}" y2="${y0}" stroke="#8fa0b8" stroke-dasharray="2 4" opacity=".85"/>`;
-      marks += `<circle cx="${x(first)}" cy="${y0}" r="4.5" fill="none" stroke="#326ce5" stroke-width="1.5" opacity=".9"/>`;
+      grid += `<line x1="${L}" y1="${y0}" x2="${W-R}" y2="${y0}" stroke="#9aa0a6" stroke-dasharray="2 4" opacity=".85"/>`;
+      marks += `<circle cx="${x(first)}" cy="${y0}" r="4.5" fill="none" stroke="#1a73e8" stroke-width="1.5" opacity=".9"/>`;
     }
     // 一个柱面板：0 轴居中、左刻度 ±上限、涨红跌绿
     function barPane(top, paneHeight, title, valAt, attr) {
@@ -532,11 +533,11 @@ box-shadow:0 4px 16px #0f172a18;font-variant-numeric:tabular-nums}
       const bmax = Math.max(.5, amps.length ? Math.max(...amps) : 0);
       const yB = v => zero - v * (paneHeight / 2 - 8) / bmax;
       // 刻度在裁剪区域之外，否则左侧百分比会被 plot-clip 裁掉。
-      ticks += `<text x="${L}" y="${top-10}" font-size="12" fill="#475569">${title}</text>`
-        + `<text x="${L-8}" y="${top+11}" text-anchor="end" font-size="11" fill="#64748b">+${bmax.toFixed(2)}%</text>`
-        + `<text x="${L-8}" y="${zero+3.5}" text-anchor="end" font-size="11" fill="#64748b">0%</text>`
-        + `<text x="${L-8}" y="${top+paneHeight-1}" text-anchor="end" font-size="11" fill="#64748b">-${bmax.toFixed(2)}%</text>`;
-      let out = `<line x1="${L}" y1="${zero}" x2="${W-R}" y2="${zero}" stroke="#cbd5e1" stroke-dasharray="3 3"/>`;
+      ticks += `<text x="${L}" y="${top-10}" font-size="12" fill="#5f6368">${title}</text>`
+        + `<text x="${L-8}" y="${top+11}" text-anchor="end" font-size="11" fill="#5f6368">+${bmax.toFixed(2)}%</text>`
+        + `<text x="${L-8}" y="${zero+3.5}" text-anchor="end" font-size="11" fill="#5f6368">0%</text>`
+        + `<text x="${L-8}" y="${top+paneHeight-1}" text-anchor="end" font-size="11" fill="#5f6368">-${bmax.toFixed(2)}%</text>`;
+      let out = `<line x1="${L}" y1="${zero}" x2="${W-R}" y2="${zero}" stroke="#dadce0" stroke-dasharray="3 3"/>`;
       let cnt = 0;
       for (let i = first; i <= last; i++) {
         const v = vals[i - first]; if (!valid(v)) continue;
@@ -561,7 +562,7 @@ box-shadow:0 4px 16px #0f172a18;font-variant-numeric:tabular-nums}
       labs.push({i, cx});
     }
     for (const {i, cx} of labs) {
-      ticks += `<text data-date-label="${i}" x="${cx}" y="${H-15}" text-anchor="middle" font-size="10" fill="#64748b">${esc(P.labels[i])}</text>`;
+      ticks += `<text data-date-label="${i}" x="${cx}" y="${H-15}" text-anchor="middle" font-size="10" fill="#5f6368">${esc(P.labels[i])}</text>`;
     }
     // 最高/最低直接标注在价格图内；仅标真实可见点，并对标签做碰撞处理。
     let hiI = null, loI = null;
@@ -582,14 +583,14 @@ box-shadow:0 4px 16px #0f172a18;font-variant-numeric:tabular-nums}
       }
       [hiI,loI].forEach((i,k) => {
         const box = boxes[k], label = k === 0 ? '最高' : '最低', kind = k === 0 ? 'high' : 'low';
-        marks += `<circle cx="${x(i)}" cy="${y(P.prices[i])}" r="4" fill="${k === 0 ? '#b33f48' : '#fff'}" stroke="#b33f48" stroke-width="1.5"/>`;
+        marks += `<circle cx="${x(i)}" cy="${y(P.prices[i])}" r="4" fill="${k === 0 ? '#b3261e' : '#fff'}" stroke="#b3261e" stroke-width="1.5"/>`;
         annotations += `<g data-extreme="${kind}" data-index="${i}" data-price="${P.prices[i]}" data-date="${esc(P.dates[i])}">`
-          + `<rect x="${box.x}" y="${box.y}" width="${labelW}" height="${labelH}" rx="6" fill="#fff" fill-opacity=".96" stroke="#efd8da"/>`
-          + `<text x="${box.x+10}" y="${box.y+17}" font-size="12" fill="#b33f48">${label} ${price(P.prices[i])}</text>`
-          + `<text x="${box.x+10}" y="${box.y+33}" font-size="11" fill="#64748b">${esc(P.dates[i])}</text></g>`;
+          + `<rect x="${box.x}" y="${box.y}" width="${labelW}" height="${labelH}" rx="6" fill="#fff" fill-opacity=".96" stroke="#f0c0bd"/>`
+          + `<text x="${box.x+10}" y="${box.y+17}" font-size="12" fill="#b3261e">${label} ${price(P.prices[i])}</text>`
+          + `<text x="${box.x+10}" y="${box.y+33}" font-size="11" fill="#5f6368">${esc(P.dates[i])}</text></g>`;
       });
     }
-    svg.innerHTML = `<defs><clipPath id="plot-clip"><rect x="${L}" y="${T-5}" width="${PW}" height="${H-T-B+10}"/></clipPath></defs>${grid}<g clip-path="url(#plot-clip)">${marks}<line id="guide" y1="${T}" y2="${H-B}" stroke="#94a3b8" stroke-dasharray="4 4" visibility="hidden"/></g>${ticks}${annotations}`;
+    svg.innerHTML = `<defs><clipPath id="plot-clip"><rect x="${L}" y="${T-5}" width="${PW}" height="${H-T-B+10}"/></clipPath></defs>${grid}<g clip-path="url(#plot-clip)">${marks}<line id="guide" y1="${T}" y2="${H-B}" stroke="#9aa0a6" stroke-dasharray="4 4" visibility="hidden"/></g>${ticks}${annotations}`;
     wrap.dataset.bars = String(cntRel); wrap.dataset.stepBars = String(cntStep);
     const change = relAt(last);
     const amplitude = hiI !== null && loI !== null && P.prices[loI] > 0 ? (P.prices[hiI]/P.prices[loI]-1)*100 : null;
@@ -1103,7 +1104,7 @@ with tab1:
     cells = []
     for q in QUADRANTS:
         active = q["growth"] == growth_up and q["inflation"] == inflation_up
-        border = f"2px solid {_BRAND}" if active else "1px solid #e8ebf2"
+        border = f"2px solid {_BRAND}" if active else "1px solid #e8eaed"
         bg = "#fff5f5" if active else "#ffffff"
         cells.append(
             f"<div style='border:{border};border-radius:14px;padding:12px 16px;"
@@ -1111,7 +1112,7 @@ with tab1:
             f"<span style='font-size:22px'>{q['icon']}</span> "
             f"<strong style='font-size:15px'>{q['label']}</strong> "
             f"<span style='color:#9aa3af;font-size:12px'>{q['sub']}</span><br>"
-            f"<span style='font-size:12.5px;color:#6b7280'>{q['assets']}</span>"
+            f"<span style='font-size:12.5px;color:#5f6368'>{q['assets']}</span>"
             f"</div>"
         )
 
@@ -1428,11 +1429,11 @@ with tab5:
                 .encode(
                     x=alt.X("date:T", title=None,
                             axis=alt.Axis(format="%Y年%m月", labelColor=_SUB,
-                                          domainColor="#e8ebf2")),
+                                          domainColor="#e8eaed")),
                     y=alt.Y("nav:Q", title="净值", scale=alt.Scale(zero=False)),
                     color=alt.Color(
                         "曲线:N",
-                        scale=alt.Scale(range=["#2f6fed", "#c98a1a"]),
+                        scale=alt.Scale(range=["#1a73e8", "#e8710a"]),
                         legend=alt.Legend(orient="top", title=None),
                     ),
                     tooltip=[
@@ -1517,12 +1518,12 @@ with tab5:
                 .encode(
                     x=alt.X("月份:N", sort=None, title=None,
                             axis=alt.Axis(labelAngle=-45, labelFontSize=9,
-                                          labelColor=_SUB, domainColor="#e8ebf2")),
+                                          labelColor=_SUB, domainColor="#e8eaed")),
                     xOffset=alt.X("曲线:N", title=None),
                     y=alt.Y("收益:Q", title="%",
-                            axis=alt.Axis(labelColor=_SUB, gridColor="#f1f3f8")),
+                            axis=alt.Axis(labelColor=_SUB, gridColor="#eceff1")),
                     color=alt.Color("曲线:N",
-                                    scale=alt.Scale(range=["#2f6fed", "#c98a1a"]),
+                                    scale=alt.Scale(range=["#1a73e8", "#e8710a"]),
                                     legend=alt.Legend(orient="top", title=None)),
                     tooltip=[alt.Tooltip("月份:N", title="月份"),
                              alt.Tooltip("曲线:N", title="曲线"),
