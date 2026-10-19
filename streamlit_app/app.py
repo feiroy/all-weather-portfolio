@@ -192,6 +192,12 @@ hr{ border-color:#e8eaed; }
 .sb-status .dot{ width:7px; height:7px; border-radius:50%; background:#188038; }
 .sb-status.warn .dot{ background:#f59e0b; }
 .sb-status.err .dot{ background:#ef4444; }
+/* 数据拉取失败提示 */
+.sb-fetch-err{
+  margin-top:10px; padding:9px 11px; font-size:12px; line-height:1.5;
+  border-radius:10px; background:#fdecea; border:1px solid #f5c6c0; color:#b3261e;
+}
+.sb-fetch-err-detail{ margin-top:4px; color:#7a1f1a; font-size:11px; word-break:break-all; }
 /* 单选组做成“列表项”，选中项浅底高亮 */
 [data-testid="stSidebar"] [role="radiogroup"]{ gap:4px; }
 [data-testid="stSidebar"] [role="radiogroup"] label{
@@ -429,7 +435,7 @@ def _asset_series(asset):
 def _scroll_chart_html(labels, values, win, height=540, rets=None, revision=0, histories=None):
     """全历史数据 + 有界索引视窗；只绘制可见部分，不创建超宽画布。
 
-    一张图三层面板，共用同一条时间轴：上方收盘价折线（含起点虚线），
+    一张图三层面板，共用同一条时间轴：上方净值折线（含起点虚线），
     中间每个点位相对区间起点的涨跌幅柱，下方单期涨跌幅柱（涨红跌绿）。
     """
     def numbers(items):
@@ -502,7 +508,7 @@ box-shadow:0 4px 16px rgba(60,64,67,.18);font-variant-numeric:tabular-nums}
   let period = '日', lastRange = '近1月', activeRange = lastRange, customDates = null;
   let P = D.histories[period], n = P.prices.length;
   const H = D.height, L = 64, R = 16, T = 32, B = 32, GAP = 30, minCount = 1;
-  // 绘图区主次：收盘价55%、累计变化27%、单期变化18%。
+  // 绘图区主次：净值55%、累计变化27%、单期变化18%。
   const PH = H - T - B - GAP * 2, AH = PH * .55, BH = PH * .27, CH = PH * .18;
   const bTop1 = T + AH + GAP, bTop2 = bTop1 + BH + GAP;
   let initialCount = P.windows[lastRange].count, initialStart = P.windows[lastRange].start;
@@ -591,11 +597,11 @@ box-shadow:0 4px 16px rgba(60,64,67,.18);font-variant-numeric:tabular-nums}
     const pad = (hi - lo) * .12 || Math.max(Math.abs(hi) * .02, .01);
     lo -= pad; hi += pad;
     const y = v => T + (hi - v) * AH / (hi - lo);
-    // 相对起点（可见第一期收盘为 0% 基准）与单期涨跌幅，各自一个柱面板
+    // 相对起点（可见第一期净值为 0% 基准）与单期涨跌幅，各自一个柱面板
     const startPx = valid(P.prices[first]) ? P.prices[first] : null;
     const relAt = i => (startPx && startPx > 0 && valid(P.prices[i])) ? (P.prices[i]/startPx - 1) * 100 : null;
     const stepAt = i => P.rets[i];
-    let grid = '', marks = '', ticks = `<text x="${L}" y="18" font-size="12" fill="#5f6368">收盘价</text>`;
+    let grid = '', marks = '', ticks = `<text x="${L}" y="18" font-size="12" fill="#5f6368">净值</text>`;
     for (let k = 0; k <= 4; k++) {
       const v = lo + (hi - lo) * k / 4, yy = y(v);
       grid += `<line x1="${L}" y1="${yy}" x2="${W-R}" y2="${yy}" stroke="#eceff1"/>`;
@@ -608,7 +614,7 @@ box-shadow:0 4px 16px rgba(60,64,67,.18);font-variant-numeric:tabular-nums}
     for (let i = first; i <= last; i++) if (valid(P.prices[i])) {
       marks += `<circle data-index="${i}" cx="${x(i)}" cy="${y(P.prices[i])}" r="${Math.min(3.5,Math.max(1,step*.12))}" fill="#1a73e8"/>`;
     }
-    // 起点：价格面板上画一条虚线并圈出该点，相对起点柱全部以它为 0% 基准
+    // 起点：净值面板上画一条虚线并圈出该点，相对起点柱全部以它为 0% 基准
     const y0 = startPx ? y(startPx) : null;
     if (y0 !== null && y0 >= T && y0 <= T + AH) {
       grid += `<line x1="${L}" y1="${y0}" x2="${W-R}" y2="${y0}" stroke="#9aa0a6" stroke-dasharray="2 4" opacity=".85"/>`;
@@ -654,7 +660,7 @@ box-shadow:0 4px 16px rgba(60,64,67,.18);font-variant-numeric:tabular-nums}
     for (const {i, cx} of labs) {
       ticks += `<text data-date-label="${i}" x="${cx}" y="${H-15}" text-anchor="middle" font-size="10" fill="#5f6368">${esc(P.labels[i])}</text>`;
     }
-    // 最高/最低直接标注在价格图内；仅标真实可见点，并对标签做碰撞处理。
+    // 最高/最低直接标注在净值图内；仅标真实可见点，并对标签做碰撞处理。
     let hiI = null, loI = null;
     for (let i = first; i <= last; i++) {
       if (!valid(P.prices[i])) continue;
@@ -689,8 +695,8 @@ box-shadow:0 4px 16px rgba(60,64,67,.18);font-variant-numeric:tabular-nums}
       + `<b id="change" data-value="${valid(change) ? change : ''}" style="color:${color(change)}">${pct(change)}</b></div>`
       + `<div class="summary-prices"><span><small>起点价</small><b id="start-price" data-value="${startPx ?? ''}">${price(startPx)}</b></span>`
       + `<span aria-hidden="true">→</span><span><small>终点价</small><b id="end-price" data-value="${P.prices[last] ?? ''}">${price(P.prices[last])}</b></span></div></div>`
-      + `<div class="amp-row"><span>收盘价区间振幅</span><b id="amplitude" data-value="${valid(amplitude) ? amplitude : ''}">${valid(amplitude) ? amplitude.toFixed(2)+'%' : '—'}</b>`
-      + `<small>最高收盘价 ÷ 最低收盘价 − 1 · 当前 ${visibleCount} 期 / 全历史 ${n} 期</small></div>`;
+      + `<div class="amp-row"><span>净值区间振幅</span><b id="amplitude" data-value="${valid(amplitude) ? amplitude : ''}">${valid(amplitude) ? amplitude.toFixed(2)+'%' : '—'}</b>`
+      + `<small>最高净值 ÷ 最低净值 − 1 · 当前 ${visibleCount} 期 / 全历史 ${n} 期</small></div>`;
     if (pinned !== null) showTip(pinned); else tip.style.display = 'none';
   }
   function showTip(i, clientY = null) {
@@ -702,7 +708,7 @@ box-shadow:0 4px 16px rgba(60,64,67,.18);font-variant-numeric:tabular-nums}
     const sp = P.prices[first];
     const rel = valid(px) && valid(sp) && sp !== 0 ? (px/sp - 1) * 100 : null;
     tip.innerHTML = `<b>${esc(P.dates[i])}</b>`
-      + `<div class="tip-row"><span class="tip-label">收盘价</span><b>${price(px)}</b></div>`
+      + `<div class="tip-row"><span class="tip-label">净值</span><b>${price(px)}</b></div>`
       + `<div class="tip-row"><span class="tip-label">单${period}涨跌幅</span><b style="color:${color(rt)}">${pct(rt)}</b></div>`
       + `<div class="tip-row"><span class="tip-label">相对起点</span><b style="color:${color(rel)}">${pct(rel)}</b></div>`
       + `<small class="tip-label">基准 ${esc(P.dates[first])}</small>`
@@ -954,7 +960,8 @@ if "auto_fetch_done" not in st.session_state:
 if staleness_days is not None and staleness_days > 1 and not st.session_state.auto_fetch_done:
     from allweather.fetch import fetch_all
     today_str = date.today().strftime("%Y%m%d")
-    fetch_all(force=False, end=today_str)
+    _ok, _errs, _uptodate = fetch_all(force=False, end=today_str)
+    st.session_state.fetch_errors = _errs
     st.session_state.auto_fetch_done = True
     st.cache_data.clear()
     st.rerun()
@@ -973,12 +980,25 @@ st.sidebar.markdown(
     unsafe_allow_html=True,
 )
 
+# 数据拉取失败提示：任何资产拉取失败都在侧边栏顶部醒目展示
+if st.session_state.get("fetch_errors"):
+    _errs = st.session_state.fetch_errors
+    _err_txt = "<br>".join(html_escape(e) for e in _errs)
+    st.sidebar.markdown(
+        f'<div class="sb-fetch-err">⚠️ 数据拉取失败 {len(_errs)} 项'
+        f'<div class="sb-fetch-err-detail">{_err_txt}</div></div>',
+        unsafe_allow_html=True,
+    )
+
 if st.sidebar.button("拉取最新数据", icon="🔄", type="secondary", use_container_width=True):
     with st.sidebar:
         with st.spinner("正在拉取..."):
             from allweather.fetch import fetch_all
             today_str = date.today().strftime("%Y%m%d")
-            fetch_all(force=False, end=today_str)
+            _ok, _errs, _uptodate = fetch_all(force=False, end=today_str)
+            st.session_state.fetch_errors = _errs
+            if _errs:
+                st.error(f"有 {len(_errs)} 项资产拉取失败，详见下方提示")
     st.session_state.auto_fetch_done = True
     st.cache_data.clear()
     st.rerun()
@@ -1296,7 +1316,7 @@ with tab3:
         if rows:
             _render_table(
                 [("资产", "left"), ("代码", "left"), ("权重", "right"),
-                 ("目标金额", "right"), ("现价", "right"), ("买入股数", "right"),
+                 ("目标金额", "right"), ("净值", "right"), ("买入股数", "right"),
                  ("实际金额", "right")],
                 rows,
                 totals=["合计", "—", "100.0%", f"¥{total_target:,.0f}", "—", "—",
@@ -1807,7 +1827,7 @@ def _trend_chart_data(series):
 
 
 def _stage_rows(series):
-    """四个固定阶段数字，沿用首个真实收盘基准，不受图表视窗影响。"""
+    """四个固定阶段数字，沿用首个真实净值基准，不受图表视窗影响。"""
     clean = _trend_aggregate(series, "日")
     cells = []
     for label, span in _TREND_STAGES.items():
@@ -1832,7 +1852,7 @@ def _stage_summary_html(cells):
         text = f"{value:+.2f}%" if valid and value != 0 else ("0.00%" if valid else "—")
         dates = (f'{cell["base"]:%Y/%m/%d} — {cell["end"]:%Y/%m/%d}'
                  if cell["base"] is not None and cell["end"] is not None else "暂无有效行情")
-        tip = dates + " · 区间首个收盘至最新收盘" + (" · 30自然日" if cell["label"] == "近1月" else "")
+        tip = dates + " · 区间首个净值至最新净值" + (" · 30自然日" if cell["label"] == "近1月" else "")
         items.append(
             f'<div class="stage-metric" data-stage="{html_escape(cell["label"])}" title="{html_escape(tip)}">'
             f'<span class="stage-label">{html_escape(cell["label"])}</span>'
@@ -1865,7 +1885,7 @@ with tab6:
         _latest_date = f"{_all.index[-1]:%Y/%m/%d}" if len(_all) else "暂无有效行情"
 
         with _h1:
-            # 最新价、单日涨跌、数据截至三者严格同源：都是该期最后一个交易日
+            # 最新净值、单日涨跌、数据截至三者严格同源：都是该期最后一个交易日
             st.markdown(
                 f"""<div class="fund-head flat">
                   <div class="fh-top">
@@ -1874,7 +1894,7 @@ with tab6:
                     <span class="fh-tag">{_CAT.get(asset, '其他')}</span>
                   </div>
                   <div class="fh-price">
-                    <span class="fh-price-label">最新收盘价</span>
+                    <span class="fh-price-label">最新净值</span>
                     <span class="px">{_latest_text}</span>
                     <span class="chg {_day_cls}"><small>单日</small> {_day_text}</span>
                     <span class="fh-date">截至 {_latest_date}</span>
@@ -1900,7 +1920,7 @@ with tab6:
             st.markdown(
                 f'<div class="sec-note">数据源：data/{_LIVE_ASSETS.get(asset, asset)}.csv · '
                 f'截至 {_latest_date} · 月/年线取每期最后一条真实记录，未结束期间按最新数据计算。'
-                '区间变化以首个可见收盘为基准；近1月为30自然日。</div>',
+                '区间变化以首个可见净值为基准；近1月为30自然日。</div>',
                 unsafe_allow_html=True,
             )
 
