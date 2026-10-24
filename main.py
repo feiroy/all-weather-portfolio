@@ -58,6 +58,11 @@ def main():
     print("=" * 60)
     from allweather.fetch import fetch_all
     fetch_all(force=args.force_fetch)
+    # 沪深300 PE/PB（抄底信号用）增量更新；失败不中断回测，沿用本地文件
+    from allweather.valuation import update_hs300_pe_pb
+    _vm, _ve = update_hs300_pe_pb()
+    for _line in _vm + [f"[WARN] {e}" for e in _ve]:
+        print(f"  {_line}")
 
     # === 检查数据齐全 ===
     from allweather.fetch import check_data_complete

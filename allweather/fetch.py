@@ -65,7 +65,18 @@ def _fetch_idx_em(sym):
 
 
 def _fetch_etf_nav(code, start, end):
-    """直接调 eastmoney API 获取 ETF 历史净值，避免 akshare 列数硬编码 bug。"""
+    """策略用：累计净值（LJJZ）序列，列 date/close。口径沿用历史回测，不在此改动。"""
+    df = _fetch_etf_nav_full(code, start, end)
+    return df[["date", "close"]] if not df.empty else pd.DataFrame(columns=["date", "close"])
+
+
+def _fetch_etf_nav_full(code, start, end):
+    """直接调 eastmoney API 获取 ETF 历史净值，避免 akshare 列数硬编码 bug。
+
+    返回 date / close(累计净值) / unit_nav(单位净值) / daily_chg(官方日增长率%)。
+    注意：累计净值 = 单位净值 + 历年分红（分红不再投资），其涨跌幅会被分红稀释，
+    与支付宝/天天基金显示的「日涨幅」（按单位净值、分红日复权）不同。
+    """
     url = "https://api.fund.eastmoney.com/f10/lsjz"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.149 Safari/537.36",
@@ -95,7 +106,7 @@ def _fetch_etf_nav(code, start, end):
         # 区间内无数据（周末/节假日/无新净值）：返回空表，
         # 让上层 fetch_one 降级到 _fetch_etf_hist 或标记"已最新"，
         # 避免 pd.concat([]) 抛 "No objects to concatenate"
-        return pd.DataFrame(columns=["date", "close"])
+        return pd.DataFrame(columns=["date", "close", "unit_nav", "daily_chg"])
     big_df = pd.concat(df_list, ignore_index=True)
     col_map = {
         "FSRQ": "date", "DWJZ": "unit_nav", "LJJZ": "close",
@@ -103,7 +114,7 @@ def _fetch_etf_nav(code, start, end):
     }
     big_df = big_df[list(col_map.keys())].rename(columns=col_map)
     big_df["date"] = pd.to_datetime(big_df["date"], errors="coerce")
-    for col in ["close", "unit_nav"]:
+    for col in ["close", "unit_nav", "daily_chg"]:
         big_df[col] = pd.to_numeric(big_df[col], errors="coerce")
     close_mid = big_df["close"].median()
     unit_mid = big_df["unit_nav"].median()
@@ -112,7 +123,7 @@ def _fetch_etf_nav(code, start, end):
     if not (0.1 <= unit_mid <= 5000):
         raise ValueError(f"{code}: unit_nav 中位数={unit_mid}，超出预期")
     big_df = big_df.dropna(subset=["date", "close"])
-    return big_df[["date", "close"]].sort_values("date").reset_index(drop=True)
+    return big_df[["date", "close", "unit_nav", "daily_chg"]].sort_values("date").reset_index(drop=True)
 
 
 def _fetch_etf_hist(code, start, end):
@@ -160,7 +171,9 @@ def fetch_one(name, kind, sym, start=DEFAULT_START, end=DEFAULT_END):
                 df = _fetch_fut_dce(sym, start, end)
             elif kind == "etf_nav":
                 df = _fetch_etf_nav(sym, start, end)
-                if df.empty:
+                # 仅全量拉取才降级到收盘价；增量时空表=净值未发布（QDII 滞后 1~2 日），
+                # 降级会把收盘价拼到累计净值序列上（513500 曾因此 -45% 跳变）
+                if df.empty and start <= DEFAULT_START:
                     df = _fetch_etf_hist(sym, start, end)
             elif kind == "treasury":
                 df = _fetch_treasury_idx(start, end)
@@ -322,7 +335,8 @@ def fetch_all(force: bool = False, start: str = DEFAULT_START, end: str = DEFAUL
                 continue
             last_date = existing["date"].max()
             next_date = last_date + pd.Timedelta(days=1)
-            if next_date >= pd.Timestamp(end):
+            # 用 > 而不是 >=：已有至 10/22、最近交易日为 10/23 时 next_date == end，仍需请求 10/23
+            if next_date > pd.Timestamp(end):
                 up_to_date.append(name)
                 print(f"  -- {name} 已最新（已有至 {last_date.date()}，无需请求）", flush=True)
                 continue
@@ -332,6 +346,11 @@ def fetch_all(force: bool = False, start: str = DEFAULT_START, end: str = DEFAUL
                 df = fetch_one(name, kind, sym, start=inc_start, end=end)
                 if df is None or df.empty:
                     up_to_date.append(name)
+                    continue
+                # 口径校验：新段首值与旧段末值偏离 >15% 视为口径混用，拒绝写入
+                _jump = float(df["close"].iloc[0]) / float(existing["close"].iloc[-1]) - 1
+                if abs(_jump) > 0.15:
+                    errors.append(f"{name}: 增量首值与已有末值偏离 {_jump:+.1%}，疑似净值/收盘价口径混用，已拒绝写入")
                     continue
                 combined = pd.concat([existing, df[["date", "close"]]], ignore_index=True)
                 combined = combined.drop_duplicates(subset="date").sort_values("date").reset_index(drop=True)
@@ -386,12 +405,110 @@ def fetch_all(force: bool = False, start: str = DEFAULT_START, end: str = DEFAUL
     return ok, errors, up_to_date
 
 
+NAV_DETAIL_DIR = DATA_DIR / "nav_detail"
+
+
+def update_nav_detail(force: bool = False, end: str | None = None):
+    """维护 data/nav_detail/{name}.csv：date / unit_nav / acc_nav / daily_chg（官方日增长率%）。
+
+    只供页面展示（与支付宝一致的单位净值和日涨幅），策略回测仍读 data/{name}.csv 的累计净值。
+    首次全量（按页拉取，较慢），之后增量。返回 (更新说明, 错误)。
+    """
+    NAV_DETAIL_DIR.mkdir(parents=True, exist_ok=True)
+    end = _last_trading_day(end or pd.Timestamp.today().strftime("%Y%m%d"))
+    msgs, errs = [], []
+    for name, (kind, sym) in TARGETS.items():
+        if kind != "etf_nav":
+            continue
+        path = NAV_DETAIL_DIR / f"{name}.csv"
+        old = pd.read_csv(path, parse_dates=["date"]) if path.exists() and not force else None
+        start = DEFAULT_START if old is None or old.empty else (old["date"].max() + pd.Timedelta(days=1)).strftime("%Y%m%d")
+        if pd.Timestamp(start) > pd.Timestamp(end):
+            continue
+        try:
+            df = _fetch_etf_nav_full(sym, start, end)
+            if df.empty:
+                continue
+            df = df.rename(columns={"close": "acc_nav"})[["date", "unit_nav", "acc_nav", "daily_chg"]]
+            out = df if old is None or old.empty else pd.concat([old, df], ignore_index=True)
+            out = out.drop_duplicates(subset="date", keep="last").sort_values("date")
+            out["date"] = pd.to_datetime(out["date"]).dt.strftime("%Y-%m-%d")
+            out.to_csv(path, index=False)
+            msgs.append(f"{name} 净值明细 +{len(df)} 行")
+        except Exception as e:  # noqa: BLE001
+            errs.append(f"{name} 净值明细: {str(e)[:120]}")
+    return msgs, errs
+
+
 def check_data_complete() -> bool:
     """检查回测必需的 CSV 是否齐全。"""
     required = ["hs300", "bond_30y_etf",
                 "bond_credit", "gold", "nonferr", "us_sp500"]
     missing = [n for n in required if not (DATA_DIR / f"{n}.csv").exists()]
     return len(missing) == 0, missing
+
+
+# === 场内收盘价（与净值分离，供"基金走势"页看盘用）===
+# 净值 CSV（data/{name}.csv）存累计净值 LJJZ，用于回测；这里的收盘价
+# CSV（data/price_{name}.csv）存场内 ETF 交易价（open/high/low/close/volume），
+# 用于"看股价"，两者口径不同、独立存放，互不污染。
+_PRICE_SYMBOLS = {
+    "hs300":     "510300",
+    "us_sp500":  "513500",
+    "bond_30y":  "511130",
+    "bond_10y":  "511260",
+    "credit":    "511220",
+    "gold":      "518850",
+    "nonferr":   "159980",
+    "wti":       "501018",
+}
+
+
+def _sina_symbol(code: str) -> str:
+    """新浪 ETF 代码前缀：5 开头沪市 sh，其余深市 sz。"""
+    return ("sh" if str(code).startswith("5") else "sz") + str(code)
+
+
+def _fetch_etf_price(code: str):
+    """拉取场内 ETF 日线（含 OHLC + 成交量），新浪接口。"""
+    import akshare as ak
+    df = ak.fund_etf_hist_sina(symbol=_sina_symbol(code))
+    df["date"] = pd.to_datetime(df["date"])
+    cols = ["date", "open", "high", "low", "close", "volume"]
+    df = df[[c for c in cols if c in df.columns]]
+    for c in ["open", "high", "low", "close"]:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+    return df.sort_values("date").reset_index(drop=True)
+
+
+def fetch_prices(force: bool = False):
+    """拉取所有资产的场内收盘价，写入 data/price_{name}.csv（独立于净值）。"""
+    ok, errors = {}, []
+    for name, code in _PRICE_SYMBOLS.items():
+        path = DATA_DIR / f"price_{name}.csv"
+        if path.exists() and not force:
+            # 增量：只补缺失日期
+            existing = pd.read_csv(path, parse_dates=["date"])
+            last = existing["date"].max()
+            try:
+                df = _fetch_etf_price(code)
+                new = df[df["date"] > last]
+                if new.empty:
+                    continue
+                combined = pd.concat([existing, new], ignore_index=True)
+                combined = combined.drop_duplicates(subset="date").sort_values("date")
+                combined.to_csv(path, index=False)
+                ok[name] = len(combined)
+            except Exception as e:
+                errors.append(f"{name}: {str(e)[:150]}")
+        else:
+            try:
+                df = _fetch_etf_price(code)
+                df.to_csv(path, index=False)
+                ok[name] = len(df)
+            except Exception as e:
+                errors.append(f"{name}: {str(e)[:150]}")
+    return ok, errors
 
 
 if __name__ == "__main__":

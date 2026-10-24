@@ -30,15 +30,19 @@ ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "streamlit_app/app.py"
 SOURCE = ROOT / "data/hs300.csv"
 FIXTURE = ROOT / "outputs/trend-test-cases.json"
-RANGES = {"近1月": ("days", 30), "近3月": ("months", 3),
-          "近1年": ("years", 1), "今年来": ("ytd", 0), "全部": ("all", 0)}
-STAGES = {"近1月": ("days", 30), "近3月": ("months", 3),
-          "近1年": ("years", 1), "今年来": ("ytd", 0)}
+RANGES = {"近1月": ("months", 1), "近3月": ("months", 3), "近6月": ("months", 6),
+          "近1年": ("years", 1), "近3年": ("years", 3), "近5年": ("years", 5),
+          "今年来": ("ytd", 0), "全部": ("all", 0)}
+STAGES = {"近1月": ("months", 1), "近3月": ("months", 3), "近6月": ("months", 6),
+          "近1年": ("years", 1), "近3年": ("years", 3), "今年来": ("ytd", 0)}
 PERIODS = ("日", "月", "年")
-CHART_SOURCE_SHA256 = "ebc060c50d84c66b6a82eec9bdfba23b400a07c0ef34baae20a9506d3685ca9e"
+# 2026/10/24 更新：区间按钮改由 _range_buttons() 生成；去掉「近1月=30自然日」提示（区间口径改为与支付宝一致）。
+# 已用 jsdom 实跑验证区间切换、日/月/年线、悬停提示与区间统计。
+CHART_SOURCE_SHA256 = "e251eb7fc4b0328e1c8ba29583947599b53ac0ef7eab2b4022134cfa6c0cf7ec"
 NAMES = {"_scroll_chart_html", "_trend_aggregate", "_trend_window_start",
-         "_stage_rows", "_stage_summary_html", "_trend_chart_data"}
-CONSTANTS = {"_TREND_RANGES", "_TREND_STAGES"}
+         "_stage_rows", "_stage_summary_html", "_trend_chart_data",
+         "_period_label", "_range_buttons"}
+CONSTANTS = {"_TREND_RANGES", "_TREND_STAGES", "_COMP_BASE_CSS"}
 
 
 def load_namespace():
@@ -118,15 +122,18 @@ def expected_aggregate(records, period):
 
 
 def expected_start(records, span):
+    """支付宝「历史业绩」口径（2026/10/24 对账 161119 五个区间全部一致）：
+    基准 = 截止日往前推 N 个自然月/年那天（或之前最近一个交易日）的记录；今年来 = 去年最后一条记录；不够长则第一条。"""
     if not records or span[0] == "all":
         return 0
     kind, amount = span
     end = records[-1][0]
     if kind == "ytd":
-        cutoff = date(end.year, 1, 1)
-        return next((i for i, (day, _) in enumerate(records) if day >= cutoff), len(records) - 1)
+        before = [i for i, (day, _) in enumerate(records) if day < date(end.year, 1, 1)]
+        return before[-1] if before else 0
     cutoff = end - timedelta(days=amount) if kind == "days" else shift_months(end, -amount * (12 if kind == "years" else 1))
-    return next((i for i, (day, _) in enumerate(records) if day > cutoff), len(records) - 1)
+    before = [i for i, (day, _) in enumerate(records) if day <= cutoff]
+    return before[-1] if before else 0
 
 
 def as_series(records):
@@ -136,7 +143,9 @@ def as_series(records):
 def expected_history(records, period):
     data = expected_aggregate(records, period)
     prices = [price for _, price in data]
-    return {"labels": [day.strftime({"日": "%Y/%m/%d", "月": "%Y/%m", "年": "%Y"}[period]) for day, _ in data],
+    labels = {"日": lambda d: d.strftime("%Y/%m/%d"), "月": lambda d: f"{d.year}年{d.month}月",
+              "年": lambda d: f"{d.year}年"}[period]
+    return {"labels": [labels(day) for day, _ in data],
             "dates": [day.strftime("%Y/%m/%d") for day, _ in data], "prices": prices,
             "rets": [None] + [(prices[i] / prices[i - 1] - 1) * 100 for i in range(1, len(prices))],
             "windows": {label: {"start": expected_start(data, span),
@@ -189,9 +198,9 @@ def assert_stage_summary(markup, expected):
     for cls in ("stage-summary", "stage-summary-title", "stage-metrics"):
         assert len(parsed.matching(cls=cls)) == 1, f"必须有一个 {cls}"
     assert [a["data-stage"] for a in parsed.matching(cls="stage-metric")] == list(STAGES)
-    assert len(parsed.matching(cls="stage-label")) == 4
+    assert len(parsed.matching(cls="stage-label")) == len(STAGES)
     returns = parsed.matching(cls="stage-return")
-    assert len(returns) == 4
+    assert len(returns) == len(STAGES)
     for tag in ("button", "a", "input", "select", "svg", "rect", "canvas"):
         assert not parsed.matching(tag), f"阶段概览不应有 {tag}"
     assert not parsed.matching(role="button")
@@ -252,15 +261,20 @@ class ChartRangeTests(unittest.TestCase):
         self.assertIn("Number.isInteger(i)", markup)
         self.assertIn("tip.offsetHeight", markup)
 
-    def test_default_is_thirty_calendar_days_not_month_or_rows(self):
-        series = pd.Series(np.arange(65) + 100., index=pd.date_range("2024-02-01", periods=65))
-        records = [(day.date(), float(price)) for day, price in series.items()]
+    def test_month_window_matches_alipay_base_date(self):
+        """近N月基准 = N 个自然月前那天的净值；那天休市取之前最近一个交易日（与支付宝一致，不再用 30 天）。"""
+        series = pd.Series(np.arange(65) + 100., index=pd.date_range("2024-02-01", periods=65))   # 末日 2024/04/05
         idx = self.ns["_trend_window_start"](series, RANGES["近1月"])
-        self.assertEqual(idx, expected_start(records, ("days", 30)))
-        self.assertNotEqual(idx, expected_start(records, ("months", 1)))
-        weekdays = series[series.index.weekday < 5]
-        idx = self.ns["_trend_window_start"](weekdays, RANGES["近1月"])
-        self.assertLess(len(weekdays) - idx, 30)
+        self.assertEqual(series.index[idx], pd.Timestamp("2024-03-05"))
+        self.assertNotEqual(idx, expected_start([(d.date(), v) for d, v in series.items()], ("days", 30)))
+        weekdays = series[series.index.weekday < 5]                     # 2024/03/05 是周二，有交易
+        self.assertEqual(weekdays.index[self.ns["_trend_window_start"](weekdays, RANGES["近1月"])], pd.Timestamp("2024-03-05"))
+        sat_end = series.loc[:"2024-04-06"][lambda x: x.index.weekday < 5]   # 截止 2024/04/05 周五，往前一月 03/05
+        self.assertEqual(sat_end.index[self.ns["_trend_window_start"](sat_end, ("months", 1))], pd.Timestamp("2024-03-05"))
+        hol = weekdays.drop(pd.Timestamp("2024-03-05"))                  # 基准日休市 → 用前一个交易日 03/04
+        self.assertEqual(hol.index[self.ns["_trend_window_start"](hol, RANGES["近1月"])], pd.Timestamp("2024-03-04"))
+        ytd = self.ns["_trend_window_start"](weekdays, RANGES["今年来"])  # 今年来基准 = 去年最后一条，没有则第一条
+        self.assertEqual(ytd, 0)
 
     def test_all_fifteen_windows_keep_real_dates(self):
         got = self.ns["_trend_chart_data"](self.series)
@@ -280,7 +294,7 @@ class ChartRangeTests(unittest.TestCase):
                 self.assertTrue(aggregated.index.isin(self.series.index).all())
                 for label, span in RANGES.items():
                     self.assertEqual(self.ns["_trend_window_start"](aggregated, span), expected["windows"][label]["start"])
-        self.assertEqual(got["年"]["windows"]["近1月"]["count"], 1)
+        self.assertEqual(got["年"]["windows"]["近1月"]["count"], 2)       # 年线：基准为上一年末那条 + 今年最新
         self.assertGreater(got["年"]["windows"]["近1年"]["count"], 1)
 
     def test_real_csv_matches_independent_oracle(self):
@@ -362,7 +376,7 @@ class StageSummaryTests(unittest.TestCase):
         cells = self.ns["_stage_rows"](series)
         expected = expected_stages(records)
         self.assertIsInstance(cells, list)
-        self.assertEqual(len(cells), 4)
+        self.assertEqual(len(cells), len(STAGES))
         for cell, ex in zip(cells, expected):
             with self.subTest(stage=ex["label"]):
                 self.assertEqual(set(cell), {"label", "ret", "base", "end"})
@@ -382,10 +396,10 @@ class StageSummaryTests(unittest.TestCase):
     def test_four_cells_match_independent_real_csv_calculation(self):
         self.assert_cells(self.series, self.records)
 
-    def test_stage_return_uses_first_visible_close_not_previous_record(self):
-        dates = pd.bdate_range("2022-01-03", "2024-05-06")
+    def test_stage_return_uses_window_base_record(self):
+        dates = pd.bdate_range("2020-01-02", "2024-05-06")
         series = pd.Series(np.arange(len(dates)) + 100., index=dates)
-        # 覆盖闰日、周末、今年来，以及近1月为30自然日的边界。
+        # 覆盖闰日、周末、今年来、月末边界；阶段数字的基准 = 图表视窗第一条（即支付宝口径的基准日）。
         for end in ("2024-02-29", "2024-04-05", "2024-05-06"):
             sample = series.loc[:end]
             records = [(day.date(), float(price)) for day, price in sample.items()]
@@ -423,7 +437,7 @@ class StageSummaryTests(unittest.TestCase):
 
     def test_stage_markup_is_four_readonly_numbers_with_direction_classes(self):
         cells = [{"label": label, "ret": ret, "base": pd.Timestamp("2024-01-02"),
-                  "end": pd.Timestamp("2024-01-03")} for label, ret in zip(STAGES, (12.5, -3.25, 0., None))]
+                  "end": pd.Timestamp("2024-01-03")} for label, ret in zip(STAGES, (12.5, -3.25, 0., None, 4.0, -1.5))]
         assert_stage_summary(self.ns["_stage_summary_html"](cells), cells)
 
     def test_removed_comparison_functions_are_not_retained(self):

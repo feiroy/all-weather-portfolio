@@ -24,7 +24,9 @@ SAFETY_DEDUCT = {
 }
 
 # === 调仓规则 ===
-REBAL_FREQ = "ME"            # 月度再平衡（V3c）
+REBAL_FREQ = "monthly"        # 调仓频率: monthly(月频,默认,回测最优)/biweekly(双周)/weekly(周频)
+# 实测：月频 CAGR 最高、MDD 最小；周/双周因逆波动率窗口(20d/60d)本身是月度节奏，
+# 高频调仓引入换手噪声，三策略均「月频 > 双周 > 周频」。默认保持月频。
 REBAL_MODE = "month_end"     # 调仓日: 月末最后交易日 — 远离商品期货主力换月窗口（月中），
                              # 实证: V3c +0.43pp / RP +0.47pp / Con +0.10pp，三策略受益或中性
 RISK_FREE_RATE = 0.017 / 252   # 10年期国债收益率 ~1.7%（日度，2026.07）

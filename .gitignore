@@ -23,3 +23,17 @@ data/rebalance_state.json
 data/dividend_etf.csv
 data/dividend_idx.csv
 data/dividend_total_return.csv
+
+# 线上部署产物（scripts/build_web.py 生成）
+deploy_web/
+.workbuddy/web_password.txt
+
+# 后台自动更新的节流标记
+data/.last_auto_fetch
+# 搜索框名录静态文件（由 _fund_names.json 自动生成）
+streamlit_app/static/fund_names.json
+# 全市场基金名录缓存（运行时自动拉取，约 1.2MB，7 天刷新）
+streamlit_app/_fund_names.json
+# WorkBuddy 本地工作区数据（记忆、访问密码等，不进仓库）
+.workbuddy/
+.wbapp_*.genie

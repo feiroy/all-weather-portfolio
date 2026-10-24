@@ -23,6 +23,7 @@ from .config import (
     V3B_CON_ASSETS,
     RISK_PARITY_TARGET_VOL,
     RISK_PARITY_COV_WINDOW,
+    REBAL_FREQ,
 )
 from . import reports
 DOCS_DIR = OUTPUT_DIR.parent / "docs"
@@ -45,6 +46,50 @@ def step_1_load_data():
     return panel, rets
 
 
+def strategy_backtest_kwargs(strategy: str, rebal_freq: str = "monthly") -> dict:
+    """流水线和展示页共用的基础策略参数；不改变原有回测定义。"""
+    if rebal_freq not in {"monthly", "biweekly", "weekly"}:
+        raise ValueError(f"未知调仓频率: {rebal_freq}")
+    common = dict(
+        cash_ratio=0.0, nonferr_trend_window=75, wti_trend_window=75,
+        hs300_value_dip=True, gold_dip_threshold=None, rebal_freq=rebal_freq,
+    )
+    if strategy == "V3-B 风险平价":
+        params = dict(
+            rp_buckets=V3B_RP_BUCKETS, rp_window=STRATEGY_PARAMS["rp"]["window"],
+            gold_trend_filter=True, gold_trend_window=75,
+            equity_trend_assets=["us_sp500", "hs300"],
+            equity_trend_windows={"us_sp500": SP500_TREND_WINDOW, "hs300": HS300_TREND_WINDOW},
+            target_vol=RISK_PARITY_TARGET_VOL, vol_target_window=RISK_PARITY_COV_WINDOW,
+        )
+    elif strategy == "V3-B 保守增强":
+        params = dict(
+            rp_window=STRATEGY_PARAMS["con"]["window"],
+            max_w=STRATEGY_PARAMS["con"]["max_w"], weighting_method="inverse_vol",
+            gold_dip_cap=0.20,
+        )
+    elif strategy == "V3c 多元":
+        params = dict(
+            assets=V3C_ASSETS, iv_window=STRATEGY_PARAMS["v3c"]["window"],
+            max_w=STRATEGY_PARAMS["v3c"]["max_w"], min_w=STRATEGY_PARAMS["v3c"]["min_w"],
+            gold_trend_filter=True, gold_trend_window=75, gold_dip_cap=0.20,
+            equity_trend_assets=["us_sp500"], equity_trend_window=75,
+        )
+    else:
+        raise ValueError(f"未知策略: {strategy}")
+    return dict(common, **params)
+
+
+def run_strategy_backtest(rets, strategy: str, rebal_freq: str = "monthly", **runtime):
+    """只运行指定策略；runtime 用于流水线跟踪或复用 PB/PE，不负责写文件。"""
+    kwargs = strategy_backtest_kwargs(strategy, rebal_freq)
+    kwargs.update(runtime)
+    if strategy == "V3c 多元":
+        return backtest_iv(rets, **kwargs)
+    assets = V3B_RP_ASSETS if strategy == "V3-B 风险平价" else V3B_CON_ASSETS
+    return backtest_b(rets[assets], **kwargs)
+
+
 def step_2_run_backtests(rets):
     """Step 2: 3 策略 × 3 现金档 = 9 回测（+2 动态现金 = 11）。"""
     print("\n" + "─" * 60)
@@ -63,34 +108,12 @@ def step_2_run_backtests(rets):
 
     from .backtest import adjust_nav_for_cash
 
-    # ============================================================
-    # 公共参数（策略族参数，减少重复）
-    # ============================================================
+    # 只保留运行时跟踪信息；基础策略定义与展示页共享。
     _common = dict(
-        cash_ratio=0.0,
-        nonferr_trend_window=75,
-        wti_trend_window=75,
-        hs300_value_dip=True,
         track_weights=True, track_signals=True,
         hs300_pb_data=hs300_pb_data, hs300_pe_data=hs300_pe_data,
         hs300_pb_pct=hs300_pb_pct, hs300_pe_pct=hs300_pe_pct,
     )
-    _b_rp = dict(rp_window=STRATEGY_PARAMS["rp"]["window"],
-                 gold_trend_filter=True, gold_trend_window=75,
-                 equity_trend_assets=["us_sp500", "hs300"],
-                 equity_trend_windows={"us_sp500": SP500_TREND_WINDOW, "hs300": HS300_TREND_WINDOW},
-                 track_dynamic_nav=True,
-                 target_vol=RISK_PARITY_TARGET_VOL, vol_target_window=RISK_PARITY_COV_WINDOW,
-                 gold_dip_threshold=None)
-    _b_con = dict(rp_window=STRATEGY_PARAMS["con"]["window"], max_w=STRATEGY_PARAMS["con"]["max_w"],
-                  weighting_method="inverse_vol",
-                  gold_dip_threshold=None, gold_dip_cap=0.20, track_dynamic_nav=True)
-    _iv = dict(iv_window=STRATEGY_PARAMS["v3c"]["window"],
-               max_w=STRATEGY_PARAMS["v3c"]["max_w"], min_w=STRATEGY_PARAMS["v3c"]["min_w"],
-               gold_trend_filter=True, gold_trend_window=75,
-               gold_dip_threshold=None, gold_dip_cap=0.20,
-               equity_trend_assets=["us_sp500"], equity_trend_window=75,
-               track_dynamic_nav=False)
 
     def _store(name, nv_base, nv_dyn, n, wh, sl):
         nonlocal n_rebal_total
@@ -104,19 +127,21 @@ def step_2_run_backtests(rets):
             nv_results[(name, tier_label)] = adjust_nav_for_cash(nv_base, c)
 
     # --- V3-B RP ---
-    nv_base, nv_dyn, n, wh, sl = backtest_b(
-        rets[V3B_RP_ASSETS], rp_buckets=V3B_RP_BUCKETS,
-        signal_label="V3-B 风险平价", **_common, **_b_rp)
+    nv_base, nv_dyn, n, wh, sl = run_strategy_backtest(
+        rets, "V3-B 风险平价", REBAL_FREQ, signal_label="V3-B 风险平价",
+        track_dynamic_nav=True, **_common)
     _store("V3-B 风险平价(20d)", nv_base, nv_dyn, n, wh, sl)
 
     # --- V3-B Con ---
-    nv_base, nv_dyn, n, wh, sl = backtest_b(
-        rets[V3B_CON_ASSETS], signal_label="V3-B 保守增强", **_common, **_b_con)
+    nv_base, nv_dyn, n, wh, sl = run_strategy_backtest(
+        rets, "V3-B 保守增强", REBAL_FREQ, signal_label="V3-B 保守增强",
+        track_dynamic_nav=True, **_common)
     _store("V3-B 保守增强(20d)", nv_base, nv_dyn, n, wh, sl)
 
     # --- V3c 多元 ---
-    nv_base, _, n, wh, sl = backtest_iv(
-        rets, assets=V3C_ASSETS, signal_label="V3c 多元", **_common, **_iv)
+    nv_base, _, n, wh, sl = run_strategy_backtest(
+        rets, "V3c 多元", REBAL_FREQ, signal_label="V3c 多元",
+        track_dynamic_nav=False, **_common)
     _store("V3c 多元", nv_base, None, n, wh, sl)
 
     total = len(nv_results)

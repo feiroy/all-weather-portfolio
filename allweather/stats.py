@@ -46,6 +46,56 @@ def perf_metrics(nv: pd.Series, rets: pd.Series | None = None) -> PerfMetrics:
     }
 
 
+def comparison_metrics(nv: pd.Series) -> dict:
+    """任意区间绩效：先归一化，再复用报告的 252 观测日年化口径。"""
+    nv = nv.dropna().sort_index()
+    if len(nv) < 2 or (nv <= 0).any() or not np.isfinite(nv.to_numpy()).all():
+        raise ValueError("绩效比较需要至少两条有限、正值净值")
+    if nv.index.has_duplicates:
+        raise ValueError("净值日期不能重复")
+    result = perf_metrics(nv / nv.iloc[0])
+    # 月/年表还提供日收益波动；短区间不冒充稳定的年化估计。
+    result["daily_vol"] = float(nv.pct_change().dropna().std())
+    return result
+
+
+def comparison_slice(nv: pd.Series, start=None, end=None, *, include_prior=False) -> pd.Series:
+    """截取区间；自然月/年包含期前一条净值，保留期首第一天的涨跌。"""
+    nv = nv.dropna().sort_index()
+    if start is not None:
+        start = pd.Timestamp(start)
+        seg = nv.loc[nv.index >= start]
+        if include_prior:
+            prior = nv.loc[nv.index < start].tail(1)
+            seg = pd.concat([prior, seg])
+    else:
+        seg = nv
+    if end is not None:
+        seg = seg.loc[seg.index <= pd.Timestamp(end)]
+    return seg
+
+
+def period_performance(nv: pd.Series, freq: str = "M") -> pd.DataFrame:
+    """各自然月/年的收益、期内最大回撤与指标；回撤每期从期前净值重置。"""
+    if freq not in {"M", "Y"}:
+        raise ValueError("仅支持自然月 M 或自然年 Y")
+    nv = nv.dropna().sort_index()
+    if len(nv) < 2:
+        return pd.DataFrame()
+    # 先计算日收益再分期，不能把每月/年第一天的收益丢掉。
+    r = nv.pct_change().dropna()
+    rows = []
+    for period, daily in r.groupby(r.index.to_period(freq)):
+        seg = comparison_slice(nv, daily.index[0], daily.index[-1], include_prior=True)
+        metrics = comparison_metrics(seg)
+        rows.append(dict(
+            period=period, date=period.to_timestamp(),
+            first_date=daily.index[0], last_date=daily.index[-1],
+            **metrics,
+        ))
+    return pd.DataFrame(rows).set_index("period")
+
+
 def yearly_returns(nv: pd.Series, rets: pd.Series | None = None) -> pd.Series:
     """按自然年聚合收益率。"""
     r = rets if rets is not None else nv.pct_change().dropna()

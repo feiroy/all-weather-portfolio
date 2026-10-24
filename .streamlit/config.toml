@@ -8,3 +8,5 @@ font="sans serif"
 
 [server]
 headless=true
+# 基金搜索框的名录静态文件 streamlit_app/static/fund_names.json（见 fund_search.py）
+enableStaticServing=true

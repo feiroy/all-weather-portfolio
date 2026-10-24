@@ -119,6 +119,42 @@ def _section_yearly(yearly_results, years=None):
     ]
 
 
+def _section_monthly(nv_results):
+    """月度收益明细：每个 100% RP 策略，按「年份 × 12 月」列月收益。
+
+    帮助判断波动可接受度——看具体每个月的实际涨跌，而非只看年化数字。
+    """
+    if not nv_results:
+        return []
+    months = ["1月", "2月", "3月", "4月", "5月", "6月",
+              "7月", "8月", "9月", "10月", "11月", "12月"]
+    parts = ["## 2b. 月度收益明细（100% RP 档）", "",
+             "> 每格为该月收益，正负号标注涨跌；末列为该年累计。用于逐月核对实际波动。", ""]
+
+    for (port, tier), nv_s in nv_results.items():
+        if tier != "100% RP":
+            continue
+        r = nv_s.pct_change().dropna()
+        if r.empty:
+            continue
+        m = r.groupby([r.index.year, r.index.month]).apply(lambda x: (1 + x).prod() - 1)
+        years = sorted(set(m.index.get_level_values(0)))
+        rows = []
+        for y in years:
+            row = [str(y)]
+            for mo in range(1, 13):
+                v = m.get((y, mo), None)
+                row.append(_pct(v, d=1, sign=True) if v is not None else "·")
+            yr = (1 + r[r.index.year == y]).prod() - 1
+            row.append(_pct(yr, d=1, sign=True))
+            rows.append(row)
+        parts.append(f"### {port}")
+        parts.append("")
+        parts.append(_md_table(["年份"] + months + ["全年"], rows))
+        parts.append("")
+    return parts
+
+
 def _section_risk_contrib(rc_results):
     if not rc_results:
         return []
@@ -407,6 +443,7 @@ def save_markdown_report(
     parts.extend(_section_recommendation(perf_results))
     parts.extend(_section_perf(perf_results))
     parts.extend(_section_yearly(yearly_results))
+    parts.extend(_section_monthly(nv_results))
     parts.extend(_section_risk_contrib(rc_results))
     parts.extend(_section_weight_stability(ws_results or {}))
     parts.extend(_section_signal_summary(signal_logs or {}))

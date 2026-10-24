@@ -177,6 +177,42 @@ def _sheet_yearly(wb, yearly_results, years=None):
     _autofit(ws)
 
 
+def _sheet_monthly(wb, nv_results):
+    """月度收益明细 sheet：每个 100% RP 策略一张「年份 × 12 月」表。"""
+    if not nv_results:
+        return
+    months = ["1月", "2月", "3月", "4月", "5月", "6月",
+              "7月", "8月", "9月", "10月", "11月", "12月"]
+    ws = wb.create_sheet("月度收益")
+    _write_title(ws, 1, "月度收益明细（100% RP 档，红=涨 绿=跌）", len(months) + 2)
+    r = 3
+    for (port, tier), nv_s in nv_results.items():
+        if tier != "100% RP":
+            continue
+        rr = nv_s.pct_change().dropna()
+        if rr.empty:
+            continue
+        m = rr.groupby([rr.index.year, rr.index.month]).apply(lambda x: (1 + x).prod() - 1)
+        years = sorted(set(m.index.get_level_values(0)))
+        # 每个策略一个标题行
+        ws.cell(row=r, column=1, value=port).font = Font(bold=True, size=11)
+        r += 1
+        _write_headers(ws, r, ["年份"] + months + ["全年"])
+        r += 1
+        first_data_row = r
+        for y in years:
+            ws.cell(row=r, column=1, value=str(y)).alignment = LEFT
+            for mo in range(1, 13):
+                v = m.get((y, mo), None)
+                ws.cell(row=r, column=1 + mo, value=float(v) if v is not None else None)
+            yr = (1 + rr[rr.index.year == y]).prod() - 1
+            ws.cell(row=r, column=1 + 12 + 1, value=float(yr))
+            r += 1
+        _apply_pct_neg_red(ws, first_data_row, r - 1, 2, 1 + 13)
+        r += 1  # 策略之间空一行
+    _autofit(ws)
+
+
 def _sheet_risk_contrib(wb, rc_results):
     if not rc_results:
         return
@@ -463,6 +499,7 @@ def save_excel_report(
     _sheet_recommendation(wb)
     _sheet_perf(wb, perf_results)
     _sheet_yearly(wb, yearly_results)
+    _sheet_monthly(wb, nv_results)
     _sheet_risk_contrib(wb, rc_tv_results if rc_tv_results else rc_results)
     _sheet_weight_stability(wb, ws_results or {})
     _sheet_regime(wb, regime_results)

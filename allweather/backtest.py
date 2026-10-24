@@ -275,6 +275,7 @@ def backtest(
     hs300_pe_pct: pd.Series | None = None,
     track_dynamic_nav: bool = False,
     rebal_mode: str = REBAL_MODE,
+    rebal_freq: str = "monthly",
     vol_trigger_threshold: float | None = None,
     month_mid_day: int = 10,
 ) -> BacktestResult:
@@ -282,6 +283,8 @@ def backtest(
 
     rebal_mode: 调仓日选择 — month_end(月末最后交易日,默认,远离期货换月窗口)/month_start(月初)/month_mid(当月第 N 交易日)
                  /vol_trigger(月末基准 + HS300 20d 波动率超阈值时当月额外调仓一次)。
+    rebal_freq: 调仓频率 — monthly(月频,默认)/weekly(周频)/biweekly(双周频)。周频/双周频下，
+                在每自然周（或每双周）最后一个交易日调仓，覆盖 rebal_mode 的月内调仓日选择。
     vol_trigger_threshold: vol_trigger 模式的波动率阈值（年化，如 0.30 = 30%）。
     month_mid_day: month_mid 模式选当月第几个交易日（默认 10，用于调仓日历网格实验）。
 
@@ -346,6 +349,10 @@ def backtest(
     lookback = rp_window if weighting_method in ("hierarchical_rp", "erc") else iv_window
     # 每月交易日序号（rebal_mode="month_mid" 用）：当月第 N 个交易日
     month_seq = rets_rp.index.to_series().groupby(rets_rp.index.to_period("M")).cumcount() + 1
+    # 自然周序号（rebal_freq="weekly"/"biweekly" 用）：用 ISO 周（每周一开新周）
+    week_key = rets_rp.index.to_series().dt.strftime("%G-W%V")
+    # 每周最后一个交易日标记：该周内最后一个位置的索引
+    week_last_flag = (~week_key.duplicated(keep="last")).values
     # HS300 20d 年化波动率（rebal_mode="vol_trigger" 用）：波动率突破阈值时当月额外调仓
     vol_ann = None
     if rebal_mode == "vol_trigger" and vol_trigger_threshold is not None and hs300_idx >= 0:
@@ -398,7 +405,14 @@ def backtest(
 
         # --- Rebalance ---
         _rebal_trigger = d.month != rets_rp.index[i - 1].month
-        if rebal_mode == "month_end":
+        if rebal_freq == "weekly":
+            # 周频：每自然周最后一个交易日调仓
+            _rebal_trigger = bool(week_last_flag[i])
+        elif rebal_freq == "biweekly":
+            # 双周频：每两个自然周的最后一个交易日调仓（从首个完整周起算）
+            _rebal_trigger = bool(week_last_flag[i]) and (week_key.iloc[i] != week_key.iloc[0]) and (
+                (pd.Timestamp(d).isocalendar().week % 2) == 0)
+        elif rebal_mode == "month_end":
             _rebal_trigger = (i + 1 >= len(rets_rp.index)) or (d.month != rets_rp.index[i + 1].month)
         elif rebal_mode == "month_mid":
             _rebal_trigger = month_seq.iloc[i] == month_mid_day
