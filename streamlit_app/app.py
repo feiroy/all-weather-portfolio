@@ -3199,6 +3199,8 @@ _BT_FIXED = [{"code": f"bt:{a}", "label": f"{ETF_META.get(a, {}).get('code', '')
               "tag": "回测资产"} for a in _ACCT_ASSETS]
 
 with tab7:
+    st.caption("单只基金的走势：区间涨跌、阶段表现、收益日历（日/周/月/年）。"
+               "上面的下拉既能选项目那 8 个回测资产，也能搜全市场基金。")
     # 统一入口：8 类回测资产（排最前，默认沪深300ETF）+ 全市场 2.8 万只基金，同一个输入即提示的选择框
     with st.container(key="trend_head"):
         _h1, _h2 = st.columns([3.5, 1.15], vertical_alignment="center")
@@ -3310,6 +3312,9 @@ with tab7:
 # Tab 7: 三策略比较 / 调频影响（统一月度、年度、多年视图）
 # ============================================================
 with tab8:
+    st.caption("这里是**项目原始策略**的历史回测：三策略对比、调频影响，"
+               "以及最下方「历史调仓」里每月的目标权重和当月收益。"
+               "我自己持仓的收益在「实操账户」看。")
     from streamlit_app.performance import render_performance
     render_performance(PROJECT_ROOT)
 

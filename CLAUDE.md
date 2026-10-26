@@ -113,6 +113,10 @@ This file provides guidance to Claude Code when working with code in this reposi
   - 场内按股（100 股一手）、场外按份额（金额申购，`min_amount`）；`HG.order_quantity` 统一处理。
   - 持仓换过基金后，账上旧代码的份额要按**旧代码自己的净值**估值（`_nav_of_code`），不能拿新基金净值去乘。
   - 两条基准不要混：`BM.strategy_curve`（回测长历史）vs `BM.replay_target`（同起点、同权重、用默认基金重放）。
+- **「项目原来的操作 / 月年收益」在「回测表现」页**：上半部分是三策略对比与调频影响（多年/年度/月度），
+  最下方「历史调仓」用 `output/weight_history_{策略}.csv` 给出每月目标权重、当月/当年收益
+  （`output/nv_curves.csv`）和当月触发的信号（`output/signal_log.csv`）。
+  我自己持仓的收益在「实操账户」，不要和这里的回测混着看。
 - **记账是份额制**：成交记录的是「多少份 × 每份净值」，键是**基金代码**不是策略资产 key（`_replay_holdings`）；老格式（asset/price）会自动迁移一次。入金出金按当时净值折算份额。
 
 ### 自检清单（每次写完新页面/新区块必须逐项过，过不了不交付）

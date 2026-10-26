@@ -58,6 +58,19 @@ PERFORMANCE_CSS = """
 .st-key-perf_root summary:focus-visible { outline: 2px solid var(--perf-focus); outline-offset: 3px; }
 .st-key-perf_root [data-testid="stSelectbox"] [role="combobox"] { min-height: 44px; }
 .st-key-perf_root [data-testid="stWidgetLabel"] p { color: var(--perf-muted); font-size: var(--perf-caption); }
+/* 历史调仓表（项目原来的操作 + 对应收益）；涨红跌绿与全局规范一致 */
+.st-key-perf_root .tbl-wrap { overflow-x: auto; margin-block: .5rem .75rem; }
+.st-key-perf_root table.tbl { width: 100%; border-collapse: collapse; font-size: var(--perf-caption); }
+.st-key-perf_root table.tbl th, .st-key-perf_root table.tbl td {
+  padding: .45rem .5rem; border-bottom: 1px solid var(--perf-line); white-space: nowrap;
+}
+.st-key-perf_root table.tbl th { color: var(--perf-muted); font-weight: 600; }
+.st-key-perf_root table.tbl td.num, .st-key-perf_root table.tbl th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.st-key-perf_root table.tbl td.date { color: var(--perf-ink); font-weight: 500; }
+.st-key-perf_root .up { color: var(--perf-up); }
+.st-key-perf_root .down { color: var(--perf-down); }
+.st-key-perf_root .muted { color: var(--perf-muted); }
+.st-key-perf_root .sec-note { color: var(--perf-muted); font-size: var(--perf-caption); margin-block: .25rem .5rem; }
 .perf-context { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .375rem 1.5rem;
   color: var(--perf-muted); font-size: var(--perf-caption); margin-block: .125rem .375rem; }
 .perf-context strong { color: var(--perf-ink); font-weight: 600; }
@@ -352,6 +365,125 @@ def _table(frame: pd.DataFrame):
                  column_config={col: st.column_config.NumberColumn(col, format="%.2f") for col in numeric})
 
 
+# 「历史调仓」用的权重历史文件：策略显示名 → output/weight_history_*.csv
+WEIGHT_HISTORY_FILES = {
+    "V3c 多元": "weight_history_V3c_多元.csv",
+    "V3-B 风险平价": "weight_history_V3-B_风险平价20d.csv",
+    "V3-B 保守增强": "weight_history_V3-B_保守增强20d.csv",
+}
+_WEIGHT_LABEL = {
+    "hs300": "沪深300", "us_sp500": "标普500", "credit": "城投债",
+    "bond_10y": "10Y国债", "bond_30y": "30Y国债", "gold": "黄金",
+    "nonferr": "有色", "wti": "原油",
+}
+
+
+def _signal_log_by_month(project_root: Path) -> dict[tuple[str, pd.Timestamp], str]:
+    """output/signal_log.csv → (策略标签, 月份) → 当月触发的信号说明。"""
+    fp = project_root / "output" / "signal_log.csv"
+    if not fp.exists():
+        return {}
+    try:
+        log = pd.read_csv(fp, encoding="utf-8-sig")
+    except Exception:  # noqa: BLE001
+        return {}
+    flag_cols = [c for c in log.columns if c.endswith("_filtered") or c in ("active", "boost")]
+    out = {}
+    for _, r in log.iterrows():
+        try:
+            month = pd.Timestamp(str(r.get("date")).strip()[:10]).to_period("M").to_timestamp("M")
+        except Exception:  # noqa: BLE001
+            continue
+        hits = [c for c in flag_cols if str(r.get(c)).strip().lower() == "true"]
+        if not hits:
+            continue
+        key = (str(r.get("label", "")).strip(), month)
+        if key in out:                       # 同月多行时合并，不覆盖
+            continue
+        names = {"nonferr_filtered": "有色清仓", "gold_filtered": "黄金清仓",
+                 "us_sp500_filtered": "标普清仓", "hs300_filtered": "沪深300趋势",
+                 "wti_filtered": "原油清仓", "active": "抄底/加成", "boost": "抄底/加成"}
+        out[key] = "、".join(names.get(c, c) for c in hits)
+    return out
+
+
+def _render_history_operations(project_root: Path, results: dict, granularity: str, focus_year: int):
+    """项目原来的操作：每次调仓后的目标权重 + 对应期间收益。
+
+    权重来自 output/weight_history_*.csv（回测引擎每月最后交易日算出来的），
+    收益来自 output/nv_curves.csv（所选策略同一段净值），两者按月/按年对齐。
+    """
+    try:
+        strategy = st.selectbox("策略", list(STRATEGY_COLUMNS), key="perf_hist_strategy")
+        period_label = st.radio("粒度", ["月度", "年度"], horizontal=True, key="perf_hist_period")
+        if period_label == "月度":
+            span = st.selectbox("看多少个月", ["近12个月", "近24个月", "近60个月", "全部"], key="perf_hist_span")
+        else:
+            span = "全部"
+    except Exception:  # noqa: BLE001
+        return
+
+    fp = project_root / "output" / WEIGHT_HISTORY_FILES.get(strategy, "")
+    if not fp.exists():
+        st.caption(f"没有 {strategy} 的权重历史文件（{fp.name}）；用 myenv 跑一次 main.py 会生成。")
+        return
+    try:
+        w = pd.read_csv(fp, encoding="utf-8-sig", index_col=0, parse_dates=True).sort_index()
+    except Exception as exc:  # noqa: BLE001
+        st.caption(f"权重历史读取失败：{exc}")
+        return
+    nv = results.get(strategy, {}).get("nv")
+    if nv is None or len(nv) < 2:
+        st.caption("没有可用的净值曲线，无法算期间收益。")
+        return
+    nv = nv.dropna()
+    monthly_ret = nv.resample("ME").last().pct_change().dropna()
+    yearly_ret = nv.resample("YE").last().pct_change().dropna()
+
+    picks = w.tail({"近12个月": 12, "近24个月": 24, "近60个月": 60}.get(span, len(w)))
+    signals = _signal_log_by_month(project_root)
+    rows = []
+    for ts, row in picks.iterrows():
+        if period_label == "月度":
+            m = ts.to_period("M")
+            ret = monthly_ret.get(m.to_timestamp("M"), np.nan)
+            label = f"{m.year}年{m.month}月"
+        else:
+            m = ts.to_period("Y")
+            ret = yearly_ret.get(m.to_timestamp("Y"), np.nan)
+            label = f"{m.year}年"
+        cells = []
+        for asset in [a for a in _WEIGHT_LABEL if a in w.columns]:
+            v = float(row.get(asset, 0) or 0)
+            cells.append(f'<td class="num">{v*100:.1f}%</td>')
+        ret_txt = ("—" if pd.isna(ret) else
+                   f'<span class="{"up" if ret >= 0 else "down"}">{ret*100:+.2f}%</span>')
+        sig = ""
+        for key, text in signals.items():
+            if key[0].startswith(strategy.split()[0]) or strategy.split()[0] in key[0]:
+                if key[1].to_period("M") == ts.to_period("M"):
+                    sig = f'<span class="muted">{escape(text)}</span>'
+                    break
+        rows.append(f'<tr><td class="date">{escape(label)}</td>' + "".join(cells)
+                    + f'<td class="num">{ret_txt}</td><td>{sig}</td></tr>')
+
+    head = "".join(f'<th class="num">{escape(_WEIGHT_LABEL[a])}</th>'
+                   for a in _WEIGHT_LABEL if a in w.columns)
+    st.markdown("#### 历史调仓 · 项目原来的操作与对应收益")
+    st.markdown(
+        '<div class="sec-note">权重是回测引擎在每个月最后一个交易日算出的目标权重'
+        '（output/weight_history_*.csv）；收益是同一策略这段时间的涨跌幅，'
+        '月度用自然月、年度用自然年，最后一期可能不完整。</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        '<div class="tbl-wrap"><table class="tbl"><thead><tr>'
+        '<th>期间</th>' + head + f'<th class="num">期间收益</th><th>{period_label[:2]}信号</th>'
+        '</tr></thead><tbody>' + "".join(rows) + "</tbody></table></div>",
+        unsafe_allow_html=True,
+    )
+
+
 def render_performance(project_root: Path):
     st.markdown(PERFORMANCE_CSS, unsafe_allow_html=True)
     with st.container(key="perf_root"):
@@ -360,7 +492,8 @@ def render_performance(project_root: Path):
 
 def _render_performance(project_root: Path):
     st.markdown('<header class="perf-header"><div><h1>回测表现</h1>'
-                '<p>把收益与风险放在一起，看清三种策略的长期表现和调频影响。</p></div>'
+                '<p>项目原始策略的历史表现：按「多年 / 年度 / 月度」看收益与回撤，'
+                '最下方的「历史调仓」还能看到每月的目标权重和当月收益。</p></div>'
                 '<span class="perf-header-note">全天候策略研究</span></header>', unsafe_allow_html=True)
     controls = st.container(key="perf_controls")
     with controls:
@@ -477,6 +610,7 @@ def _render_performance(project_root: Path):
                         detail.append({"期间": str(period), "策略": strategy, "涨幅(%)": row["cum_return"] * 100,
                                        "最大回撤(%)": row["mdd"] * 100, "日收益波动(%)": row["daily_vol"] * 100})
                 _table(pd.DataFrame(detail).sort_values(["期间", "策略"]))
+        _render_history_operations(project_root, current, granularity, year if granularity != "多年" else last.year)
         with st.expander("统计口径与回测限制"):
             st.markdown(
                 "- 三策略共享日期窗口；多年曲线从所选区间首个净值归一化。年度图比较自然年，月度图比较所选年份的自然月。\n"
