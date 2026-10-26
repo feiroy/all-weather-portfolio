@@ -23,7 +23,7 @@ from allweather.rebalance import (
     STRATEGIES,
     ETF_META,
 )
-from allweather.sim_account import load_acct, save_acct, replay, stats as acct_stats
+from allweather.sim_account import load_acct, save_acct, stats as acct_stats
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fund_lookup as FL
 import fund_search as FS
@@ -616,6 +616,18 @@ def _asset_display_series(asset):
         return (idx * float(d["unit_nav"].iloc[-1]) / float(idx.iloc[-1])).rename(asset)
     except Exception:
         return None
+
+
+# 区间与阶段：走势页、账户净值曲线共用（定义要在 _scroll_chart_html 之前）
+_TREND_RANGES = {
+    "近1月": ("months", 1), "近3月": ("months", 3), "近6月": ("months", 6),
+    "近1年": ("years", 1), "近3年": ("years", 3), "近5年": ("years", 5),
+    "今年来": ("ytd", 0), "全部": ("all", 0),
+}
+_TREND_STAGES = {
+    "近1月": ("months", 1), "近3月": ("months", 3), "近6月": ("months", 6),
+    "近1年": ("years", 1), "近3年": ("years", 3), "今年来": ("ytd", 0),
+}
 
 
 def _scroll_chart_html(labels, values, win, height=540, rets=None, revision=0, histories=None):
@@ -1276,6 +1288,184 @@ w = apply_signal_overrides(strat_key, w0, signals, prices)
 cfg = STRATEGIES[strat_key]
 
 # ============================================================
+# 我的持仓（策略位置 → 我实际买的基金）+ 按份额记账的账户重放
+# ============================================================
+from allweather import holdings as HG          # noqa: E402
+from allweather import alerts as AL            # noqa: E402
+from allweather import benchmark as BM         # noqa: E402
+
+_hg_state = HG.load()
+holdings = _hg_state["holdings"]
+HG_SLOT_LABEL = HG.SLOT_LABEL
+
+
+# 缓存版本号：净值口径或持仓配置结构变了就 +1，避免拿到旧结构的缓存
+_NAV_CACHE_V = 2
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _nav_of_code(code: str, _v: int = _NAV_CACHE_V) -> pd.Series:
+    """按**基金代码**取净值序列。
+
+    持仓换过基金时，账上可能还留着旧代码的份额（比如把沪深300 从 510300 换成 110020，
+    之前买的 510300 还在）。这时候必须用旧代码自己的净值估值，不能拿新基金的净值去乘。
+    """
+    for s in HG.SLOTS:
+        if holdings.get(s, {}).get("code") == code:
+            col = _hg_panel[s].dropna() if s in _hg_panel.columns else pd.Series(dtype=float)
+            return col
+    return HG.nav_series(code)
+
+
+def _hg_nav_on(slot, day, code=None):
+    """某个位置（或某只代码）在 day 当天的净值（day 非交易日时取前一个交易日）。"""
+    if code:
+        col = _nav_of_code(code)
+    else:
+        col = _hg_panel[slot].dropna() if slot in _hg_panel.columns else pd.Series(dtype=float)
+    if not len(col):
+        return None
+    sub = col.loc[:pd.Timestamp(day)]
+    return float(sub.iloc[-1]) if len(sub) else None
+
+
+def _replay_holdings(trades, capital, created):
+    """按份额记账重放成交，得到日度净值/持仓/成本/现金。
+
+    与 allweather.sim_account.replay 的差别：
+    - 持仓以**基金代码**为键（原来以策略资产 key 为键，换基金就记不进去）；
+    - 买入/卖出按份额 × 单位净值成交（场外基金的口径）；
+    - 净值 = (持仓市值 + 现金) / units，入金出金按当时净值折算份额，不虚增收益。
+    """
+    idx = _hg_panel.index[_hg_panel.index >= pd.Timestamp(created)] if len(_hg_panel) else pd.DatetimeIndex([])
+    if len(idx) == 0:
+        idx = _hg_panel.index[-1:] if len(_hg_panel) else pd.DatetimeIndex([])
+    if len(idx) == 0:
+        return pd.DataFrame(), {}, {}, float(capital or 0), float(capital or 0)
+
+    buckets: dict[pd.Timestamp, list] = {}
+    for t in trades or []:
+        try:
+            d = pd.Timestamp(t.get("date"))
+        except Exception:
+            continue
+        i = int(idx.searchsorted(d))
+        i = min(i, len(idx) - 1)
+        buckets.setdefault(idx[i], []).append(t)
+
+    cash, units = float(capital or 0), float(capital or 0)
+    pos: dict[str, float] = {}
+    cost: dict[str, float] = {}
+    rows, last_nav = [], 1.0
+    for d in idx:
+        for t in buckets.get(d, []):
+            code = str(t.get("code", "") or "")
+            sh = float(t.get("shares", 0) or 0)
+            px = float(t.get("nav", 0) or 0)
+            fee = float(t.get("fee", 0) or 0)
+            side = t.get("side")
+            if side == "买入" and code and sh > 0:
+                if px <= 0:
+                    px = _hg_nav_on(t.get("slot"), d, code) or 0
+                cash -= sh * px + fee
+                prev = pos.get(code, 0.0)
+                cost[code] = ((prev * cost.get(code, 0.0) + sh * px + fee) / (prev + sh)) if (prev + sh) > 0 else px
+                pos[code] = prev + sh
+            elif side == "卖出" and code and sh > 0:
+                if px <= 0:
+                    px = _hg_nav_on(t.get("slot"), d, code) or 0
+                cash += sh * px - fee
+                pos[code] = pos.get(code, 0.0) - sh
+                if pos[code] <= 1e-9:
+                    pos.pop(code, None)
+                    cost.pop(code, None)
+            elif side == "入金":
+                base = last_nav if last_nav > 0 else 1.0
+                units += sh / base
+                cash += sh
+            elif side == "出金":
+                base = last_nav if last_nav > 0 else 1.0
+                units = max(1e-9, units - sh / base)
+                cash -= sh
+        mv = 0.0
+        for code, sh in pos.items():
+            v = _hg_nav_on(None, d, code)
+            if v:
+                mv += sh * v
+        eq = cash + mv
+        nav = eq / units if units > 0 else 1.0
+        last_nav = nav
+        rows.append({"date": d, "equity": eq, "nav": nav, "cash": cash, "market": mv})
+    daily = pd.DataFrame(rows).set_index("date") if rows else pd.DataFrame()
+    return daily, pos, cost, cash, units
+
+
+_hg_panel = HG.nav_panel(holdings)
+ACCT_FILE = DATA_DIR / "sim_account.json"
+acct = load_acct(ACCT_FILE)
+
+
+def _migrate_trades(a: dict) -> bool:
+    """老成交（asset=策略资产 key、price=场内价）→ 新格式（code/slot/nav）。
+
+    老记账按场内价记股数，换成基金代码后口径是份额 × 单位净值，
+    不做迁移这些成交就全部读不出来。仅在缺 code 字段时改写一次。
+    """
+    if not a:
+        return False
+    changed = False
+    for t in a.get("trades", []):
+        if t.get("code") or t.get("side") in ("入金", "出金"):
+            continue
+        key = t.get("asset") or t.get("slot")
+        if not key:
+            continue
+        t["slot"] = key
+        t["code"] = holdings.get(key, {}).get("code") or ETF_META.get(key, {}).get("code", "")
+        t["nav"] = float(t.get("price", 0) or 0)
+        changed = bool(t["code"])
+    if changed:
+        save_acct(a, ACCT_FILE)
+    return changed
+
+
+if acct and _migrate_trades(acct):
+    st.toast("已把旧的记账（按场内价/资产名）换成按基金代码与份额", icon=":material/autorenew:")
+# 回测资产（项目默认那 8 个），基金走势/对比页的下拉用
+_ACCT_ASSETS = [a for a in ["hs300", "us_sp500", "credit", "bond_10y",
+                            "bond_30y", "gold", "nonferr", "wti"] if a in prices.columns]
+_ASSET_LABEL = {a: f"{ETF_META.get(a, {}).get('name', a)} ({ETF_META.get(a, {}).get('code', '')})"
+                for a in _ACCT_ASSETS}
+
+# 账户重放结果（按份额记账）：tab3 持仓概览、tab5 调仓、tab6 实操账户、tab10 提醒共用
+_acct_daily, _acct_pos, _acct_cost, _acct_cash, _acct_units = (
+    _replay_holdings(acct.get("trades", []), acct.get("capital", 0), acct.get("created"))
+    if acct else (pd.DataFrame(), {}, {}, 0.0, 0.0)
+)
+_hg_w = HG.slot_weights(w, holdings)            # 目标权重（按我启用的位置归一）
+_hg_last = _hg_panel.index[-1] if len(_hg_panel) else prices.index[-1]
+
+
+def _hg_mv_by_slot():
+    """位置 → 当前市值（按我持仓基金的净值算）。"""
+    out = {}
+    for s in HG.active(holdings):
+        code = holdings[s]["code"]
+        sh = float(_acct_pos.get(code, 0) or 0)
+        if sh > 0 and s in _hg_panel.columns:
+            v = _hg_panel[s].dropna()
+            out[s] = sh * float(v.iloc[-1]) if len(v) else 0.0
+    return out
+
+
+_hg_mv = _hg_mv_by_slot()
+_hg_other_mv = {
+    c: sh * float(_hg_nav_on(None, _hg_panel.index[-1], c) or 0) if len(_hg_panel) else 0.0
+    for c, sh in _acct_pos.items()
+    if sh > 0 and c not in {holdings.get(s, {}).get("code") for s in HG.SLOTS}
+}
+
+# ============================================================
 # Hero
 # ============================================================
 _n_sig = sum(1 for sa in SIGNAL_ACTIONS
@@ -1317,9 +1507,9 @@ with _hero_cols[1], st.container(key="hero_actions", horizontal=True, horizontal
 # ============================================================
 # Main Tabs
 # ============================================================
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs(
-    ["信号仪表盘", "目标权重", "建仓清单", "调仓清单",
-     "实操记录", "基金走势", "回测表现", "基金对比", "指数估值"]
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11 = st.tabs(
+    ["信号仪表盘", "目标权重", "我的持仓", "建仓清单", "调仓清单", "实操账户",
+     "基金走势", "回测表现", "基金对比", "提醒", "指数估值"]
 )
 
 # ============================================================
@@ -1515,10 +1705,205 @@ with tab2:
         st.info("趋势过滤触发 → 对应资产已清仓，权重转入城投债ETF (511220)")
 
 # ============================================================
-# Tab 3: 建仓清单
+# Tab 3: 我的持仓（策略位置 → 我实际买的基金）
 # ============================================================
+_HG_PRESET = [  # 场外（支付宝可买）同类基金参考，只是建议，买前请自己核对跟踪指数和费率
+    ("hs300",    "110020", "易方达沪深300ETF联接A"),
+    ("us_sp500", "050025", "博时标普500ETF联接A"),
+    ("credit",   "000047", "华夏鼎沛A（信用债）"),
+    ("bond_10y", "000191", "富国信用债A（中久期）"),
+    ("bond_30y", "003376", "广发中债7-10年国开行A"),
+    ("gold",     "000217", "华安易富黄金ETF联接A"),
+    ("nonferr",  "165520", "中信保诚中证800有色"),
+    ("wti",      "501018", "南方原油A（当前暂停申购）"),
+]
+
+
+def _hg_apply(code_map: dict[str, tuple[str, str]]) -> dict:
+    """把 (slot → (code, name)) 写进持仓配置。
+
+    换基金时同步判断买卖单位：场内代码（5xxxxx 沪市 ETF/LOF、1xxxxx 深市、
+    0xxxxx 深市股票型）按股，其余（场外基金，如 110020）按份额申购。
+    """
+    new = json.loads(json.dumps(holdings))
+    for s, (code, name) in code_map.items():
+        old = new.get(s, {})
+        if s not in new:
+            new[s] = {"code": code, "name": name, "unit": "份额", "lot": 1, "on": True}
+        else:
+            new[s]["code"] = code
+            new[s]["name"] = name or (FL.fund_name(code) or code)
+        if HG.default_unit(code) == "股":              # 场内：按股，100 股一手
+            new[s]["unit"] = "股"
+            new[s]["lot"] = int(old.get("lot") or 100)
+        else:                                          # 场外：按金额申购
+            new[s]["unit"] = "份额"
+            new[s]["lot"] = 1
+            new[s].setdefault("min_amount", 1.0)
+    HG.save(new)
+    return new
+
+
 with tab3:
+    st.subheader("我的持仓 · 策略位置 → 我实际买的基金")
+    st.caption(
+        "策略算的是 8 个**位置**的权重（增长↑权益、收益垫、增长↓国债、通胀↑黄金/有色/能源）。"
+        "这里把每个位置换成你自己买的基金，之后的建仓、调仓、记账、提醒全部按你的基金算。"
+        "策略本身和回测不动，仍用项目默认的 8 个代码。"
+    )
+
+    _pending = {}
+    for _s in HG.SLOTS:
+        _h = holdings.get(_s, {})
+        _cur_code = _h.get("code", "")
+        _picked = FS.fund_search(
+            f"hg_{_s}", mode="single",
+            placeholder=f"搜索基金，当前 {_cur_code or '未设置'}",
+            default=_cur_code or None,
+        )
+        if _picked and _picked != _cur_code:
+            _pending[_s] = _picked
+    if _pending:
+        _hg_apply({s: (c, FL.fund_name(c) or c) for s, c in _pending.items()})
+        st.rerun()
+
+    # 表格：可编辑单位/每手/最低金额/启用
+    _rows = []
+    for _s in HG.SLOTS:
+        _h = holdings.get(_s, {})
+        _code = _h.get("code", "")
+        _nav = _hg_panel[_s].dropna() if _s in _hg_panel.columns else pd.Series(dtype=float)
+        _rows.append({
+            "位置": HG.SLOT_LABEL[_s],
+            "代码": _code,
+            "基金": _h.get("name") or (FL.fund_name(_code) if _code else "") or "—",
+            "单位": _h.get("unit", "股"),
+            "每手": int(_h.get("lot") or (100 if _h.get("unit", "股") == "股" else 1)),
+            "最低金额": float(_h.get("min_amount") or 1.0),
+            "最新净值": round(float(_nav.iloc[-1]), 4) if len(_nav) else None,
+            "启用": bool(_h.get("on", True)),
+            "_slot": _s,
+        })
+    _edited = st.data_editor(
+        pd.DataFrame(_rows),
+        column_config={
+            "位置": st.column_config.TextColumn("位置", disabled=True),
+            "代码": st.column_config.TextColumn("代码", disabled=True,
+                                               help="用上方搜索框换基金"),
+            "基金": st.column_config.TextColumn("我的基金", disabled=True),
+            "单位": st.column_config.SelectboxColumn("买卖单位", options=["股", "份额"],
+                                                    help="场内按股（100 股一手），场外按份额（按金额申购）"),
+            "每手": st.column_config.NumberColumn("每手/最小", min_value=1, step=1),
+            "最低金额": st.column_config.NumberColumn("最低申购金额(元)", min_value=1.0, step=1.0),
+            "最新净值": st.column_config.NumberColumn(f"净值({_cn_date(_hg_last)})", format="%.4f",
+                                                     disabled=True),
+            "启用": st.column_config.CheckboxColumn("启用", help="关掉的位置不参与建仓/调仓/提醒"),
+            "_slot": None,
+        },
+        hide_index=True, width="stretch", key="hg_editor",
+    )
+    _miss = [f'{holdings.get(s, {}).get("code", "")} {holdings.get(s, {}).get("name", "")}'
+             for s in HG.active(holdings)
+             if not len(_hg_panel.get(s, pd.Series(dtype=float)).dropna())]
+    if _miss:
+        st.warning("这些基金还没有净值数据，拉取后建仓/调仓/提醒才能算：" + "；".join(_miss))
+        if st.button("拉取缺的净值", key="hg_fetch_missing", type="primary"):
+            st.toast("正在拉取净值…", icon=":material/sync:", duration="long")
+            for _s in HG.active(holdings):
+                _c = holdings.get(_s, {}).get("code", "")
+                if _c and not len(_hg_panel.get(_s, pd.Series(dtype=float)).dropna()):
+                    try:
+                        FL.ensure_fresh(_c)
+                    except Exception:  # noqa: BLE001
+                        pass
+            st.cache_data.clear()
+            st.rerun()
+
+    with st.container(horizontal=True, horizontal_alignment="right", gap="small"):
+        if st.button("保存修改", type="primary", key="hg_save"):
+            _new = json.loads(json.dumps(holdings))
+            for r in _edited.to_dict("records"):
+                s = r.get("_slot")
+                if not s:
+                    continue
+                _new[s]["unit"] = r.get("单位") or "股"
+                _new[s]["lot"] = int(r.get("每手") or 1)
+                _new[s]["min_amount"] = float(r.get("最低金额") or 1.0)
+                _new[s]["on"] = bool(r.get("启用"))
+            HG.save(_new)
+            st.toast("持仓设置已保存", icon=":material/check_circle:")
+            st.rerun()
+        if st.button("恢复项目默认代码", key="hg_reset"):
+            HG.save(HG._default_holdings())
+            st.toast("已恢复为项目默认的 8 个代码", icon=":material/check_circle:")
+            st.rerun()
+
+    with st.expander("换成场外（支付宝可买）同类基金 — 一键填入参考代码"):
+        st.caption("下面是同类基金的参考代码，跟踪指数和费率不一定和原版一致，填入后请自己核对；"
+                   "收益差异会在「提醒」页用「项目默认基金」那列体现出来。")
+        _preset_rows = [[HG.SLOT_LABEL[s], ETF_META.get(s, {}).get("code", ""),
+                         ETF_META.get(s, {}).get("name", ""), c, n] for s, c, n in _HG_PRESET]
+        _render_table([("位置", "left"), ("原版代码", "left"), ("原版基金", "left"),
+                       ("参考代码", "left"), ("参考基金", "left")], _preset_rows)
+        if st.button("全部填入参考代码", key="hg_preset_all"):
+            _hg_apply({s: (c, n) for s, c, n in _HG_PRESET})
+            st.toast("已填入场外参考代码，请核对跟踪指数", icon=":material/check_circle:")
+            st.rerun()
+
+    st.divider()
+    st.markdown("**当前持仓概览**（来自「实操账户」的成交记录）")
+    if not _hg_mv and not _acct_cash:
+        st.caption("还没有持仓。到「实操账户」创建账户并录入成交，这里会显示每只基金的份额、市值、"
+                   "相对目标权重的偏离。")
+    else:
+        _tot = sum(_hg_mv.values()) + float(_acct_cash or 0)
+        _ov_rows = []
+        for _s in HG.SLOTS:
+            _h = holdings.get(_s, {})
+            if not _h.get("on", True):
+                continue
+            _code = _h.get("code", "")
+            _sh = float(_acct_pos.get(_code, 0) or 0)
+            if _sh <= 0 and _s not in _hg_mv:
+                continue
+            _mv = float(_hg_mv.get(_s, 0.0))
+            _c = float(_acct_cost.get(_code, 0) or 0)
+            _nav = _hg_panel[_s].dropna() if _s in _hg_panel.columns else pd.Series(dtype=float)
+            _p = float(_nav.iloc[-1]) if len(_nav) else 0.0
+            _curw = _mv / _tot if _tot else 0.0
+            _tgt = float(_hg_w.get(_s, 0) or 0)
+            _pl = (_p / _c - 1) if (_c > 0 and _p > 0) else None
+            _pl_txt = "—" if _pl is None else f'<span class="{"up" if _pl >= 0 else "down"}">{_pl*100:+.2f}%</span>'
+            _dev = _curw - _tgt
+            _dev_txt = ('<span class="muted">—</span>' if abs(_dev) < 0.03
+                        else f'<span class="{"up" if _dev > 0 else "down"}">{_dev*100:+.1f}pp</span>')
+            _ov_rows.append([
+                HG.SLOT_LABEL[_s],
+                f'{_h.get("name") or _code}<br><span class="muted">{_code}</span>',
+                f"{_sh:,.2f}" if _h.get("unit") == "份额" else f"{_sh:,.0f}",
+                f"{_p:.4f}" if _p else "—",
+                f"{_mv:,.0f}", _pl_txt, f"{_curw*100:.1f}%", f"{_tgt*100:.1f}%", _dev_txt,
+            ])
+        _render_table(
+            [("位置", "left"), ("我的基金", "left"), ("份额/股数", "right"), ("净值", "right"),
+             ("市值(¥)", "right"), ("浮盈亏", "right"), ("当前权重", "right"),
+             ("目标权重", "right"), ("偏离", "right")],
+            _ov_rows,
+            totals=["合计", "—", "—", "—", f"{sum(_hg_mv.values()):,.0f}", "—",
+                    f"{(sum(_hg_mv.values())/_tot*100 if _tot else 0):.1f}%", "100.0%", "—"],
+        )
+        if _hg_other_mv:
+            st.caption("**换基金前买的、现在配置里没有的基金**（按各自净值照常估值）："
+                       + "；".join(f"{c} ¥{v:,.0f}" for c, v in _hg_other_mv.items()))
+        st.caption(f"现金 ¥{_acct_cash:,.0f} · 总资产 ¥{_tot:,.0f} · 净值日期 {_cn_date(_hg_last)}"
+                   + (f" · 持仓配置更新于 {_hg_state.get('updated', '—')}" if _hg_state.get("updated") else ""))
+
+# ============================================================
+# Tab 4: 建仓清单
+# ============================================================
+with tab4:
     st.subheader("从零建仓")
+    st.caption("按「我的持仓」里你自己的基金、以及策略给这 8 个位置算出的目标权重分配资金。")
 
     amount = st.number_input(
         "投资总额（元）",
@@ -1529,169 +1914,191 @@ with tab3:
         key="build_amount_input",
     )
 
-    if amount > 0:
-        latest = prices.iloc[-1]
-        lot_size = 100
+    _bg_rows, _bg_used, _bg_target = [], 0.0, 0.0
+    for _s in HG.active(holdings):
+        _h = holdings[_s]
+        _pct = float(_hg_w.get(_s, 0) or 0)
+        if not np.isfinite(_pct) or _pct <= 0:
+            continue
+        _nav = _hg_panel[_s].dropna() if _s in _hg_panel.columns else pd.Series(dtype=float)
+        _px = float(_nav.iloc[-1]) if len(_nav) else 0.0
+        if _px <= 0:
+            _bg_rows.append([HG.SLOT_LABEL[_s], f'{_h.get("name") or ""}', _h.get("code", ""),
+                             f"{_pct*100:.1f}%", "—", '<span class="muted">缺净值，先更新数据</span>'])
+            continue
+        _tgt_amt = _pct * amount
+        _qty, _act = HG.order_quantity(_h, _tgt_amt, _px)
+        _bg_used += _act
+        _bg_target += _tgt_amt
+        _qty_txt = (f"{_qty:,.2f} 份" if HG.is_otc(_h) else f"{_qty:,.0f} 股")
+        _bg_rows.append([
+            HG.SLOT_LABEL[_s], f'{_h.get("name") or ""}<br><span class="muted">{_h.get("code", "")}</span>',
+            "场外" if HG.is_otc(_h) else "场内", f"{_pct*100:.1f}%",
+            f"¥{_tgt_amt:,.0f}<br><span class='muted'>净值 {_px:.4f}</span>",
+            f"{_qty_txt}<br><span class='muted'>¥{_act:,.0f}</span>",
+        ])
 
-        rows = []
-        total_used = 0
-        total_target = 0.0
-        for a in cfg["assets"]:
-            meta = ETF_META.get(a, {"code": "", "name": a})
-            pct = w.get(a, 0)
-            if not np.isfinite(pct) or pct <= 0:
-                continue
-            target_amount = pct * amount
-            price = float(latest.get(a, np.nan))
-            if np.isnan(price) or price <= 0:
-                continue
-            shares = int(target_amount / price / lot_size) * lot_size
-            actual = shares * price
-            total_used += actual
-            total_target += target_amount
-            rows.append([
-                meta["name"], meta["code"], f"{pct*100:.1f}%",
-                f"¥{target_amount:,.0f}", f"{price:.3f}", f"{shares:,}",
-                f"¥{actual:,.0f}",
-            ])
-
-        if rows:
-            _render_table(
-                [("资产", "left"), ("代码", "left"), ("权重", "right"),
-                 ("目标金额", "right"), ("净值", "right"), ("买入股数", "right"),
-                 ("实际金额", "right")],
-                rows,
-                totals=["合计", "—", "100.0%", f"¥{total_target:,.0f}", "—", "—",
-                        f"¥{total_used:,.0f}"],
-            )
-
-            remainder = amount - total_used
-            cols = st.columns(3)
-            with cols[0]:
-                st.metric("总投资", f"¥{amount:,.0f}")
-            with cols[1]:
-                st.metric("已分配", f"¥{total_used:,.0f}")
-            with cols[2]:
-                st.metric("剩余现金", f"¥{remainder:,.0f}",
-                          delta="放入货基/华宝添益(511990)")
-
-            if any(a == "us_sp500" for a in cfg["assets"]) and w.get("us_sp500", 0) > 0:
-                st.info("标普500 QDII 经常限购，买不到用场外联接 050025 替代")
-        else:
-            st.warning("无有效资产可建仓")
-
-# ============================================================
-# Tab 4: 调仓清单
-# ============================================================
-with tab4:
-    st.subheader("调仓对比")
-
-    st.caption("输入当前持仓股数，自动计算买卖清单")
-
-    latest = prices.iloc[-1]
-    lot_size = 100
-
-    holdings_shares = {}
-    cols = st.columns(3)
-    for i, a in enumerate(cfg["assets"]):
-        meta = ETF_META.get(a, {"code": "", "name": a})
-        with cols[i % 3]:
-            holdings_shares[a] = st.number_input(
-                f"{meta['name']} ({meta['code']})",
-                min_value=0,
-                value=0,
-                step=100,
-                format="%d",
-                key=f"holdings_{strat_key}_{a}",
-            )
-
-    total_value = sum(
-        holdings_shares.get(a, 0) * float(latest.get(a, 0)) for a in cfg["assets"]
-    )
-    if total_value > 0:
-        st.divider()
-        st.caption(f"持仓总市值: ¥{total_value:,.0f}")
-
-        trade_rows = []
-        any_trade = False
-        sum_target = 0.0
-        sum_diff = 0.0
-        for a in cfg["assets"]:
-            meta = ETF_META.get(a, {"code": "", "name": a})
-            price = float(latest.get(a, 0))
-            shares = holdings_shares.get(a, 0)
-            current_amt = shares * price
-            target_amt = w.get(a, 0) * total_value
-            diff_amt = target_amt - current_amt
-            pct_diff = abs(diff_amt) / total_value if total_value > 0 else 0
-            diff_shares = int(diff_amt / price / lot_size) * lot_size if price > 0 else 0
-            sum_target += target_amt
-            sum_diff += diff_amt
-
-            if pct_diff < 0.005 or diff_shares == 0:
-                action = '<span class="muted">不变</span>'
-            elif diff_amt > 0:
-                action = f'<span class="up">买入 {diff_shares:,} 股</span>'
-                any_trade = True
-            else:
-                action = f'<span class="down">卖出 {-diff_shares:,} 股</span>'
-                any_trade = True
-
-            if abs(diff_amt) < 1:
-                diff_txt = '<span class="muted">—</span>'
-            else:
-                cls = "up" if diff_amt > 0 else "down"
-                diff_txt = f'<span class="{cls}">{diff_amt:+,.0f}</span>'
-
-            trade_rows.append([
-                meta["name"], meta["code"], f"{shares:,}",
-                f"{current_amt:,.0f}", f"{target_amt:,.0f}", diff_txt, action,
-            ])
-
+    if _bg_rows:
         _render_table(
-            [("资产", "left"), ("代码", "left"), ("持仓股数", "right"),
-             ("市值 (¥)", "right"), ("目标 (¥)", "right"), ("差额 (¥)", "right"),
-             ("操作", "left")],
-            trade_rows,
-            totals=["合计", "—", "—", f"{total_value:,.0f}", f"{sum_target:,.0f}",
-                    f"{sum_diff:+,.0f}", "—"],
+            [("位置", "left"), ("我的基金", "left"), ("场内/场外", "left"), ("目标权重", "right"),
+             ("目标金额", "right"), ("买入数量", "right")],
+            _bg_rows,
+            totals=["合计", "—", "—", "100.0%", f"¥{_bg_target:,.0f}", f"¥{_bg_used:,.0f}"],
         )
+        _c1, _c2, _c3 = st.columns(3)
+        _c1.metric("总投资", f"¥{amount:,.0f}")
+        _c2.metric("已分配", f"¥{_bg_used:,.0f}")
+        _c3.metric("剩余现金", f"¥{amount - _bg_used:,.0f}", delta="留作调仓子弹或放货基")
+        st.caption("场外按金额申购（最低金额见「我的持仓」表）；场内按 100 股取整。"
+                   "成交价以当天实际净值为准，这里是按最新净值估算。")
+        if st.button("按此清单生成建仓成交", key="hg_build_trades",
+                     help="把这份清单写成「实操账户」的首批成交，日期用最新净值日"):
+            if acct is None:
+                st.warning("请先在「实操账户」创建账户")
+            else:
+                _tr = [{"date": _hg_last.strftime("%Y-%m-%d"), "slot": _s,
+                        "code": holdings[_s]["code"], "side": "买入", "shares": 0,
+                        "nav": 0.0, "fee": 0.0}
+                       for _s in HG.active(holdings)]
+                # 复用上面的计算结果重新生成数量（保持与目标金额一致）
+                _tr = []
+                for _s in HG.active(holdings):
+                    _h = holdings[_s]
+                    _pct = float(_hg_w.get(_s, 0) or 0)
+                    _nav = _hg_panel[_s].dropna() if _s in _hg_panel.columns else pd.Series(dtype=float)
+                    _px = float(_nav.iloc[-1]) if len(_nav) else 0.0
+                    if _pct <= 0 or _px <= 0:
+                        continue
+                    _qty, _ = HG.order_quantity(_h, _pct * amount, _px)
+                    if _qty <= 0:
+                        continue
+                    _tr.append({"date": _hg_last.strftime("%Y-%m-%d"), "slot": _s,
+                                "code": holdings[_s]["code"], "side": "买入",
+                                "shares": round(float(_qty), 4), "nav": round(_px, 4), "fee": 0.0})
+                acct.setdefault("trades", []).extend(_tr)
+                save_acct(acct, ACCT_FILE)
+                st.toast(f"已生成 {len(_tr)} 笔建仓成交", icon=":material/check_circle:")
+                st.rerun()
+    else:
+        st.warning("没有可建仓的位置：请先到「我的持仓」设置基金，或点「更新数据」拉取净值")
 
-        if not any_trade:
-            st.success("所有资产偏离 < 0.5%，无需调仓")
+# ============================================================
+# Tab 5: 调仓清单
+# ============================================================
+with tab5:
+    st.subheader("调仓清单")
+    st.caption("默认带出「实操账户」里的持仓份额，可直接改；按目标权重算出该买/卖多少。")
 
+    _use_ledger = st.toggle("用实操账户的持仓份额", value=True, key="reb_use_ledger")
+    _rb_inputs = {}
+    _rb_nav = {}
+    for _s in HG.active(holdings):
+        _h = holdings[_s]
+        _nav = _hg_panel[_s].dropna() if _s in _hg_panel.columns else pd.Series(dtype=float)
+        _px = float(_nav.iloc[-1]) if len(_nav) else 0.0
+        _rb_nav[_s] = _px
+    _rb_cols = st.columns(4)
+    for _i, _s in enumerate(HG.active(holdings)):
+        _h = holdings[_s]
+        with _rb_cols[_i % 4]:
+            _default_sh = float(_acct_pos.get(_h["code"], 0) or 0) if _use_ledger else 0.0
+            _rb_inputs[_s] = st.number_input(
+                f'{HG.SLOT_LABEL[_s]} · {_h.get("code", "")}',
+                min_value=0.0, value=round(_default_sh, 2),
+                step=100.0 if _h.get("unit") == "股" else 100.0,
+                format="%.2f" if HG.is_otc(_h) else "%.0f",
+                key=f"reb_sh_{_s}",
+                help=f"{_h.get('name') or ''}　净值 {_rb_nav[_s]:.4f}" if _rb_nav[_s] else "",
+            )
+
+    _rb_mv = {s: _rb_inputs.get(s, 0.0) * _rb_nav.get(s, 0.0) for s in HG.active(holdings)}
+    _rb_total = float(sum(_rb_mv.values()))
+    if _rb_total > 0:
+        st.divider()
+        st.caption(f"持仓总市值: ¥{_rb_total:,.0f}（净值日期 {_cn_date(_hg_last)}）")
+        _rb_rows, _any, _sum_tgt, _sum_diff = [], False, 0.0, 0.0
+        for _s in HG.active(holdings):
+            _h = holdings[_s]
+            _px = _rb_nav.get(_s, 0.0)
+            _sh = float(_rb_inputs.get(_s, 0.0) or 0)
+            _cur = _sh * _px
+            _tgt = float(_hg_w.get(_s, 0) or 0) * _rb_total
+            _diff = _tgt - _cur
+            _sum_tgt += _tgt
+            _sum_diff += _diff
+            _pct = abs(_diff) / _rb_total if _rb_total else 0
+            if _pct < 0.005 or _px <= 0:
+                _act = '<span class="muted">不变</span>'
+            elif _diff > 0:
+                _qty, _amt = HG.order_quantity(_h, _diff, _px)
+                _act = (f'<span class="up">买入 {_amt:,.0f} 元</span>' if HG.is_otc(_h)
+                        else f'<span class="up">买入 {_qty:,.0f} 股</span>')
+                _any = _any or _qty > 0
+            else:
+                _qty, _amt = HG.order_quantity(_h, -_diff, _px)
+                _act = (f'<span class="down">卖出 {_amt:,.0f} 元</span>' if HG.is_otc(_h)
+                        else f'<span class="down">卖出 {_qty:,.0f} 股</span>')
+                _any = _any or _qty > 0
+            _curw = _cur / _rb_total if _rb_total else 0
+            _tgtw = float(_hg_w.get(_s, 0) or 0)
+            _dev = _curw - _tgtw
+            _rb_rows.append([
+                HG.SLOT_LABEL[_s],
+                f'{_h.get("name") or ""}<br><span class="muted">{_h.get("code", "")}</span>',
+                f"{_sh:,.2f}" if HG.is_otc(_h) else f"{_sh:,.0f}",
+                f"{_cur:,.0f}", f"{_curw*100:.1f}%", f"{_tgtw*100:.1f}%",
+                ('<span class="muted">—</span>' if abs(_dev) < 0.03
+                 else f'<span class="{"up" if _dev > 0 else "down"}">{_dev*100:+.1f}pp</span>'),
+                f'<span class="{"up" if _diff > 0 else "down"}">{_diff:+,.0f}</span>' if abs(_diff) >= 1 else '<span class="muted">—</span>',
+                _act,
+            ])
+        _render_table(
+            [("位置", "left"), ("我的基金", "left"), ("份额/股数", "right"), ("市值(¥)", "right"),
+             ("当前权重", "right"), ("目标权重", "right"), ("偏离", "right"), ("差额(¥)", "right"),
+             ("操作", "left")],
+            _rb_rows,
+            totals=["合计", "—", "—", f"{_rb_total:,.0f}", "100.0%", "100.0%", "—",
+                    f"{_sum_diff:+,.0f}", "—"],
+        )
+        if not _any:
+            st.success("所有位置偏离 < 0.5%，无需调仓")
         with st.expander("调仓规则说明"):
             st.markdown("""
             1. 每月最后一个交易日执行一次
-            2. 先卖后买 — 卖出资金 T+0 可用后再买入
-            3. nonferr / gold / SP500 跌破 SMA → 清仓转城投债
+            2. 先卖后买 — 场外卖出到账后再买入（一般 T+1~T+3）
+            3. 非农/黄金/标普 跌破 SMA → 策略已把权重转到城投债位置，照上面清单执行即可
             4. 偏离 < 0.5% 不用动，省手续费
-            5. 股数按 100 股取整，实际成交金额以市价为准
-            6. 标普500 QDII 限购时用场外联接 050025 替代
+            5. 场内按 100 股取整；场外按金额申购，最低金额见「我的持仓」
+            6. 场外当天申赎按当日收盘净值成交，和场内实时价不同
             """)
     else:
-        st.caption("输入持仓股数后自动生成调仓清单")
+        st.caption("填写持仓份额后自动生成调仓清单")
 
 # ============================================================
-# Tab 5: 实操记录
+# Tab 6: 实操账户（按我自己的基金、按份额记账）
 # ============================================================
-ACCT_FILE = DATA_DIR / "sim_account.json"
-_ACCT_ASSETS = [a for a in ["hs300", "us_sp500", "credit", "bond_10y",
-                            "bond_30y", "gold", "nonferr", "wti"] if a in prices.columns]
-_ASSET_LABEL = {a: f"{ETF_META.get(a, {}).get('name', a)} ({ETF_META.get(a, {}).get('code', '')})"
-                for a in _ACCT_ASSETS}
 
 
 def _fmt_money(v):
     return f"¥{v:,.0f}"
 
 
-with tab5:
-    st.subheader("实操记录 · 账户净值 vs 策略")
-    acct = load_acct(ACCT_FILE)
+def _hg_slot_options():
+    """位置下拉选项：value=(key, label)，显示「位置 · 代码 名称」。"""
+    return [(s, f'{HG.SLOT_LABEL[s]} · {holdings.get(s, {}).get("code", "")} '
+                 f'{holdings.get(s, {}).get("name", "")}'.strip()) for s in HG.SLOTS]
+
+
+with tab6:
+    st.subheader("实操账户 · 我的基金 vs 两条基准")
+    st.caption(
+        "按份额记账：买多少份、每份净值多少，和支付宝对账单一致。"
+        "入金/出金按当时净值折算份额，所以资金进出不会让收益率虚增。"
+    )
 
     if acct is None:
-        st.info("**还没有实操账户** — 创建后依次录入成交，页面会自动生成：净值曲线、月度收益（实际 vs 理论）、持仓明细。")
+        st.info("**还没有实操账户** — 创建后录入成交，这里会自动给出：净值曲线、持仓明细，"
+                "以及和「策略理论」「项目默认基金」的对比。")
         with st.form("acct_init"):
             c1, c2, c3 = st.columns(3)
             with c1:
@@ -1707,47 +2114,30 @@ with tab5:
                            "created": str(start0), "trades": []}, ACCT_FILE)
                 st.rerun()
     else:
-        daily, pos, cost, cash, units = replay(
-            acct.get("trades", []), prices, acct.get("capital", 0), acct.get("created"))
-        stn = acct_stats(daily)
+        daily, pos, cost, cash, units = _acct_daily, _acct_pos, _acct_cost, _acct_cash, _acct_units
+        stn = acct_stats(daily) if len(daily) else {"nav": 1.0, "ret": 0.0, "mdd": 0.0}
         equity = float(daily["equity"].iloc[-1]) if len(daily) else float(acct.get("capital", 0))
         pnl = equity - float(acct.get("capital", 0))
 
-        # 基准：同策略回测净值（从建仓日起归一）
-        bench = None
-        nvc_p = PROJECT_ROOT / "output" / "nv_curves.csv"
-        col = _BENCH_COL.get(acct.get("strategy"))
-        if nvc_p.exists() and col:
-            nvc_df = pd.read_csv(nvc_p, index_col=0, parse_dates=True)
-            if col in nvc_df.columns:
-                b = nvc_df[col].loc[pd.Timestamp(acct["created"]):].dropna()
-                if len(b) > 1:
-                    bench = b / b.iloc[0]
-        excess = None
-        if bench is not None and len(daily) and acct.get("trades"):
-            end = min(bench.index[-1], daily.index[-1])
-            excess = float(daily["nav"].loc[:end].iloc[-1] / bench.loc[:end].iloc[-1] - 1)
+        # ---- 两条基准 ----
+        bench_def = BM.replay_target(w, acct.get("created"), nav_getter=HG.nav_series)
+        bench_strat = BM.strategy_curve(_BENCH_COL.get(acct.get("strategy"), ""),
+                                        start=acct.get("created"))
+        gap_def = gap_strat = None
+        if len(daily) > 1:
+            if len(bench_def) > 1:
+                _e = min(bench_def.index[-1], daily.index[-1])
+                gap_def = float(daily["nav"].loc[:_e].iloc[-1]
+                                / (bench_def.loc[:_e].iloc[-1] / bench_def.iloc[0]) - 1)
+            if bench_strat is not None and len(bench_strat) > 1:
+                _e = min(bench_strat.index[-1], daily.index[-1])
+                gap_strat = float(daily["nav"].loc[:_e].iloc[-1]
+                                  / (bench_strat.loc[:_e].iloc[-1] / bench_strat.iloc[0]) - 1)
 
-        # 拟合程度：跟踪误差（年化）与相关系数 —— 衡量"实操跟策略贴得多紧"
-        tracking_err = None
-        corr = None
-        if bench is not None and len(daily) > 2:
-            _end = min(bench.index[-1], daily.index[-1])
-            _acc_r = daily["nav"].loc[:_end].pct_change().dropna()
-            _bnc_r = bench.loc[:_end].pct_change().dropna()
-            _common = _acc_r.index.intersection(_bnc_r.index)
-            if len(_common) > 2:
-                _d = (_acc_r.loc[_common] - _bnc_r.loc[_common]).dropna()
-                if len(_d) > 1:
-                    tracking_err = float(_d.std() * np.sqrt(252))
-                if len(_common) > 2:
-                    corr = float(_acc_r.loc[_common].corr(_bnc_r.loc[_common]))
+        st.caption(f"账户起始 {_cn_date(acct['created'])} · 净值日期 {_cn_date(_hg_last)} · "
+                   f"{len(daily)} 个数据日 · 持仓配置更新于 {_hg_state.get('updated') or '—'}")
 
-        st.caption(f"账户起始 {_cn_date(acct['created'])} · 数据区间 "
-                   f"{_cn_date(prices.index.min())} ~ {_cn_date(prices.index.max())} · "
-                   f"{len(daily)} 个数据日")
-
-        with st.expander("⚙️ 账户设置（修改起始日期 / 重置）"):
+        with st.expander("⚙️ 账户设置（起始日期 / 清空）"):
             _sc1, _sc2 = st.columns([3, 2])
             with _sc1:
                 _new_start = st.date_input(
@@ -1767,286 +2157,148 @@ with tab5:
             if st.button("清空账户（删除全部成交）", key="acct_reset_top"):
                 ACCT_FILE.unlink(missing_ok=True)
                 st.rerun()
-            st.caption("提示：起始日期越早，越能看到完整曲线；若要一键建仓，请用下方"
-                       "「按当前目标权重建仓」，它会按起始日价格买入整仓，而不是几百股。")
 
-        m1, m2, m3, m4, m5, m6, m7 = st.columns(7)
+        m1, m2, m3, m4 = st.columns(4)
         m1.metric("总资产", _fmt_money(equity))
         m2.metric("累计收益", _fmt_money(pnl), delta=f"{stn['ret']*100:+.2f}%")
         m3.metric("现金", _fmt_money(cash))
         m4.metric("最大回撤", f"{stn['mdd']*100:.2f}%")
-        if excess is not None:
-            m5.metric("超额（vs 策略）", f"{excess*100:+.2f}pp")
-        else:
-            m5.metric("超额（vs 策略）", "—")
-        if tracking_err is not None:
-            m6.metric("跟踪误差(年化)", f"{tracking_err*100:.2f}%",
-                      help="账户日收益与策略日收益之差的标准差（年化）。越低说明实操越贴合策略，<1% 贴合良好。")
-        else:
-            m6.metric("跟踪误差(年化)", "—")
-        if corr is not None:
-            m7.metric("相关系数", f"{corr:.3f}",
-                      help="账户净值与策略净值走势的同步程度。越接近 1 说明涨跌方向跟得越紧。")
-        else:
-            m7.metric("相关系数", "—")
+        b1, b2, b3 = st.columns(3)
+        b1.metric("vs 策略理论", f"{gap_strat*100:+.2f}pp" if gap_strat is not None else "—",
+                  help="回测曲线（output/nv_curves.csv）从建仓日起归一。差的是选基、调仓时点、"
+                       "费用，以及回测用累计净值/实盘用单位净值的口径差。")
+        b2.metric("vs 项目默认基金", f"{gap_def*100:+.2f}pp" if gap_def is not None else "—",
+                  help="同样从建仓日起、同样目标权重、每月再平衡，但用项目默认那 8 个代码重放。"
+                       "这一列主要体现「换基金带来多少差异」。")
+        b3.metric("怎么校验最准", "对支付宝",
+                  help="最硬的校验：份额 × 最新单位净值 + 现金 = 总资产，"
+                       "收益率和支付宝「持有收益」应该一致。")
 
-        # 净值曲线
+        # ---- 净值曲线 ----
         if len(daily) > 1:
-            cmp_df = pd.DataFrame({"我的账户": daily["nav"]})
-            if bench is not None:
-                cmp_df["策略理论"] = bench.reindex(cmp_df.index).ffill()
-            long_df = (
-                cmp_df.reset_index()
-                .melt(id_vars="date", var_name="曲线", value_name="nav")
-                .dropna()
-            )
-            ch = (
-                alt.Chart(long_df)
-                .mark_line(strokeWidth=2)
-                .encode(
-                    x=alt.X("date:T", title=None,
-                            axis=alt.Axis(format="%Y年%-m月", labelColor=_SUB,
-                                          domainColor="#E2E8F0")),
-                    y=alt.Y("nav:Q", title="净值", scale=alt.Scale(zero=False)),
-                    color=alt.Color(
-                        "曲线:N",
-                        scale=alt.Scale(range=["#3B82F6", "#e8710a"]),
-                        legend=alt.Legend(orient="top", title=None),
-                    ),
-                    tooltip=[
-                        alt.Tooltip("date:T", title="日期", format="%Y/%m/%d"),
-                        alt.Tooltip("曲线:N", title="曲线"),
-                        alt.Tooltip("nav:Q", format=".4f", title="净值"),
-                    ],
-                )
-                .properties(height=300)
-                .interactive()
-            )
-            st.altair_chart(ch)
-            st.caption(
-                f"{STRATEGIES[acct['strategy']]['name']} · 建仓 {acct['created']} · "
-                f"{len(daily)} 个交易日 · 净值 {stn['nav']:.4f}"
-            )
-        else:
-            if not acct.get("trades"):
-                st.info("还没有成交记录 — 在下方「录入一笔成交」保存第一笔后，净值曲线与月度收益对比就会生成")
-            else:
-                st.warning(
-                    f"账户起点 {_cn_date(acct['created'])} 晚于最新行情 {_cn_date(prices.index[-1])}"
-                    "（或仅有 1 个数据日），暂时无法画曲线与月度对比。"
-                    "等下一个交易日数据更新后会自动生成；也可以把账户起始日期改到 10-16 之前。"
-                )
+            _labels = [t.strftime("%Y/%m/%d") for t in daily.index]
+            _mine = [float(v) for v in daily["nav"]]
+            st.markdown('<div class="sec-note">账户净值：1.0 = 建仓起点，可拖动缩放。'
+                        '两条基准的差距见上方「vs 策略理论 / vs 项目默认基金」。</div>',
+                        unsafe_allow_html=True)
+            st.iframe(_scroll_chart_html(_labels, _mine, len(_labels), height=460,
+                                         revision=len(daily)),
+                      height="content")
 
-        # ---------- 月度收益对比 ----------
-        if len(daily) > 1 and acct.get("trades"):
-            st.divider()
-            st.markdown("**月度收益 · 实际 vs 理论**")
-
-            _m_acc = daily["nav"].groupby(daily.index.to_period("M")).last()
-            _acc_ret = _m_acc.pct_change().dropna() * 100
-            _bench_ret = None
-            if bench is not None:
-                _mb = bench.groupby(bench.index.to_period("M")).last()
-                _bench_ret = _mb.pct_change().dropna() * 100
-
-            _periods = sorted(_acc_ret.index)
-            _rows_raw = []
-            for _p in _periods:
-                _a = _acc_ret.get(_p)
-                _b = _bench_ret.get(_p) if _bench_ret is not None else None
-                _rows_raw.append((_p, _a, _b))
-
-            def _pct_html(v):
-                if v is None or pd.isna(v):
-                    return "—"
-                _c = "up" if v >= 0 else "down"
-                return f'<span class="{_c}">{v:+.2f}%</span>'
-
-            _vals = [a for _, a, _ in _rows_raw if a is not None and not pd.isna(a)]
-            _beats = [(a, b) for _, a, b in _rows_raw
-                      if a is not None and b is not None and not pd.isna(a) and not pd.isna(b)]
-            _k1, _k2, _k3, _k4 = st.columns(4)
-            _k1.metric("平均月收益", f"{(sum(_vals)/len(_vals)):+.2f}%" if _vals else "—")
-            _k2.metric("月胜率", f"{sum(1 for v in _vals if v>0)/len(_vals)*100:.0f}%" if _vals else "—")
-            _k3.metric("策略平均月收益",
-                       f"{(sum(b for _, b in _beats)/len(_beats)):+.2f}%" if _beats else "—")
-            _k4.metric("跑赢策略", f"{sum(1 for a, b in _beats if a > b)}/{len(_beats)} 个月"
-                       if _beats else "—")
-
-            _tbl_rows = []
-            for _p, _a, _b in reversed(_rows_raw):
-                _d = None if (_a is None or _b is None or pd.isna(_a) or pd.isna(_b)) else _a - _b
-                _tbl_rows.append([f"{_p.year}年{_p.month}月",
-                                  _pct_html(_a), _pct_html(_b), _pct_html(_d)])
-            _render_table(
-                [("月份", "left"), ("我的账户", "right"), ("策略理论", "right"), ("超额", "right")],
-                _tbl_rows,
-            )
-
-            _cdf = pd.DataFrame([{
-                "月份": f"{_p.year}-{_p.month:02d}",
-                "我的账户": _a,
-                "策略理论": _b,
-            } for _p, _a, _b in _rows_raw])
-            _long = _cdf.melt(id_vars="月份", var_name="曲线", value_name="收益").dropna()
-            st.altair_chart(
-                alt.Chart(_long)
-                .mark_bar(cornerRadiusTopLeft=2, cornerRadiusTopRight=2)
-                .encode(
-                    x=alt.X("月份:N", sort=None, title=None,
-                            axis=alt.Axis(labelAngle=-45, labelFontSize=9,
-                                          labelColor=_SUB, domainColor="#E2E8F0")),
-                    xOffset=alt.X("曲线:N", title=None),
-                    y=alt.Y("收益:Q", title="%",
-                            axis=alt.Axis(labelColor=_SUB, gridColor="#EEF2F7")),
-                    color=alt.Color("曲线:N",
-                                    scale=alt.Scale(range=["#3B82F6", "#e8710a"]),
-                                    legend=alt.Legend(orient="top", title=None)),
-                    tooltip=[alt.Tooltip("月份:N", title="月份"),
-                             alt.Tooltip("曲线:N", title="曲线"),
-                             alt.Tooltip("收益:Q", format=".2f", title="月收益(%)")],
-                )
-                .properties(height=250)
-            )
-            st.caption("账户月收益按月末净值计算（份额记账，已剔除入金/出金影响）；"
-                       "建仓当月为不完整月份，仅供参考。")
-
-        # 持仓
-        st.divider()
-        st.markdown("**当前持仓**")
-        hold_rows = []
-        latest_px = prices.iloc[-1]
-        for a, sh in sorted(pos.items(), key=lambda x: -abs(x[1])):
-            if abs(sh) < 1e-9:
+        # ---- 持仓明细 ----
+        st.markdown("**持仓明细**")
+        _pr = []
+        _tot_mv = 0.0
+        # 按代码列出：换过基金时旧代码的份额也照常显示，不会凭空消失
+        for _code, _sh in sorted(pos.items()):
+            _sh = float(_sh or 0)
+            if _sh <= 0:
                 continue
-            px = float(latest_px.get(a, np.nan))
-            mv = sh * px if not np.isnan(px) else np.nan
-            hold_rows.append({
-                "资产": ETF_META.get(a, {}).get("name", a),
-                "代码": ETF_META.get(a, {}).get("code", ""),
-                "份额": f"{sh:,.2f}",
-                "成本价": f"{cost.get(a, 0):.4f}",
-                "现价": f"{px:.4f}" if not np.isnan(px) else "—",
-                "市值 (¥)": f"{mv:,.0f}" if not np.isnan(mv) else "—",
-                "占比": f"{mv/equity*100:.1f}%" if equity and not np.isnan(mv) else "—",
-            })
-        if hold_rows:
-            hold_rows.append({"资产": "现金", "代码": "—", "份额": "—", "成本价": "—",
-                              "现价": "—", "市值 (¥)": f"{cash:,.0f}",
-                              "占比": f"{cash/equity*100:.1f}%" if equity else "—"})
-            st.dataframe(pd.DataFrame(hold_rows), width="stretch", hide_index=True)
+            _s = HG.slot_of(_code, holdings)
+            _h = holdings.get(_s, {}) if _s else {}
+            _px = float(_hg_nav_on(_s, _hg_last, _code) or 0)
+            _mv = _sh * _px
+            _tot_mv += _mv
+            _c = float(cost.get(_code, 0) or 0)
+            _pl = (_px / _c - 1) if (_c > 0 and _px > 0) else None
+            _pr.append([
+                HG.SLOT_LABEL.get(_s, "换基金前的旧持仓"),
+                f'{_h.get("name") or FL.fund_name(_code) or _code}'
+                f'<br><span class="muted">{_code}</span>',
+                f"{_sh:,.2f}" if HG.is_otc(_h) else f"{_sh:,.0f}",
+                f"{_c:.4f}" if _c else "—",
+                f"{_px:.4f}" if _px else "—",
+                f"{_mv:,.0f}",
+                ("—" if _pl is None else
+                 f'<span class="{"up" if _pl >= 0 else "down"}">{_pl*100:+.2f}%</span>'),
+                ("—" if not _c else
+                 f'<span class="{"up" if (_mv - _c * _sh) >= 0 else "down"}">{_mv - _c * _sh:+,.0f}</span>'),
+            ])
+        if _pr:
+            _render_table(
+                [("位置", "left"), ("基金", "left"), ("份额/股数", "right"), ("成本单价", "right"),
+                 ("最新净值", "right"), ("市值(¥)", "right"), ("浮盈亏", "right"),
+                 ("浮盈亏(¥)", "right")],
+                _pr,
+                totals=["合计", "—", "—", "—", "—", f"{_tot_mv:,.0f}", "—", "—"],
+            )
         else:
             st.caption("暂无持仓（全部为现金）")
 
-        # 录入成交
+        # ---- 录入成交 ----
         st.divider()
-        with st.form("add_trade", clear_on_submit=True):
-            st.markdown("**录入一笔成交**")
-            # 列宽按内容定：日期要放下 2026/10/24、资产要放下名称；标签一律单行，说明放 help，避免输入框高低不齐
-            r1 = st.columns([1.25, 0.85, 1.75, 1, 1, 0.85], vertical_alignment="bottom")
-            tr_date = r1[0].date_input("成交日期", value=date.today(), format="YYYY/MM/DD")
-            tr_side = r1[1].selectbox("方向", ["买入", "卖出", "入金", "出金"])
-            tr_asset = r1[2].selectbox("资产", _ACCT_ASSETS,
-                                       format_func=lambda a: _ASSET_LABEL.get(a, a))
-            tr_shares = r1[3].number_input("份额", min_value=0.0, value=0.0, step=100.0, format="%.2f",
-                                           help="买入/卖出填成交份额；入金/出金填金额（元）")
-            tr_price = r1[4].number_input("成交价", min_value=0.0, value=float(latest_px.get(tr_asset, 0)),
-                                          step=0.001, format="%.4f")
-            tr_fee = r1[5].number_input("费用", min_value=0.0, value=0.0, help="手续费（元）",
-                                        step=1.0, format="%.2f")
-            if st.form_submit_button("保存成交", type="primary"):
-                if tr_shares <= 0:
-                    st.error("份额需大于 0")
+        st.markdown("**录入成交**")
+        _slot_opts = _hg_slot_options()
+        with st.form("acct_trade", clear_on_submit=True):
+            r1 = st.columns([1.1, 0.9, 2.2], gap="small")
+            tr_date = r1[0].date_input("日期", value=pd.Timestamp(_hg_last).date(), format="YYYY/MM/DD")
+            tr_side = r1[1].selectbox("类型", ["买入", "卖出", "入金", "出金"])
+            tr_slot = r1[2].selectbox("基金（位置）", _slot_opts, format_func=lambda x: x[1])
+            _is_money = tr_side in ("入金", "出金")
+            _unit_otc = HG.is_otc(holdings.get(tr_slot[0], {}))
+            r2 = st.columns([1, 1, 1], gap="small")
+            tr_shares = r2[0].number_input(
+                "金额（元）" if _is_money else ("份额（场外）" if _unit_otc else "股数（场内）"),
+                min_value=0.0, step=100.0, format="%.2f")
+            _nav_hint = _hg_nav_on(tr_slot[0], tr_date)
+            tr_nav = r2[1].number_input(
+                "成交净值（元/份）", min_value=0.0,
+                value=round(float(_nav_hint or 0), 4) if (not _is_money and _nav_hint) else 0.0,
+                step=0.0001, format="%.4f",
+                help="场外按当天收盘净值成交；留 0 会自动取该日净值。入金/出金不用填。")
+            tr_fee = r2[2].number_input("手续费（元）", min_value=0.0, step=1.0, format="%.2f")
+            if st.form_submit_button("记一笔", type="primary"):
+                _t = {"date": str(tr_date), "side": tr_side, "slot": tr_slot[0],
+                      "code": holdings.get(tr_slot[0], {}).get("code", ""),
+                      "shares": float(tr_shares), "nav": float(tr_nav), "fee": float(tr_fee)}
+                if _is_money and tr_shares <= 0:
+                    st.warning("金额要大于 0")
+                elif not _is_money and (tr_shares <= 0 or not _t["code"]):
+                    st.warning("数量要大于 0，且该位置要先在「我的持仓」设置基金代码")
                 else:
-                    acct.setdefault("trades", []).append({
-                        "date": str(tr_date), "asset": tr_asset, "side": tr_side,
-                        "shares": float(tr_shares),
-                        "price": 0.0 if tr_side in ("入金", "出金") else float(tr_price),
-                        "fee": float(tr_fee),
-                    })
-                    acct["trades"].sort(key=lambda t: t["date"])
+                    acct.setdefault("trades", []).append(_t)
+                    save_acct(acct, ACCT_FILE)
+                    st.toast("已记录", icon=":material/check_circle:")
+                    st.rerun()
+
+        # ---- 成交流水 ----
+        with st.expander(f"成交流水（{len(acct.get('trades', []))} 笔）", expanded=False):
+            _tr_rows = []
+            for i, t in enumerate(acct.get("trades", [])):
+                _sl = t.get("slot", "")
+                _nm = holdings.get(_sl, {}).get("name") or t.get("code", "")
+                _u = holdings.get(_sl, {}).get("unit", "份额")
+                _qty = (f"¥{float(t.get('shares', 0)):,.0f}" if t.get("side") in ("入金", "出金")
+                        else (f'{float(t.get("shares", 0)):,.2f} 份' if _u == "份额"
+                              else f'{float(t.get("shares", 0)):,.0f} 股'))
+                _tr_rows.append([
+                    _cn_date(t.get("date")), t.get("side"),
+                    f'{_nm}<br><span class="muted">{t.get("code", "")}</span>',
+                    _qty,
+                    f'{float(t.get("nav", 0)):.4f}' if float(t.get("nav", 0) or 0) > 0 else "—",
+                    f'{float(t.get("fee", 0)):,.2f}' if float(t.get("fee", 0) or 0) else "—",
+                    str(i),
+                ])
+            if _tr_rows:
+                _render_table([("日期", "left"), ("类型", "left"), ("基金", "left"),
+                               ("数量", "right"), ("净值", "right"), ("手续费", "right"),
+                               ("#", "right")], _tr_rows)
+                _del = st.number_input("删除第几笔（最后一列的序号）", min_value=0,
+                                       max_value=max(0, len(acct.get("trades", [])) - 1),
+                                       step=1, format="%d", key="acct_del_idx")
+                if st.button("删除这笔", key="acct_del_btn"):
+                    acct["trades"].pop(int(_del))
                     save_acct(acct, ACCT_FILE)
                     st.rerun()
-
-        # 快捷操作
-        with st.expander("按当前目标权重建仓（生成首笔成交）"):
-            build_amt = st.number_input("建仓金额（元）", min_value=1000.0,
-                                        value=float(acct.get("capital", 500000)),
-                                        step=10000.0, format="%.0f", key="acct_build_amt")
-            if st.button("生成建仓成交", key="acct_build_btn"):
-                # cash_ratio=0 → 不留现金缓冲（100% 风险平价）
-                w_build = compute_target_weights(acct["strategy"], prices, 0.0)
-                w_build = apply_signal_overrides(acct["strategy"], w_build, signals, prices)
-
-                # 按账户起始日期成交，这样建完立刻就有完整的历史曲线与月度对比
-                _start_idx = prices.index[prices.index >= pd.Timestamp(acct["created"])]
-                _build_day = _start_idx[0] if len(_start_idx) else prices.index[-1]
-                _build_px = prices.loc[_build_day]
-
-                new_trades, left = [], build_amt
-                for a, pct in w_build.items():
-                    if not np.isfinite(pct) or pct <= 0 or a not in prices.columns:
-                        continue
-                    px = float(_build_px.get(a, np.nan))
-                    if not np.isfinite(px) or px <= 0:
-                        continue
-                    sh = int(build_amt * pct / px / 100) * 100
-                    if sh > 0:
-                        new_trades.append({"date": str(_build_day.date()), "asset": a,
-                                           "side": "买入", "shares": sh, "price": px, "fee": 0.0})
-                        left -= sh * px
-                if new_trades:
-                    acct.setdefault("trades", []).extend(new_trades)
-                    acct["trades"].sort(key=lambda t: t["date"])
-                    save_acct(acct, ACCT_FILE)
-                    st.success(f"已生成 {len(new_trades)} 笔建仓成交，剩余现金约 ¥{left:,.0f}")
-                    st.rerun()
-                else:
-                    st.warning("没有可建仓的资产")
-
-        # 流水
-        st.divider()
-        st.markdown(f"**成交流水（{len(acct.get('trades', []))} 笔）**")
-        if acct.get("trades"):
-            trows = []
-            for t in reversed(acct["trades"]):
-                trows.append({
-                    "日期": _cn_date(t["date"]),
-                    "方向": t["side"],
-                    "资产": "—" if t["side"] in ("入金", "出金") else ETF_META.get(t["asset"], {}).get("name", t["asset"]),
-                    "份额": f"{t['shares']:,.2f}",
-                    "价格": f"{t['price']:.4f}" if t.get("price") else "—",
-                    "费用": f"{t.get('fee', 0):,.2f}",
-                })
-            st.dataframe(pd.DataFrame(trows), width="stretch", hide_index=True, height=240)
-            c_undo, c_reset = st.columns([1, 1])
-            with c_undo:
-                if st.button("撤销最后一笔", key="acct_undo"):
-                    acct["trades"].pop()
-                    save_acct(acct, ACCT_FILE)
-                    st.rerun()
-            with c_reset:
-                if st.button("清空账户", key="acct_reset", type="secondary"):
-                    ACCT_FILE.unlink(missing_ok=True)
-                    st.rerun()
-        else:
-            st.caption("暂无成交")
+            else:
+                st.caption("暂无成交")
 
         st.caption(f"账户文件：{ACCT_FILE.name}（保存在 data/ 下，重装或换机时记得备份）")
 
 # ============================================================
-# Tab 6: 基金走势（日 / 月 / 年 的涨跌幅与价格）
+# Tab 7: 基金走势（日 / 月 / 年 的涨跌幅与价格）
 # ============================================================
 # 范围和采样粒度独立，切周期不改变所选范围。区间口径与支付宝「历史业绩」一致（见 _trend_window_start）。
-_TREND_RANGES = {
-    "近1月": ("months", 1), "近3月": ("months", 3), "近6月": ("months", 6),
-    "近1年": ("years", 1), "近3年": ("years", 3), "近5年": ("years", 5),
-    "今年来": ("ytd", 0), "全部": ("all", 0),
-}
-_TREND_STAGES = {
-    "近1月": ("months", 1), "近3月": ("months", 3), "近6月": ("months", 6),
-    "近1年": ("years", 1), "近3年": ("years", 3), "今年来": ("ytd", 0),
-}
 
 
 def _trend_aggregate(series, period):
@@ -2946,7 +3198,7 @@ _CAT = {"hs300": "宽基·A股", "us_sp500": "宽基·美股", "credit": "信用
 _BT_FIXED = [{"code": f"bt:{a}", "label": f"{ETF_META.get(a, {}).get('code', '')} {ETF_META.get(a, {}).get('name', a)}",
               "tag": "回测资产"} for a in _ACCT_ASSETS]
 
-with tab6:
+with tab7:
     # 统一入口：8 类回测资产（排最前，默认沪深300ETF）+ 全市场 2.8 万只基金，同一个输入即提示的选择框
     with st.container(key="trend_head"):
         _h1, _h2 = st.columns([3.5, 1.15], vertical_alignment="center")
@@ -3057,7 +3309,7 @@ with tab6:
 # ============================================================
 # Tab 7: 三策略比较 / 调频影响（统一月度、年度、多年视图）
 # ============================================================
-with tab7:
+with tab8:
     from streamlit_app.performance import render_performance
     render_performance(PROJECT_ROOT)
 
@@ -3066,7 +3318,7 @@ with tab7:
 # ============================================================
 # Tab 8: 基金对比 —— 与「基金走势」同一套组件：多基金同图、可拖动缩放、日/月/年线、区间指标
 # ============================================================
-with tab8:
+with tab9:
     with st.container(key="cmp_head"):
         st.markdown('<div class="sec-head"><span class="t">基金对比</span>'
                     '<span class="r">回测资产 + 全市场场外基金 · 输入名称或代码即提示</span></div>',
@@ -3112,9 +3364,109 @@ with tab8:
 
 
 # ============================================================
-# Tab 9: 指数估值 —— 蛋卷估值快照 + 近10年 PE/PB 走势（仅展示，不进入策略计算）
+# Tab 10: 提醒（偏离 / 估值 / 体检）—— 全部按我持仓的基金算
 # ============================================================
-with tab9:
+def _alert_card(level, title, body, tip=""):
+    _cls = {"urgent": "warn", "warn": "warn", "info": "", "ok": "calm"}.get(level, "")
+    _tip = f'<div class="m">{tip}</div>' if tip else ""
+    return (f'<div class="sig {_cls}"><div class="main"><div class="t">{title}</div>'
+            f'<div class="m">{body}</div>{_tip}</div></div>')
+
+
+with tab10:
+    st.subheader("提醒 · 按我持仓的基金算")
+    st.caption("三类提醒分开看：偏离是「该不该调仓」，估值是「贵不贵」，体检是「账户本身怎么样」。")
+
+    # 估值数据（蛋卷快照）按代码索引
+    _val_by_code = {}
+    try:
+        from allweather import valuation as _VAL
+        _snap = _VAL.load_snapshot()
+        if not _snap.empty:
+            for _r in _snap.to_dict("records"):
+                _dd = _VAL.drawdown_10y(_r["代码"])
+                _tot, _vs, _ps, _lb = _VAL.score(_r["PE百分位"], _r["PB百分位"], _dd)
+                _val_by_code[str(_r["代码"])] = {
+                    "name": _r["名称"], "pe_pct": _r["PE百分位"] if pd.notna(_r["PE百分位"]) else None,
+                    "pb_pct": _r["PB百分位"] if pd.notna(_r["PB百分位"]) else None,
+                    "score": _tot, "label": _lb,
+                    "asof": f'{pd.Timestamp(_snap["数据日"].max()):%Y/%m/%d}',
+                }
+    except Exception:  # noqa: BLE001
+        _val_by_code = {}
+
+    _bench_for_alert = {}
+    if acct is not None and len(_acct_daily) > 1:
+        _bd = BM.replay_target(w, acct.get("created"), nav_getter=HG.nav_series)
+        if len(_bd) > 1:
+            _bench_for_alert["项目默认基金"] = _bd
+        _bs = BM.strategy_curve(_BENCH_COL.get(acct.get("strategy"), ""), start=acct.get("created"))
+        if _bs is not None and len(_bs) > 1:
+            _bench_for_alert["策略理论"] = _bs
+
+    _al = AL.compute(
+        mv=_hg_mv, target_w=_hg_w, holdings=holdings, slot_label=HG.SLOT_LABEL,
+        val_by_code=_val_by_code, daily=_acct_daily if acct is not None else None,
+        cash=float(_acct_cash or 0),         pos=_acct_pos if acct is not None else {},
+        cost=_acct_cost if acct is not None else {}, bench=_bench_for_alert,
+        slot_of_code=lambda c: HG.slot_of(c, holdings),
+    )
+
+    _A, _B = st.columns([1.15, 1], gap="large")
+    with _A:
+        st.markdown("**偏离提醒**")
+        if not _al["偏离"]:
+            st.markdown('<div class="sig calm"><div class="main">'
+                        '<div class="t">所有位置都在目标附近</div>'
+                        '<div class="m">偏离都小于 3 个百分点，月末再看即可</div></div></div>',
+                        unsafe_allow_html=True)
+        else:
+            for x in _al["偏离"]:
+                st.markdown(_alert_card(
+                    x["level"], x["label"], x["text"],
+                    "偏离 ≥12pp 建议尽快调；3~12pp 可以等月末一起调"), unsafe_allow_html=True)
+        st.markdown("**账户体检**")
+        if not _al["体检"]:
+            st.caption("录入成交后这里会给出收益、回撤、现金占比等提醒。")
+        for x in _al["体检"]:
+            st.markdown(_alert_card(x["level"], x["text"], x.get("tip", "")), unsafe_allow_html=True)
+    with _B:
+        st.markdown("**估值提醒**")
+        if not _al["估值"]:
+            st.caption("持仓的基金暂时没有对应的指数估值数据（蛋卷快照按指数代码收录，"
+                       "单只场外基金可能匹配不上）。")
+        else:
+            for x in _al["估值"]:
+                st.markdown(_alert_card(
+                    x["level"], f'{x["name"]}（{x["code"]}）',
+                    f'评分 {x["score"]} · {x["label"]}：{x["action"]}'
+                    + (f' · PE/PB 百分位较高者 {x["pct"]:.0f}%' if x.get("pct") is not None else ""),
+                    "估值只作加减仓参考，不进策略信号；评分 ≥18 猎杀区、≤6 泡沫区"),
+                    unsafe_allow_html=True)
+        _m = _al["指标"]
+        if _m:
+            st.divider()
+            st.markdown("**关键指标**")
+            _kv = []
+            for k, v in _m.items():
+                if isinstance(v, dict):
+                    continue
+                if k == "现金占比":
+                    _kv.append([k, f"{v*100:.1f}%"])
+                elif k in ("累计收益", "最大回撤"):
+                    _kv.append([k, f'<span class="{"up" if v >= 0 else "down"}">{v*100:+.2f}%</span>'])
+                elif k.startswith("对比"):
+                    _kv.append([k, f'<span class="{"up" if v >= 0 else "down"}">{v*100:+.2f}pp</span>'])
+                else:
+                    _kv.append([k, str(v)])
+            if _kv:
+                _render_table([("指标", "left"), ("数值", "right")], _kv)
+
+
+# ============================================================
+# Tab 11: 指数估值 —— 蛋卷估值快照 + 近10年 PE/PB 走势（仅展示，不进入策略计算）
+# ============================================================
+with tab11:
     _vp = _valuation_payload()
     if not _vp:
         with st.container(key="val_head"):

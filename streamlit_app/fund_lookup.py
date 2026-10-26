@@ -94,6 +94,22 @@ def _purchase_map() -> dict:
     return out
 
 
+def is_otc(code: str) -> bool | None:
+    """这只基金能不能在支付宝（场外）申购？查不到返回 None。
+
+    申购状态是「开放申购 / 限大额」等就算场外可买；「场内」「暂停申购」不算。
+    """
+    info = _purchase_map().get(str(code).strip())
+    if not info:
+        return None
+    buy = str(info.get("buy", "") or "").strip()
+    if not buy:
+        return None
+    if "开放申购" in buy or "限大额" in buy:
+        return True
+    return False
+
+
 def name_map() -> dict:
     """代码 → 名称。优先用 akshare 全市场基金名录的本地缓存，没有名字则回落到空串。"""
     global _NM
