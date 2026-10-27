@@ -5,7 +5,7 @@ import unittest
 
 import pandas as pd
 
-from allweather.sim_account import MONEY_SIDES, fund_pnl, replay
+from allweather.sim_account import MONEY_SIDES, fund_pnl, replay, rounds
 
 
 def _prices(days=4, value=1.0):
@@ -126,6 +126,65 @@ class TestFundPnl(unittest.TestCase):
                          "nav": 1.0, "fee": 0.0}], _nav([1.2, 1.3]))
         self.assertEqual(len(pnl), 2)
         self.assertAlmostEqual(float(pnl.iloc[-1]), 100 * 1.3 - 100.0, places=6)
+
+
+class TestRounds(unittest.TestCase):
+    """持仓轮次：一轮 = 从建仓到份额归零。清仓后要能算出当时的盈亏、拿多久。"""
+
+    def test_clear_out_records_pnl_and_days(self):
+        rs = rounds([
+            {"date": "2024-01-02", "side": "买入", "code": "A", "shares": 1000.0, "nav": 1.0, "fee": 1.0},
+            {"date": "2024-02-02", "side": "卖出", "code": "A", "shares": 1000.0, "nav": 1.2, "fee": 1.2},
+        ])
+        self.assertEqual(len(rs), 1)
+        r = rs[0]
+        self.assertTrue(r["closed"])
+        self.assertEqual(r["close"], "2024-02-02")
+        self.assertEqual(r["days"], 31)
+        self.assertAlmostEqual(r["pnl"], 1200.0 - 1.2 - (1000.0 + 1.0), places=2)   # 两头的手续费都算
+        self.assertAlmostEqual(r["ret"], r["pnl"] / r["buy_amount"], places=6)
+
+    def test_partial_sell_is_not_a_round(self):
+        rs = rounds([
+            {"date": "2024-01-02", "side": "买入", "code": "A", "shares": 1000.0, "nav": 1.0, "fee": 0.0},
+            {"date": "2024-01-03", "side": "卖出", "code": "A", "shares": 400.0, "nav": 1.5, "fee": 0.0},
+        ])
+        self.assertFalse(rs[0]["closed"])
+        self.assertIsNone(rs[0]["pnl"])
+        self.assertAlmostEqual(rs[0]["shares_left"], 600.0, places=6)
+
+    def test_sell_then_buy_again_starts_a_new_round(self):
+        rs = rounds([
+            {"date": "2024-01-02", "side": "买入", "code": "A", "shares": 100.0, "nav": 1.0, "fee": 0.0},
+            {"date": "2024-01-05", "side": "卖出", "code": "A", "shares": 100.0, "nav": 1.1, "fee": 0.0},
+            {"date": "2024-02-01", "side": "买入", "code": "A", "shares": 200.0, "nav": 1.2, "fee": 0.0},
+        ])
+        self.assertEqual([r["closed"] for r in rs], [True, False])
+        self.assertAlmostEqual(rs[0]["pnl"], 10.0, places=6)
+        self.assertEqual(rs[1]["open"], "2024-02-01")
+        self.assertAlmostEqual(rs[1]["buy_amount"], 240.0, places=6)   # 新一轮不能把上一轮的成本带进来
+
+    def test_money_sides_and_other_codes_are_ignored(self):
+        rs = rounds([
+            {"date": "2024-01-02", "side": "转入", "code": "", "shares": 5000.0},
+            {"date": "2024-01-02", "side": "买入", "code": "A", "shares": 10.0, "nav": 1.0, "fee": 0.0},
+            {"date": "2024-01-03", "side": "转出", "code": "", "shares": 100.0},
+            {"date": "2024-01-04", "side": "卖出", "code": "B", "shares": 5.0, "nav": 2.0, "fee": 0.0},
+        ])
+        self.assertEqual(len(rs), 2)                     # A 一轮、B 一轮（缺买入的补录卖出也保留）
+        self.assertFalse([r for r in rs if r["code"] == "A"][0]["closed"])
+        _b = [r for r in rs if r["code"] == "B"][0]
+        self.assertTrue(_b["closed"])
+        self.assertIsNone(_b["ret"])                     # 没有买入额，算不出收益率，但不能报错
+
+    def test_sell_without_position_closes_at_zero(self):
+        """补录时多卖了（份额记错）：不崩，按清仓处理。"""
+        rs = rounds([
+            {"date": "2024-01-02", "side": "买入", "code": "A", "shares": 100.0, "nav": 1.0, "fee": 0.0},
+            {"date": "2024-01-03", "side": "卖出", "code": "A", "shares": 120.0, "nav": 1.0, "fee": 0.0},
+        ])
+        self.assertTrue(rs[0]["closed"])
+        self.assertAlmostEqual(rs[0]["pnl"], 20.0, places=6)
 
 
 if __name__ == "__main__":

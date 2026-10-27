@@ -163,6 +163,87 @@ def fund_pnl(trades, nav: pd.Series) -> pd.Series:
     return pd.Series(out, dtype=float)
 
 
+def rounds(trades, tol: float = 1e-6) -> list[dict]:
+    """把成交切成「一次建仓 → 一站清仓」的若干轮 —— 用来回答「清仓那次到底赚了多少」。
+
+    一只基金可能被清仓多次（卖了又买），所以轮次以**份额归零**为界，而不是按基金代码汇总：
+    卖出后剩余份额 ≤ tol 就算这一轮清仓（close 记那天），之后再买入开始新一轮。
+
+    Returns:
+        每轮一个 dict：``code/open/close/days/closed/shares_bought/shares_left/
+        buy_amount/sell_amount/fee/pnl/ret/buy_n/sell_n/nav``
+        - ``close`` / ``pnl`` / ``ret`` 在未清仓（还在手上）时是 ``None``
+        - ``pnl`` = 累计卖出净额 − 累计买入总额（买入含手续费、卖出扣手续费）
+        - ``ret`` = pnl / buy_amount，补录残缺（只有卖出没有买入）时为 ``None``
+        - ``nav`` = 清仓那笔的成交净值
+    """
+    items = []
+    for k, t in enumerate(trades or []):
+        if t.get("side") not in ("买入", "卖出"):
+            continue                       # 转入 / 转出是账户层面的钱，和单只基金无关
+        sh = float(t.get("shares") or 0)
+        if sh <= 0:
+            continue
+        try:
+            d = pd.Timestamp(t.get("date"))
+        except Exception:  # noqa: BLE001
+            continue
+        items.append((d, k, t.get("side"), str(t.get("code") or ""), sh,
+                      float(t.get("nav") or 0), float(t.get("fee") or 0)))
+    items.sort(key=lambda x: (x[0], x[1]))       # 同一天按录入顺序，先买后卖才不会算错
+
+    out: list[dict] = []
+    live: dict[str, dict] = {}
+
+    def _blank(code: str, d) -> dict:
+        return {"code": code, "open": d, "last": d, "shares": 0.0, "bought": 0.0,
+                "buy_amount": 0.0, "sell_amount": 0.0, "fee": 0.0,
+                "buy_n": 0, "sell_n": 0, "nav": 0.0}
+
+    def _finish(r: dict, close) -> dict:
+        pnl = None if close is None else round(r["sell_amount"] - r["buy_amount"], 2)
+        return {
+            "code": r["code"],
+            "open": r["open"].strftime("%Y-%m-%d"),
+            "close": close.strftime("%Y-%m-%d") if close is not None else None,
+            "days": max(0, ((close or r["last"]) - r["open"]).days),
+            "closed": close is not None,
+            "shares_bought": round(r["bought"], 4),
+            "shares_left": round(r["shares"], 4),
+            "buy_amount": round(r["buy_amount"], 2),
+            "sell_amount": round(r["sell_amount"], 2),
+            "fee": round(r["fee"], 2),
+            "pnl": pnl,
+            "ret": (pnl / r["buy_amount"]) if (pnl is not None and r["buy_amount"] > 0) else None,
+            "buy_n": r["buy_n"],
+            "sell_n": r["sell_n"],
+            "nav": round(r["nav"], 4),
+        }
+
+    for d, _k, side, code, sh, px, fee in items:
+        r = live.get(code)
+        if r is None:
+            r = live[code] = _blank(code, d)
+        r["last"] = d
+        r["fee"] += fee
+        if side == "买入":
+            r["shares"] += sh
+            r["bought"] += sh
+            r["buy_amount"] += sh * px + fee
+            r["buy_n"] += 1
+        else:
+            r["shares"] -= sh
+            r["sell_amount"] += sh * px - fee
+            r["sell_n"] += 1
+            r["nav"] = px
+            if r["shares"] <= tol:            # 份额归零 = 这一轮清仓
+                out.append(_finish(r, d))
+                live.pop(code, None)
+    for r in live.values():
+        out.append(_finish(r, None))
+    return sorted(out, key=lambda x: (x["open"], x["code"]))
+
+
 def stats(daily: pd.DataFrame) -> dict:
     """净值曲线指标：累计收益、最大回撤。"""
     if daily is None or not len(daily):

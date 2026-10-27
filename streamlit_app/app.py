@@ -24,7 +24,8 @@ from allweather.rebalance import (
     ETF_META,
 )
 from allweather.sim_account import (load_acct, save_acct, stats as acct_stats,
-                                  fund_pnl as _fund_pnl, MONEY_SIDES as _MONEY_SIDES)
+                                  fund_pnl as _fund_pnl, rounds as _acct_rounds,
+                                  MONEY_SIDES as _MONEY_SIDES)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fund_lookup as FL
 import fund_search as FS
@@ -305,6 +306,7 @@ hr{ border-color:var(--line); margin:1.6rem 0; }
 .pf-detail .pd-grid .v{ font-size:14px; font-weight:650; margin-top:2px; font-variant-numeric:tabular-nums; }
 .pf-detail .pd-grid .v.up{ color:var(--red); }
 .pf-detail .pd-grid .v.down{ color:var(--green); }
+.pf-detail.is-closed{ border-left-color:var(--line-strong); }   /* 已清仓：灰边，和「在手上」的蓝边区分 */
 @media(max-width:900px){ .pf-detail .pd-grid{ grid-template-columns:repeat(3,1fr); row-gap:14px; } }
 /* 买卖标记：红买绿卖，和支付宝走势图里的「买入 / 卖出」气泡同色 */
 .pf-badge{
@@ -2002,10 +2004,13 @@ def _hg_mv_by_slot():
 
 _hg_mv = _hg_mv_by_slot()
 _hg_configured_codes = set(HG.all_codes(holdings))
+# 「不在启用位置里」的份额：配置里删掉的旧代码，以及**位置被关掉、但账上还留着**的基金。
+# 只按 all_codes 判断会把第二种漏掉 —— 那样这笔钱既不在列表里、也不进总金额，账就对不上了。
+_hg_active_slot_codes = {c for s in HG.active(holdings) for c in HG.codes(holdings[s])}
 _hg_other_mv = {
     c: sh * float(_hg_nav_on(None, _hg_panel.index[-1], c) or 0) if len(_hg_panel) else 0.0
     for c, sh in _acct_pos.items()
-    if sh > 0 and c not in _hg_configured_codes
+    if sh > 0 and c not in _hg_active_slot_codes
 }
 
 
@@ -2074,11 +2079,14 @@ def _hg_plan() -> dict:
                                "nav": round(it["px"], 4), "fee": 0.0})
                 by_code[it["code"]] = {"side": side, "amount": amt, "qty": qty}
             rows.append(it)
-    # 配置里已经没有、但账上还留着份额的代码：占着总资产却不在目标权重里
-    other = [{"code": c, "mv": v} for c, v in (_hg_other_mv or {}).items() if v > 0]
+    # 不在启用位置里、但账上还留着份额的代码：占着总资产却不在目标权重里
+    other = [{"code": c, "mv": v, "in_cfg": c in _hg_configured_codes}
+             for c, v in (_hg_other_mv or {}).items() if v > 0]
     cap0 = float((acct or {}).get("capital", 0) or 0)
     total = mv_total + sum(o["mv"] for o in other) + cash
-    return {"asset": asset, "cash": cash, "mv": mv_total, "total": total, "other": other,
+    return {"asset": asset, "cash": cash, "mv": mv_total,
+            "mv_all": mv_total + sum(o["mv"] for o in other), "total": total,
+            "other": other,
             "rows": rows, "orders": orders, "by_code": by_code,
             "buy": buy_total, "sell": sell_total, "today": today_pnl,
             "pnl": (total - cap0) if cap0 else 0.0,
@@ -2087,6 +2095,28 @@ def _hg_plan() -> dict:
 
 
 _plan = _hg_plan()
+
+
+def _hg_other_item(code: str, why: str = "位置已关闭") -> dict:
+    """「不在启用位置里、账上还有份额」的一只基金 → 与 `_pf_row` 同结构的条目。
+
+    这样列表里点它也能展开走势与累计盈亏（不然点了只剩一句说明，等于只能看不能查）。
+    """
+    _nav = _nav_of_code(code)
+    px = float(_nav.iloc[-1]) if len(_nav) else 0.0
+    px_prev = float(_nav.iloc[-2]) if len(_nav) > 1 else px
+    sh = float(_acct_pos.get(code, 0) or 0)
+    cst = float(_acct_cost.get(code, 0) or 0)
+    _meta = HG.fund_meta(holdings, code)[1] or {}
+    return {
+        "code": code, "f": _meta, "slot": why, "x": 1.0, "slot_n": 1,
+        "px": px, "px_prev": px_prev, "shares": sh, "cost": cst, "mv": sh * px,
+        "pl": ((px / cst - 1) if (cst > 0 and px > 0) else None),
+        "otc": HG.is_otc(_meta) if _meta else (HG.default_unit(code) == "份额"),
+        "w_now": ((sh * px / _plan["asset"]) if _plan["asset"] else 0.0), "w_tgt": None,
+        "side": "", "qty": 0.0, "amount": 0.0, "note": "", "why": why,
+        "dev": 0.0, "slot_first": True,
+    }
 
 
 def _pf_sign(v: float) -> str:
@@ -2133,7 +2163,8 @@ def _pf_row(it: dict) -> dict:
     day_pct = ((px / px_prev - 1) * 100) if (px_prev > 0 and held) else None
     hold = it["mv"] - shares * cost
     hold_pct = it["pl"] * 100 if it["pl"] is not None else None
-    dev = it["w_now"] - it["w_tgt"]
+    w_tgt = it.get("w_tgt")            # None = 不在任何启用位置里（没有目标权重）
+    dev = (it["w_now"] - w_tgt) if w_tgt is not None else 0.0
     badge, badge_cls = _pf_badge_parts(it)
     return {
         "code": code,
@@ -2148,9 +2179,9 @@ def _pf_row(it: dict) -> dict:
         "hold_sub": (f"{_pf_num(hold_pct, 2)}%" if (held and hold_pct is not None) else ""),
         "hold_cls": _pf_sign(hold) if held else "",
         "w": f'{it["w_now"] * 100:.1f}%',
-        "wtgt": f'{it["w_tgt"] * 100:.1f}%',
-        "dev": "—" if abs(dev) < 0.005 else f"{dev * 100:+.1f}pp",
-        "dev_cls": "" if abs(dev) < 0.005 else _pf_sign(dev),
+        "wtgt": "—" if w_tgt is None else f"{w_tgt * 100:.1f}%",
+        "dev": ("—" if (w_tgt is None or abs(dev) < 0.005) else f"{dev * 100:+.1f}pp"),
+        "dev_cls": "" if (w_tgt is None or abs(dev) < 0.005) else _pf_sign(dev),
         "badge": badge,
         "badge_cls": badge_cls,
     }
@@ -2509,6 +2540,17 @@ _PNL_TPL = r"""<style>__CSS__</style>
     });
     g += '<line x1="' + L + '" x2="' + (W - RT) + '" y1="' + y0.toFixed(1) + '" y2="' + y0.toFixed(1)
        + '" stroke="#CBD5E1" stroke-width="1" stroke-dasharray="4 4"/>';
+    // 清仓日竖线（已清仓的基金才有）：标记「这天之后就不再拿着了」，之后是平的余额
+    if (D.mark) {
+      const mi = idxOf.get(D.mark);
+      if (mi !== undefined && mi >= start && mi < start + count) {
+        const X = xs(mi).toFixed(1);
+        g += '<line x1="' + X + '" x2="' + X + '" y1="' + top + '" y2="' + bot
+           + '" stroke="#94A3B8" stroke-width="1" stroke-dasharray="4 3"/>';
+        g += '<text x="' + clamp(xs(mi) + 6, L + 4, W - RT - 46).toFixed(1) + '" y="' + (top + 11) +
+             '" font-size="10.5" fill="#64748B">' + esc(D.markLabel || '清仓') + '</text>';
+      }
+    }
     // 折线 + 零轴上下分别填红/绿（涨红跌绿）
     let d = '', firstX = null, lastX = null;
     for (let i = start; i < start + count && i < n; i++) {
@@ -2607,11 +2649,14 @@ _PNL_TPL = r"""<style>__CSS__</style>
 
 
 def _pnl_chart_html(series, trades=None, height=200, store="awPnl.fund",
-                    default_range="全部", heading="累计盈亏"):
+                    default_range="全部", heading="累计盈亏",
+                    mark=None, mark_label="清仓"):
     """单只基金的累计盈亏曲线（元）：零轴上下分别填红/绿，标出这只基金的买卖点。
 
     和 `_scroll_chart_html` 那张净值图分开：净值图上读不出「我赚了多少钱」，
     这张图直接用元为单位，和支付宝「累计盈亏」同口径。
+
+    ``mark``：竖虚线 + 角标的日期（`YYYY/MM/DD`，已清仓的基金标清仓那天）。
     """
     dates = series.index.strftime("%Y/%m/%d").tolist()
     values = [round(float(v), 2) for v in series.values]
@@ -2626,7 +2671,8 @@ def _pnl_chart_html(series, trades=None, height=200, store="awPnl.fund",
                    for lb in labels)
     payload = json.dumps({"dates": dates, "values": values, "trades": trades or [],
                           "ranges": ranges, "height": int(height), "store": store,
-                          "defaultRange": default_range}, ensure_ascii=False,
+                          "defaultRange": default_range,
+                          "mark": mark or "", "markLabel": mark_label}, ensure_ascii=False,
                          allow_nan=False).replace("<", "\\u003c")
     return (_PNL_TPL.replace("__CSS__", _PNL_CSS).replace("__HEADING__", heading)
             .replace("__BTNS__", btns).replace("__DATA__", payload))
@@ -2657,7 +2703,8 @@ def _pf_detail(it: dict) -> None:
         f'<div class="pd-name">{html_escape(name)}</div>'
         f'<div class="pd-sub">{code} · {"场外" if it["otc"] else "场内"} · '
         f'{html_escape(HG.SLOT_LABEL.get(it["slot"], it["slot"]))}</div>'
-        '</div>' + _pf_badge(it) + '</div>'
+        '</div>' + (f'<span class="pf-badge warn">{html_escape(it["why"])}</span>'
+                    if it.get("why") else _pf_badge(it)) + '</div>'
         '<div class="pd-grid">'
         + "".join(f'<div><div class="k">{k}</div><div class="v {c}">{v}</div></div>'
                   for k, v, c in _cells)
@@ -2666,7 +2713,14 @@ def _pf_detail(it: dict) -> None:
     )
 
     _tr = _code_trades(code)
-    _ser = _hg_panel[code].dropna() if code in _hg_panel.columns else pd.Series(dtype=float)
+    # 用 _nav_of_code 而不是 _hg_panel：位置关掉／配置删掉的基金不在面板里，但它们自己仍然有净值
+    _ser = _nav_of_code(code)
+    if not held:
+        _cl = [r for r in _closed_rounds() if r["code"] == code]
+        if _cl:
+            st.caption(f"这一只已经清仓（最近一次 {_cn_date(_cl[0]['close'])}，"
+                       f"当时累计 {_pf_num(float(_cl[0]['pnl'] or 0), 2)} 元）—— "
+                       "清仓那天赚了多少、拿了多久、期间最高最低，都在页面下方「已清仓」里。")
     if len(_ser) < 2:
         st.info("这只基金还没有净值数据，拉取后才有走势图（页底「拉取缺的净值」）。")
     else:
@@ -2718,6 +2772,228 @@ def _pf_detail(it: dict) -> None:
         st.markdown("**这只基金的成交**")
         _render_table([("日期", "left"), ("类型", "left"), ("数量", "right"),
                        ("成交净值", "right"), ("手续费", "right")], _rows)
+
+# ============================================================
+# 已清仓：份额归零的那一轮，赚了多少、拿了多久 —— 从成交记录还原，不依赖基金是否还在配置里
+# ============================================================
+_CL_LIST_CSS = r"""
+:host{display:block}
+.tbl{font:13px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Noto Sans SC","Microsoft YaHei",sans-serif;
+  color:#0F172A;background:#fff;border:1px solid #E2E8F0;border-radius:14px;overflow:auto;max-height:330px}
+.hd,.rw{display:grid;grid-template-columns:minmax(0,2.2fr) 104px 74px 112px 92px;gap:10px;
+  align-items:center;padding:10px 14px}
+.hd{background:#F8FAFC;border-bottom:1px solid #E2E8F0;font-size:12px;color:#64748B;
+  position:sticky;top:0;z-index:2}
+.hd .r{text-align:right}
+.rw{border-bottom:1px solid #F1F5F9;cursor:pointer;transition:background .12s}
+.rw:last-child{border-bottom:0}
+.rw:hover{background:#F8FAFC}
+.rw:focus-visible{outline:2px solid #3B82F6;outline-offset:-2px}
+.rw.on{background:#EFF6FF;box-shadow:inset 3px 0 0 #3B82F6}
+.nm{font-size:13.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sub{font-size:11.5px;color:#94A3B8;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.num{text-align:right;font-variant-numeric:tabular-nums;font-size:13px;font-weight:600}
+.num .sub{font-weight:400;opacity:.78;color:inherit}
+.mid{text-align:right;font-variant-numeric:tabular-nums;font-size:13px;color:#475569}
+.up{color:#C52828}
+.down{color:#16703B}
+@media(max-width:900px){
+  .hd,.rw{grid-template-columns:minmax(0,1fr) 96px 88px;padding:9px 12px;gap:8px}
+  .c-day,.c-days{display:none}
+}
+"""
+
+_CL_LIST_JS = r"""
+export default function (c) {
+  const { data, setStateValue, parentElement } = c;
+  const D = data || {};
+  Array.from(parentElement.children).forEach(el => {
+    if (el && el.classList && el.classList.contains('tbl')) el.remove();
+  });
+  const rows = D.rows || [], sel = D.selected || '';
+  const esc = s => String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const rowHtml = r => '<div class="rw' + (r.key === sel ? ' on' : '') + '" role="row" tabindex="0"'
+    + ' data-key="' + esc(r.key) + '">'
+    + '<div class="c-name"><div class="nm">' + esc(r.name) + '</div>'
+    + '<div class="sub">' + esc(r.sub) + '</div></div>'
+    + '<div class="mid c-day">' + esc(r.close) + '</div>'
+    + '<div class="mid c-days">' + esc(r.days) + '</div>'
+    + '<div class="num ' + esc(r.cls) + '">' + esc(r.pnl) + '</div>'
+    + '<div class="num ' + esc(r.cls) + '">' + esc(r.ret) + '</div>'
+    + '</div>';
+  const root = document.createElement('div');
+  root.className = 'tbl';
+  root.setAttribute('role', 'table');
+  root.innerHTML = '<div class="hd"><div>已清仓的基金</div><div class="r c-day">清仓日</div>'
+    + '<div class="r c-days">持有</div><div class="r">累计盈亏</div><div class="r">收益率</div></div>'
+    + rows.map(rowHtml).join('');
+  parentElement.appendChild(root);
+  root.querySelectorAll('.rw').forEach(el => {
+    const pick = () => { if (el.dataset.key !== sel) setStateValue('picked', el.dataset.key); };
+    el.addEventListener('click', pick);
+    el.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); }
+    });
+  });
+  return () => root.remove();
+}
+"""
+
+_CL_LIST = st.components.v2.component("aw_closed_list", css=_CL_LIST_CSS, js=_CL_LIST_JS)
+
+
+def _cl_list(rows: list[dict], key: str = "cl_list"):
+    """渲染已清仓列表并返回选中那一轮的 key（code@清仓日）；没点过就选第一行。"""
+    if not rows:
+        return None
+    keys = [r["key"] for r in rows]
+    _state = st.session_state.get(key)
+    picked = _state.get("picked") if isinstance(_state, dict) else None
+    if picked not in keys:
+        picked = keys[0]
+    res = _CL_LIST(key=key, data={"rows": rows, "selected": picked},
+                   default={"picked": picked}, on_picked_change=lambda: None)
+    out = res.get("picked") if hasattr(res, "get") else None
+    return out if out in keys else picked
+
+
+def _closed_rounds() -> list[dict]:
+    """已清仓的持仓轮次，最近的排前面；`seq` 是这只基金第几次清仓（按时间正序数）。"""
+    if not acct:
+        return []
+    _seq: dict[str, int] = {}
+    out = []
+    for r in _acct_rounds(acct.get("trades") or []):
+        if not r["closed"]:
+            continue
+        _seq[r["code"]] = _seq.get(r["code"], 0) + 1
+        out.append({**r, "seq": _seq[r["code"]]})
+    return sorted(out, key=lambda x: (x["close"] or "", x["code"]), reverse=True)
+
+
+def _closed_section() -> None:
+    """「我的持仓」底部的已清仓区块：一轮一行，点开看当时的盈亏曲线与成交。"""
+    _rows_all = _closed_rounds()
+    if acct is None:
+        return
+    _sum = sum(float(r["pnl"] or 0) for r in _rows_all)
+    _sum_col = "#C52828" if _sum > 0.005 else ("#16703B" if _sum < -0.005 else "#475569")
+    _head_right = (f'{len(_rows_all)} 轮 · 累计兑现 '
+                   f'<b style="color:{_sum_col};font-variant-numeric:tabular-nums">'
+                   f'{_pf_num(_sum, 2)}</b> 元') if _rows_all else "还没有清仓过"
+    st.markdown(
+        '<div class="sec-head"><span class="t">已清仓</span>'
+        f'<span class="r">{_head_right}</span></div>',
+        unsafe_allow_html=True,
+    )
+    if not _rows_all:
+        st.caption("卖出后份额归零，那一轮就会自动记到这里：清仓日、持有天数、清仓当时的累计盈亏都留着，"
+                   "不用事后自己记。")
+        return
+    st.caption("卖出后份额归零就算清仓（卖了又买是新的一轮）：这里留着清仓那天赚了多少、拿了多久，"
+               "点一行看当时的走势与成交。清仓不影响账户总资产，钱已经回到现金里。")
+    _cfg_codes = set(HG.all_codes(holdings))
+    _rows = [{
+        "key": f'{r["code"]}@{r["close"]}',
+        "name": FL.fund_name(r["code"]) or r["code"],
+        "sub": f'{r["code"]} · 第 {r["seq"]} 次清仓'
+               + (" · 仍在配置里" if r["code"] in _cfg_codes else ""),
+        "close": _cn_date(r["close"]),
+        "days": f'{r["days"]} 天',
+        "pnl": _pf_num(float(r["pnl"] or 0), 2),
+        "ret": (f'{r["ret"] * 100:+.2f}%' if r["ret"] is not None else "—"),
+        "cls": _pf_sign(float(r["pnl"] or 0)),
+    } for r in _rows_all]
+    _picked = _cl_list(_rows)
+    _sel = next((r for r in _rows_all if f'{r["code"]}@{r["close"]}' == _picked), None)
+    if _sel:
+        _cl_detail(_sel)
+
+
+def _cl_detail(r: dict) -> None:
+    """一次清仓的「当时的场景」：清仓时累计盈亏、收益率、持有天数、曲线（标清仓日）、那一轮的成交。"""
+    code = r["code"]
+    name = FL.fund_name(code) or code
+    _pnl_v, _ret = float(r["pnl"] or 0), r["ret"]
+    _meta = HG.fund_meta(holdings, code)[1]
+    _in_cfg = bool(_meta)
+    _cells = [
+        ("清仓时累计盈亏", f"¥{_pnl_v:+,.2f}", _pf_sign(_pnl_v)),
+        ("累计收益率", (f"{_ret * 100:+.2f}%" if _ret is not None else "—"),
+         _pf_sign(_ret or 0)),
+        ("投入成本", f"¥{r['buy_amount']:,.0f}", ""),
+        ("卖出回收", f"¥{r['sell_amount']:,.0f}", ""),
+        ("持有天数", f"{r['days']} 天", ""),
+        ("手续费", f"¥{r['fee']:,.2f}", ""),
+    ]
+    st.markdown(
+        '<div class="pf-detail is-closed">'
+        '<div class="pd-top"><div>'
+        f'<div class="pd-name">{html_escape(name)}</div>'
+        f'<div class="pd-sub">{code} · 建仓 {_cn_date(r["open"])} → 清仓 {_cn_date(r["close"])} · '
+        f'第 {r["seq"]} 次清仓 · {r["buy_n"]} 买 / {r["sell_n"]} 卖'
+        f'{" · 仍在配置里" if _in_cfg else " · 已不在配置里"}</div>'
+        '</div><span class="pf-badge hold">已清仓</span></div>'
+        '<div class="pd-grid">'
+        + "".join(f'<div><div class="k">{k}</div><div class="v {c}">{v}</div></div>'
+                  for k, v, c in _cells)
+        + '</div></div>',
+        unsafe_allow_html=True,
+    )
+
+    # 这一轮的成交（同一只基金清仓多次时，只取这一轮的日期区间）
+    _o, _c = pd.Timestamp(r["open"]), pd.Timestamp(r["close"])
+    _mine = []
+    for t in ((acct or {}).get("trades") or []):
+        if str(t.get("code") or "") != code or t.get("side") not in ("买入", "卖出"):
+            continue
+        try:
+            _d = pd.Timestamp(t.get("date"))
+        except Exception:  # noqa: BLE001
+            continue
+        if _o <= _d <= _c:
+            _mine.append(t)
+    _tr = _code_trades(code)
+    _curve = _code_pnl_curve(code)
+    if len(_curve) > 1:
+        _win = _curve.loc[_o:_c]
+        _hi, _lo = float(_win.max()), float(_win.min())
+        st.iframe(_pnl_chart_html(_curve, trades=_tr, store="awPnl.closed",
+                                  default_range="全部", mark=_cn_date(r["close"]),
+                                  mark_label="清仓"), height=380)
+        st.caption(
+            f"竖虚线是 {_cn_date(r['close'])} 清仓那天：之后份额是 0，曲线停在已经落袋的钱上不再变。"
+            f"持有期间累计盈亏最高 ¥{_hi:+,.0f}（{_cn_date(_win.idxmax())}）、"
+            f"最低 ¥{_lo:+,.0f}（{_cn_date(_win.idxmin())}）—— 和清仓时的数字差多少，就是没卖在最高点的那部分。")
+    else:
+        _nav = _nav_of_code(code)
+        if not len(_nav):
+            st.caption("这只基金还没有净值数据，画不出曲线；上面的数字是按成交净额算的，仍然准确。")
+        else:
+            st.caption(f"这只基金的净值只更新到 {_cn_date(_nav.index[-1])}，"
+                       f"清仓那天（{_cn_date(r['close'])}）的净值还没到，曲线暂时只有一个点 —— "
+                       "等净值更新到那天就会画出来。上面的数字是按成交金额算的，仍然准确。")
+
+    if _mine:
+        _unit = (_meta.get("unit") if _meta else None) or HG.default_unit(code)
+        _rows = []
+        for t in _mine:
+            _side = t.get("side") or "—"
+            _cls = "buy" if _side == "买入" else "sell"
+            _q = (f"{float(t.get('shares', 0)):,.2f} 份" if _unit == "份额"
+                  else f"{float(t.get('shares', 0)):,.0f} 股")
+            _rows.append([
+                _cn_date(t.get("date")),
+                f'<span class="pf-badge {_cls}">{_side}</span>',
+                _q,
+                f'{float(t.get("nav", 0)):.4f}' if float(t.get("nav", 0) or 0) > 0 else "—",
+                f'{float(t.get("fee", 0)):,.2f}' if float(t.get("fee", 0) or 0) else "—",
+            ])
+        st.markdown(f"**这一轮的成交（{len(_rows)} 笔）**")
+        _render_table([("日期", "left"), ("类型", "left"), ("数量", "right"),
+                       ("成交净值", "right"), ("手续费", "right")], _rows)
+
 
 # ============================================================
 # Hero
@@ -3064,20 +3340,23 @@ with tab3:
         _sel, _sel_it = None, None
     else:
         _pf_rows = [_pf_row(it) for it in _plan["rows"]]
-        for _o in _plan["other"]:          # 配置里已删、账上还留份额的代码
-            _pf_rows.append({
-                "code": _o["code"], "slot": "不在配置里", "name": FL.fund_name(_o["code"]) or _o["code"],
-                "tag": "自行处理", "amt": f'{_o["mv"]:,.0f}',
-                "day": "—", "day_sub": "", "day_cls": "",
-                "hold": "—", "hold_sub": "", "hold_cls": "",
-                "w": f'{(_o["mv"] / _plan["asset"] * 100) if _plan["asset"] else 0:.1f}%',
-                "wtgt": "—", "dev": "—", "dev_cls": "",
-                "badge": "自行处理", "badge_cls": "warn", "qty": "", "cost": "", "px": "",
-            })
+        for _o in _plan["other"]:          # 位置关掉了、或配置里已删，账上还留着份额的代码
+            _why = "位置已关闭" if _o.get("in_cfg") else "不在配置里"
+            _r = _pf_row(_hg_other_item(_o["code"], _why))
+            _r.update({"badge": _why, "badge_cls": "warn"})   # 标记换成「为什么不参与调仓」
+            _pf_rows.append(_r)
         _sel = _pf_list(_pf_rows)           # 点一行 → 返回该基金代码（组件里高亮选中行）
         _sel_it = next((it for it in _plan["rows"] if it["code"] == _sel), None)
-        st.caption("点一行展开这只基金的走势与历史买卖点。" if _sel_it
-                   else f"{_sel} 不在配置里（账上还有份额，占着总资产）—— 到「交易记录」核对或补录卖出。")
+        _sel_other = next((o for o in _plan["other"] if o["code"] == _sel), None)
+        if _sel_it:
+            st.caption("点一行展开这只基金的走势与历史买卖点。")
+        elif _sel_other:
+            _why = "位置被关掉了" if _sel_other.get("in_cfg") else "位置已从配置里删掉"
+            st.caption(f"这只基金所在的{_why}（账上还有 ¥{_sel_other['mv']:,.0f}，占着总资产）："
+                       "想卖就到「交易记录」记一笔卖出，想继续拿就把位置重新打开 —— 否则它不参与这一轮的调仓。")
+            _sel_it = _hg_other_item(_sel, "位置已关闭" if _sel_other.get("in_cfg") else "不在配置里")
+        else:
+            st.caption("点一行展开这只基金的走势与历史买卖点。")
 
         if _sel_it:
             _pf_detail(_sel_it)
@@ -3088,6 +3367,9 @@ with tab3:
             st.caption("这些位置没有挂基金（不持有，目标权重已按同桶比例让给其它位置）："
                        + "、".join(HG.SLOT_LABEL[s] for s in _empty_slots)
                        + "。要买就展开页底给它加一只。")
+
+    # ---- 已清仓：从成交记录还原的历史轮次（清仓时赚了多少、拿了多久）----
+    _closed_section()
 
     # ---- 配置区：加删基金、买卖单位、位置开关（低频操作，收在展开里）----
     st.divider()
@@ -3290,28 +3572,30 @@ with tab4:
                  if _it["slot_first"] else ""),
                 _pf_badge(_it),
             ])
-        # 配置里已经没有、但账上还留着份额的代码：占着总资产却不在目标权重里，单独列出来
+        # 不在启用位置里、但账上还留着份额的代码：占着总资产却不在目标权重里，单独列出来
         for _o in _plan["other"]:
+            _why = "位置已关闭" if _o.get("in_cfg") else "不在配置里"
             _rb_rows.append([
                 "其他",
-                f'{FL.fund_name(_o["code"]) or _o["code"]}<br><span class="muted">{_o["code"]} · 不在配置里</span>',
+                f'{FL.fund_name(_o["code"]) or _o["code"]}<br><span class="muted">{_o["code"]} · {_why}</span>',
                 f'{_o["mv"]:,.0f}',
                 f'{(_o["mv"] / _plan["asset"] * 100) if _plan["asset"] else 0:.1f}%',
                 "0.0%", '<span class="muted">—</span>',
-                '<span class="muted">不在配置里，自行处理</span>',
+                f'<span class="muted">{_why}，不参与调仓</span>',
             ])
         _render_table(
             [("位置", "left"), ("我的基金", "left"), ("当前市值(¥)", "right"),
              ("当前权重", "right"), ("目标权重(位置)", "right"), ("偏离", "right"), ("操作", "left")],
             _rb_rows,
-            totals=["合计", "—", f'{_plan["mv"]:,.0f}',
-                    f'{(_plan["mv"] / _plan["asset"] * 100) if _plan["asset"] else 0:.1f}%',
+            totals=["合计", "—", f'{_plan["mv_all"]:,.0f}',
+                    f'{(_plan["mv_all"] / _plan["asset"] * 100) if _plan["asset"] else 0:.1f}%',
                     "100.0%", "—",
                     (f'买 ¥{_plan["buy"]:,.0f} / 卖 ¥{_plan["sell"]:,.0f}'
                      if (_plan["buy"] or _plan["sell"]) else "—")],
             min_width=900,
         )
-        st.caption(f"调仓基数 ¥{_plan['asset']:,.0f} = 持仓 ¥{_plan['mv']:,.0f} + 现金 ¥{_plan['cash']:,.0f}。"
+        st.caption(f"调仓基数 ¥{_plan['asset']:,.0f} = 持仓 ¥{_plan['mv_all']:,.0f} + 现金 ¥{_plan['cash']:,.0f}。"
+                   "「其他」是位置关掉或已删、账上还留着份额的基金，钱在里面但不算进目标权重；"
                    "位置整体偏离 < 0.5% 不用动，省手续费；场内按每手取整，场外按最低申购金额。")
 
         # ---- 一键登记：把这份清单落成成交（相当于批量补录）----
