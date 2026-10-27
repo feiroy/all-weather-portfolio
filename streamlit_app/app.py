@@ -355,7 +355,7 @@ div[data-testid="stAlert"] p{ color:var(--brand-strong); }
 /* ========== 基金走势页：含阶段数字的概览 / 走势分析 ========== */
 /* 基金走势 / 收益日历 / 基金对比 共用同一卡片容器 */
 .st-key-trend_head, .st-key-trend_chart, .st-key-trend_cal, .st-key-cmp_head, .st-key-cmp_chart,
-.st-key-val_head, .st-key-val_table, .st-key-val_chart{
+.st-key-cmp_stage, .st-key-val_head, .st-key-val_table, .st-key-val_chart{
   background:var(--card); border:1px solid var(--line); border-radius:16px;
   padding:24px !important; margin-bottom:24px;
 }
@@ -369,6 +369,17 @@ div[data-testid="stAlert"] p{ color:var(--brand-strong); }
   .st-key-trend_chart iframe,.st-key-trend_chart [data-testid="stElementContainer"]:has(>iframe){height:940px !important;flex-basis:940px !important}
 }
 .st-key-trend_head [data-testid="stHorizontalBlock"]{align-items:center; gap:20px}
+/* 视图切换（单只走势 / 多只对比）：tab 按钮组，与输入控件同圆角、同高度档位 */
+.st-key-trend_mode_switch{margin:0 0 6px}
+.st-key-trend_mode_switch [role="radiogroup"]{gap:2px;padding:3px;background:var(--bg);
+  border:1px solid var(--line-strong);border-radius:12px;width:fit-content}
+.st-key-trend_mode_switch button{border:0 !important;border-radius:9px !important;
+  min-height:34px;height:34px;padding:0 14px;background:transparent;color:var(--sub)}
+.st-key-trend_mode_switch button p{font-size:13px !important;line-height:1.4;color:inherit}
+.st-key-trend_mode_switch button:hover{color:var(--ink)}
+.st-key-trend_mode_switch button[aria-checked="true"]{background:var(--card) !important;
+  box-shadow:0 1px 2px rgba(15,23,42,.08)}
+.st-key-trend_mode_switch button[aria-checked="true"] p{color:var(--brand) !important;font-weight:600}
 .fund-head.flat{border:none; box-shadow:none; padding:0; margin:0; background:transparent}
 .fh-top,.fh-price{flex-wrap:wrap; row-gap:8px}
 .fh-price .fh-date{margin-left:0}
@@ -387,7 +398,7 @@ div[data-testid="stAlert"] p{ color:var(--brand-strong); }
 .stage-return.neutral{color:var(--sub)}
 
 @media(max-width:600px){
-  .st-key-trend_head,.st-key-trend_chart,.st-key-trend_cal,.st-key-cmp_head,.st-key-cmp_chart,.st-key-val_head,.st-key-val_table,.st-key-val_chart{padding:14px !important;margin-bottom:18px}
+  .st-key-trend_head,.st-key-trend_chart,.st-key-trend_cal,.st-key-cmp_head,.st-key-cmp_chart,.st-key-cmp_stage,.st-key-val_head,.st-key-val_table,.st-key-val_chart{padding:14px !important;margin-bottom:18px}
   .stage-metrics{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px 6px}.stage-return{font-size:16px;letter-spacing:-.4px}
   .stage-label{font-size:11px}
   .fh-price .px{font-size:28px}.fh-price .chg{font-size:14px}
@@ -982,10 +993,11 @@ def _sparkline(series, height=58):
     return area
 
 
-def _render_table(columns, rows, totals=None):
+def _render_table(columns, rows, totals=None, min_width=None):
     """渲染 HTML 表格。columns: [(标题, 对齐)]，rows: list[list[str]]。
 
     totals 传入一行（list[str]）时会渲染为高亮的合计行。
+    min_width：给窄屏（手机）用，列多时不再压缩换行，改为在卡片内横向滑动。
     """
     head = "".join(
         f'<th class="{"num" if al=="right" else ""}">{c}</th>' for c, al in columns
@@ -1001,8 +1013,11 @@ def _render_table(columns, rows, totals=None):
             f'<td class="{"num" if columns[i][1]=="right" else ""}">{cell}</td>'
             for i, cell in enumerate(totals)
         ) + "</tr>"
-    st.markdown(f'<table class="tbl"><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>',
-                unsafe_allow_html=True)
+    style = f' style="min-width:{int(min_width)}px"' if min_width else ""
+    table = f'<table class="tbl"{style}><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>'
+    if min_width:
+        table = f'<div class="tblwrap">{table}</div>'
+    st.markdown(table, unsafe_allow_html=True)
 
 
 _nf = f"{ETF_META['nonferr']['name']} ({ETF_META['nonferr']['code']})"
@@ -1507,9 +1522,9 @@ with _hero_cols[1], st.container(key="hero_actions", horizontal=True, horizontal
 # ============================================================
 # Main Tabs
 # ============================================================
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11 = st.tabs(
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs(
     ["信号仪表盘", "目标权重", "我的持仓", "建仓清单", "调仓清单", "实操账户",
-     "基金走势", "回测表现", "基金对比", "提醒", "指数估值"]
+     "基金走势", "回测表现", "提醒", "指数估值"]
 )
 
 # ============================================================
@@ -3199,117 +3214,198 @@ _BT_FIXED = [{"code": f"bt:{a}", "label": f"{ETF_META.get(a, {}).get('code', '')
               "tag": "回测资产"} for a in _ACCT_ASSETS]
 
 with tab7:
-    st.caption("单只基金的走势：区间涨跌、阶段表现、收益日历（日/周/月/年）。"
-               "上面的下拉既能选项目那 8 个回测资产，也能搜全市场基金。")
-    # 统一入口：8 类回测资产（排最前，默认沪深300ETF）+ 全市场 2.8 万只基金，同一个输入即提示的选择框
-    with st.container(key="trend_head"):
-        _h1, _h2 = st.columns([3.5, 1.15], vertical_alignment="center")
-        with _h2:
-            # 自研搜索框：全市场名录只在第一次点开时下载（静态文件），不随页面加载传输（见 fund_search.py）
-            _pick = FS.fund_search("trend_pick", mode="single", fixed=_BT_FIXED, default="bt:hs300",
-                                   placeholder="输入基金名称或代码")
-            asset = _pick[3:] if str(_pick).startswith("bt:") else None
+    # 视图切换：单只走势 / 多只对比（原「基金对比」页合并到这里，少一个标签页）
+    _MODE_S, _MODE_C = "单只走势", "多只对比"
+    with st.container(key="trend_mode_switch"):
+        _mode = st.segmented_control(
+            "视图", [_MODE_S, _MODE_C], default=_MODE_S, key="trend_mode",
+            label_visibility="collapsed",
+            help="单只走势：区间涨跌、阶段表现、收益日历（日/周/月/年）。\n\n"
+                 "多只对比：多只基金同一张图（净值 / 相对起点 / 单期涨跌），可拖动缩放、切日/月/年线。",
+        ) or _MODE_S
+    if _mode == _MODE_S:
+        st.caption("单只基金的走势：区间涨跌、阶段表现、收益日历（日/周/月/年）。"
+                   "上面的下拉既能选项目那 8 个回测资产，也能搜全市场基金。")
+        # 统一入口：8 类回测资产（排最前，默认沪深300ETF）+ 全市场 2.8 万只基金，同一个输入即提示的选择框
+        with st.container(key="trend_head"):
+            _h1, _h2 = st.columns([3.5, 1.15], vertical_alignment="center")
+            with _h2:
+                # 自研搜索框：全市场名录只在第一次点开时下载（静态文件），不随页面加载传输（见 fund_search.py）
+                _pick = FS.fund_search("trend_pick", mode="single", fixed=_BT_FIXED, default="bt:hs300",
+                                       placeholder="输入基金名称或代码")
+                asset = _pick[3:] if str(_pick).startswith("bt:") else None
+                if asset:
+                    # 单位净值（基金公司每晚公布，与支付宝「单位净值/日涨幅」一致） / 场内价格（交易所实时成交价）
+                    _price_mode = st.radio("口径", ["单位净值", "场内价格"], horizontal=True,
+                                           key="trend_price_mode", label_visibility="collapsed",
+                                           help="单位净值：基金公司每晚按持仓算出的每份价值，日涨幅与支付宝一致（分红日已复权）。\n\n"
+                                                "场内价格：ETF 在交易所买卖的成交价（收盘价），会围绕净值小幅溢价/折价。\n\n"
+                                                "累计净值 = 单位净值 + 历年分红，只用于看成立以来的总分红，不适合算涨跌幅。")
+                else:
+                    _price_mode = "净值"
+                    st.caption("单位净值 + 官方日涨幅（分红日复权）")
+
+            _ready, _own = True, None
             if asset:
-                # 单位净值（基金公司每晚公布，与支付宝「单位净值/日涨幅」一致） / 场内价格（交易所实时成交价）
-                _price_mode = st.radio("口径", ["单位净值", "场内价格"], horizontal=True,
-                                       key="trend_price_mode", label_visibility="collapsed",
-                                       help="单位净值：基金公司每晚按持仓算出的每份价值，日涨幅与支付宝一致（分红日已复权）。\n\n"
-                                            "场内价格：ETF 在交易所买卖的成交价（收盘价），会围绕净值小幅溢价/折价。\n\n"
-                                            "累计净值 = 单位净值 + 历年分红，只用于看成立以来的总分红，不适合算涨跌幅。")
+                _own = (_asset_series(asset, price=True) if _price_mode == "场内价格"
+                        else _asset_display_series(asset))
+                _all = _trend_aggregate(_own if _own is not None else prices[asset], "日")
+                _meta = ETF_META.get(asset, {"name": asset, "code": ""})
+                _tag = _CAT.get(asset, "其他")
+                _price_label = "最新场内价格" if _price_mode == "场内价格" else "最新单位净值"
+                _src_note = (f"data/price_{_LIVE_ASSETS.get(asset, asset)}.csv（交易所收盘价）" if _price_mode == "场内价格"
+                             else f"data/nav_detail/{_LIVE_ASSETS.get(asset, asset)}.csv（单位净值 + 官方日涨幅，分红日复权；"
+                                  f"最新值 = 单位净值，与支付宝一致）")
             else:
-                _price_mode = "净值"
-                st.caption("单位净值 + 官方日涨幅（分红日复权）")
+                _code = _pick if str(_pick).isdigit() and len(str(_pick)) == 6 else None
+                if _code and FL.is_stale(_code):
+                    with st.spinner(f"正在拉取 {_code} 最新净值…"):
+                        _fok, _fmsg = FL.fetch_fund(_code)
+                    if not _fok:
+                        if FL.load_cached(_code) is None:
+                            st.error(_fmsg)
+                            _code = None
+                        else:   # 拉取失败但有旧缓存：继续显示旧数据，提示一下
+                            st.caption(f"⚠️ 最新净值拉取失败，显示本地缓存（{_fmsg}）")
+                _own = FL.build_nav(_code) if _code else None
+                _ready = _own is not None and len(_own) >= 2
+                _all = _trend_aggregate(_own, "日") if _ready else pd.Series(dtype=float)
+                _pm = FL._purchase_map().get(_code, {}) if _code else {}
+                _meta = {"name": _pm.get("name") or (FL.fund_name(_code) if _code else "") or (_code or ""),
+                         "code": _code or ""}
+                _tag = _pm.get("type") or "场外基金"
+                _price_label = "最新净值"
+                _src_note = f"rebal/nav/{_code}.csv（复权净值：最新值=单位净值，历史按日增长率含分红还原）"
 
-        _ready, _own = True, None
-        if asset:
-            _own = (_asset_series(asset, price=True) if _price_mode == "场内价格"
-                    else _asset_display_series(asset))
-            _all = _trend_aggregate(_own if _own is not None else prices[asset], "日")
-            _meta = ETF_META.get(asset, {"name": asset, "code": ""})
-            _tag = _CAT.get(asset, "其他")
-            _price_label = "最新场内价格" if _price_mode == "场内价格" else "最新单位净值"
-            _src_note = (f"data/price_{_LIVE_ASSETS.get(asset, asset)}.csv（交易所收盘价）" if _price_mode == "场内价格"
-                         else f"data/nav_detail/{_LIVE_ASSETS.get(asset, asset)}.csv（单位净值 + 官方日涨幅，分红日复权；"
-                              f"最新值 = 单位净值，与支付宝一致）")
+            if _ready and len(_all):
+                _day_chg = float(_all.iloc[-1] / _all.iloc[-2] - 1) if len(_all) > 1 and _all.iloc[-2] > 0 else None
+                _day_cls = "up" if _day_chg is not None and _day_chg > 0 else ("down" if _day_chg is not None and _day_chg < 0 else "neutral")
+                _day_text = f"{_day_chg * 100:+.2f}%" if _day_chg is not None else "—"
+                _latest_text = f"{_all.iloc[-1]:.4f}"
+                _latest_date = f"{_all.index[-1]:%Y/%m/%d}"
+            else:
+                _day_cls, _day_text, _latest_text, _latest_date = "neutral", "—", "—", "暂无有效行情"
+            with _h1:
+                # 最新值、单日涨跌、数据截至三者严格同源：都是该期最后一个交易日
+                st.markdown(
+                    f"""<div class="fund-head flat">
+                      <div class="fh-top">
+                        <span class="fh-name">{html_escape(_meta['name'])}</span>
+                        <span class="fh-code">{_meta['code']}</span>
+                        <span class="fh-tag">{html_escape(_tag)}</span>
+                        {_val_tag_html(asset, _meta.get('code'), _meta.get('name', ''))}
+                      </div>
+                      <div class="fh-price">
+                        <span class="fh-price-label">{_price_label}</span>
+                        <span class="px">{_latest_text}</span>
+                        <span class="chg {_day_cls}"><small>单日</small> {_day_text}</span>
+                        <span class="fh-date">截至 {_latest_date}</span>
+                      </div>
+                    </div>""".replace("\n", "").replace("  ", ""),   # 压成一行：空行+缩进会被 Markdown 当成代码块
+                    unsafe_allow_html=True,
+                )
+            if _ready and len(_all):
+                st.markdown(_stage_summary_html(_stage_rows(_all)), unsafe_allow_html=True)
+
+        if not _ready or _all.empty:
+            st.info("该基金暂无有效行情，请换一只或稍后重试。")
         else:
-            _code = _pick if str(_pick).isdigit() and len(str(_pick)) == 6 else None
-            if _code and FL.is_stale(_code):
-                with st.spinner(f"正在拉取 {_code} 最新净值…"):
-                    _fok, _fmsg = FL.fetch_fund(_code)
-                if not _fok:
-                    if FL.load_cached(_code) is None:
-                        st.error(_fmsg)
-                        _code = None
-                    else:   # 拉取失败但有旧缓存：继续显示旧数据，提示一下
-                        st.caption(f"⚠️ 最新净值拉取失败，显示本地缓存（{_fmsg}）")
-            _own = FL.build_nav(_code) if _code else None
-            _ready = _own is not None and len(_own) >= 2
-            _all = _trend_aggregate(_own, "日") if _ready else pd.Series(dtype=float)
-            _pm = FL._purchase_map().get(_code, {}) if _code else {}
-            _meta = {"name": _pm.get("name") or (FL.fund_name(_code) if _code else "") or (_code or ""),
-                     "code": _code or ""}
-            _tag = _pm.get("type") or "场外基金"
-            _price_label = "最新净值"
-            _src_note = f"rebal/nav/{_code}.csv（复权净值：最新值=单位净值，历史按日增长率含分红还原）"
-
-        if _ready and len(_all):
-            _day_chg = float(_all.iloc[-1] / _all.iloc[-2] - 1) if len(_all) > 1 and _all.iloc[-2] > 0 else None
-            _day_cls = "up" if _day_chg is not None and _day_chg > 0 else ("down" if _day_chg is not None and _day_chg < 0 else "neutral")
-            _day_text = f"{_day_chg * 100:+.2f}%" if _day_chg is not None else "—"
-            _latest_text = f"{_all.iloc[-1]:.4f}"
-            _latest_date = f"{_all.index[-1]:%Y/%m/%d}"
-        else:
-            _day_cls, _day_text, _latest_text, _latest_date = "neutral", "—", "—", "暂无有效行情"
-        with _h1:
-            # 最新值、单日涨跌、数据截至三者严格同源：都是该期最后一个交易日
-            st.markdown(
-                f"""<div class="fund-head flat">
-                  <div class="fh-top">
-                    <span class="fh-name">{html_escape(_meta['name'])}</span>
-                    <span class="fh-code">{_meta['code']}</span>
-                    <span class="fh-tag">{html_escape(_tag)}</span>
-                    {_val_tag_html(asset, _meta.get('code'), _meta.get('name', ''))}
-                  </div>
-                  <div class="fh-price">
-                    <span class="fh-price-label">{_price_label}</span>
-                    <span class="px">{_latest_text}</span>
-                    <span class="chg {_day_cls}"><small>单日</small> {_day_text}</span>
-                    <span class="fh-date">截至 {_latest_date}</span>
-                  </div>
-                </div>""".replace("\n", "").replace("  ", ""),   # 压成一行：空行+缩进会被 Markdown 当成代码块
-                unsafe_allow_html=True,
-            )
-        if _ready and len(_all):
-            st.markdown(_stage_summary_html(_stage_rows(_all)), unsafe_allow_html=True)
-
-    if not _ready or _all.empty:
-        st.info("该基金暂无有效行情，请换一只或稍后重试。")
+            if asset and _own is None:
+                st.warning("单基金历史读取失败，当前使用已有组合行情，历史覆盖可能不完整。")
+            _histories = _trend_chart_data(_all)
+            _daily = _histories["日"]
+            # 控件与SVG同处一个局部组件：视窗、高亮、日期和摘要同步，无跨iframe状态桥接。
+            with st.container(key="trend_chart"):
+                st.iframe(_scroll_chart_html(
+                    _daily["labels"], _daily["prices"], _daily["windows"]["近1月"]["count"],
+                    rets=_daily["rets"], histories=_histories,
+                ), height=850)
+                st.markdown(
+                    f'<div class="sec-note">数据源：{_src_note} · '
+                    f'截至 {_latest_date} · 月/年线取每期最后一条真实记录，未结束期间按最新数据计算。'
+                    f'区间变化以首个可见值为基准（近N月=N个自然月前那天的净值，今年来=去年最后一个交易日），与支付宝历史业绩同口径。</div>',
+                    unsafe_allow_html=True,
+                )
+            # 收益日历：日/周/月/年 格子，按钮与走势分析同款，期间切换在组件内完成（不触发整页重跑）
+            _cal = _calendar_payload(_all)
+            if _cal:
+                with st.container(key="trend_cal"):
+                    st.iframe(_calendar_html(_cal), height="content")
     else:
-        if asset and _own is None:
-            st.warning("单基金历史读取失败，当前使用已有组合行情，历史覆盖可能不完整。")
-        _histories = _trend_chart_data(_all)
-        _daily = _histories["日"]
-        # 控件与SVG同处一个局部组件：视窗、高亮、日期和摘要同步，无跨iframe状态桥接。
-        with st.container(key="trend_chart"):
-            st.iframe(_scroll_chart_html(
-                _daily["labels"], _daily["prices"], _daily["windows"]["近1月"]["count"],
-                rets=_daily["rets"], histories=_histories,
-            ), height=850)
-            st.markdown(
-                f'<div class="sec-note">数据源：{_src_note} · '
-                f'截至 {_latest_date} · 月/年线取每期最后一条真实记录，未结束期间按最新数据计算。'
-                f'区间变化以首个可见值为基准（近N月=N个自然月前那天的净值，今年来=去年最后一个交易日），与支付宝历史业绩同口径。</div>',
+        st.caption("多只基金同图对比：三块面板分别是净值、相对起点涨跌幅、单期涨跌幅，"
+                   f"可拖动缩放、切日/月/年线；下方按基金列出各阶段涨跌幅。最多同时 {len(_CMP_COLORS)} 只。")
+        # ---- 多只对比：与单只共用同一套 iframe 组件（净值 / 相对起点 / 单期涨跌），只是叠加多条线 ----
+        with st.container(key="trend_head"):
+            _head_slot = st.empty()          # 占位：选了几只要等搜索框返回后才知道
+            _sel = FS.fund_search("cmp_pick", mode="multi", fixed=_BT_FIXED, default=[],
+                                  placeholder="搜索并添加基金，可多选对比", max_sel=len(_CMP_COLORS))
+            _bt_label = {f["code"]: f["label"] for f in _BT_FIXED}
+            _series_map, _cmp_fail = {}, []
+            for _o in (_sel or []):
+                if str(_o).startswith("bt:"):
+                    _a = _o[3:]
+                    _ss = _asset_display_series(_a)
+                    if _ss is None:
+                        _ss = FL.backtest_index(_a)
+                    _nm = _bt_label.get(_o, _a)
+                else:
+                    _c = _o if str(_o).isdigit() and len(str(_o)) == 6 else None
+                    if not _c:
+                        continue
+                    if FL.is_stale(_c):
+                        with st.spinner(f"正在拉取 {_c} 最新净值…"):
+                            _fok, _fmsg = FL.fetch_fund(_c)
+                        if not _fok and FL.load_cached(_c) is None:
+                            _cmp_fail.append(_fmsg)
+                            continue
+                    _ss = FL.build_nav(_c)
+                    _nm = f"{_c} {FL.fund_name(_c)}".strip()
+                if _ss is not None and len(_ss) >= 2:
+                    _series_map[_nm] = _ss
+            _nm_list = list(_series_map)
+            _lasts = [_series_map[k].index[-1] for k in _nm_list if len(_series_map[k])]
+            _cmp_last = f"{max(_lasts):%Y/%m/%d}" if _lasts else ""
+            _head_slot.markdown(
+                f'<div class="fund-head flat"><div class="fh-top">'
+                f'<span class="fh-name">多只基金对比</span>'
+                f'<span class="fh-tag">{"已选 %d 只" % len(_nm_list) if _nm_list else "未选择"}</span>'
+                f'<span class="fh-date">{"数据截至 " + _cmp_last if _cmp_last else "最多同时对比 %d 只" % len(_CMP_COLORS)}</span>'
+                f'</div></div>',
                 unsafe_allow_html=True,
             )
-        # 收益日历：日/周/月/年 格子，按钮与走势分析同款，期间切换在组件内完成（不触发整页重跑）
-        _cal = _calendar_payload(_all)
-        if _cal:
-            with st.container(key="trend_cal"):
-                st.iframe(_calendar_html(_cal), height="content")
+            if _cmp_fail:
+                st.warning("以下基金没有画进图里：" + "；".join(_cmp_fail), icon=":material/info:")
 
-
+        if not _series_map:
+            st.info("在右上角的搜索框里添加基金：选 1 只也能看，选 2 只以上即同图对比。")
+        else:
+            with st.container(key="cmp_chart"):
+                st.iframe(_compare_chart_html(_series_map), height="content")
+                st.markdown(
+                    '<div class="sec-note">净值为复权单位净值：最新值 = 最新单位净值，每日涨跌 = 官方日涨幅（分红日复权），与支付宝一致。'
+                    '各基金以可见区间内首个有效值为 0% 基准，月/年线取每期最后一条真实记录。</div>',
+                    unsafe_allow_html=True,
+                )
+            # 阶段涨跌幅：每只基金一行，口径与单只「阶段表现」完全一致（基准日净值 → 最新净值）
+            with st.container(key="cmp_stage"):
+                st.markdown('<div class="sec-head"><span class="t">阶段表现</span>'
+                            '<span class="r">与单只走势同口径 · 基准日净值至最新净值 · 手机上左右滑动看全部</span></div>',
+                            unsafe_allow_html=True)
+                _rows = []
+                for _nm, _ss in _series_map.items():
+                    _cells = {}
+                    for _cell in _stage_rows(_ss):
+                        _v = _cell["ret"]
+                        if _v is None or not np.isfinite(_v):
+                            _cells[_cell["label"]] = '<span class="muted">—</span>'
+                        else:
+                            _cls = "up" if _v > 0 else ("down" if _v < 0 else "muted")
+                            _cells[_cell["label"]] = f'<span class="{_cls}">{_v:+.2f}%</span>'
+                    _rows.append([html_escape(_nm)] + [_cells[_l] for _l in _TREND_STAGES])
+                _render_table([("基金", "left")] + [(f"{_l}", "right") for _l in _TREND_STAGES], _rows,
+                              min_width=700)
 # ============================================================
-# Tab 7: 三策略比较 / 调频影响（统一月度、年度、多年视图）
+# Tab 8: 三策略比较 / 调频影响（统一月度、年度、多年视图）
 # ============================================================
 with tab8:
     st.caption("这里是**项目原始策略**的历史回测：三策略对比、调频影响，"
@@ -3321,55 +3417,7 @@ with tab8:
 
 
 # ============================================================
-# Tab 8: 基金对比 —— 与「基金走势」同一套组件：多基金同图、可拖动缩放、日/月/年线、区间指标
-# ============================================================
-with tab9:
-    with st.container(key="cmp_head"):
-        st.markdown('<div class="sec-head"><span class="t">基金对比</span>'
-                    '<span class="r">回测资产 + 全市场场外基金 · 输入名称或代码即提示</span></div>',
-                    unsafe_allow_html=True)
-        _sel = FS.fund_search("cmp_pick", mode="multi", fixed=_BT_FIXED, default=[],
-                              placeholder="至少选择 1 个基金", max_sel=len(_CMP_COLORS))
-    _bt_label = {f["code"]: f["label"] for f in _BT_FIXED}
-    if _sel:
-        _series_map, _cmp_fail = {}, []
-        for _o in _sel:
-            if str(_o).startswith("bt:"):
-                _a = _o[3:]
-                _ss = _asset_display_series(_a)
-                if _ss is None:
-                    _ss = FL.backtest_index(_a)
-                _nm = _bt_label.get(_o, _a)
-            else:
-                _c = _o if str(_o).isdigit() and len(str(_o)) == 6 else None
-                if not _c:
-                    continue
-                if FL.is_stale(_c):
-                    with st.spinner(f"正在拉取 {_c} 最新净值…"):
-                        _fok, _fmsg = FL.fetch_fund(_c)
-                    if not _fok and FL.load_cached(_c) is None:
-                        _cmp_fail.append(_fmsg)
-                        continue
-                _ss = FL.build_nav(_c)
-                _nm = f"{_c} {FL.fund_name(_c)}".strip()
-            if _ss is not None and len(_ss) >= 2:
-                _series_map[_nm] = _ss
-        if _cmp_fail:
-            st.warning("以下基金没有画进图里：" + "；".join(_cmp_fail), icon=":material/info:")
-        if _series_map:
-            with st.container(key="cmp_chart"):
-                st.iframe(_compare_chart_html(_series_map), height="content")
-                st.markdown(
-                    '<div class="sec-note">净值为复权单位净值：最新值 = 最新单位净值，每日涨跌 = 官方日涨幅（分红日复权），与支付宝一致。'
-                    '各基金以可见区间内首个有效值为 0% 基准，月/年线取每期最后一条真实记录。</div>',
-                    unsafe_allow_html=True,
-                )
-        else:
-            st.error("所选基金都没有可用数据。")
-
-
-# ============================================================
-# Tab 10: 提醒（偏离 / 估值 / 体检）—— 全部按我持仓的基金算
+# Tab 9: 提醒（偏离 / 估值 / 体检）—— 全部按我持仓的基金算
 # ============================================================
 def _alert_card(level, title, body, tip=""):
     _cls = {"urgent": "warn", "warn": "warn", "info": "", "ok": "calm"}.get(level, "")
@@ -3378,7 +3426,7 @@ def _alert_card(level, title, body, tip=""):
             f'<div class="m">{body}</div>{_tip}</div></div>')
 
 
-with tab10:
+with tab9:
     st.subheader("提醒 · 按我持仓的基金算")
     st.caption("三类提醒分开看：偏离是「该不该调仓」，估值是「贵不贵」，体检是「账户本身怎么样」。")
 
@@ -3469,9 +3517,9 @@ with tab10:
 
 
 # ============================================================
-# Tab 11: 指数估值 —— 蛋卷估值快照 + 近10年 PE/PB 走势（仅展示，不进入策略计算）
+# Tab 10: 指数估值 —— 蛋卷估值快照 + 近10年 PE/PB 走势（仅展示，不进入策略计算）
 # ============================================================
-with tab11:
+with tab10:
     _vp = _valuation_payload()
     if not _vp:
         with st.container(key="val_head"):

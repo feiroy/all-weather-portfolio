@@ -77,11 +77,12 @@ This file provides guidance to Claude Code when working with code in this reposi
 - **底部说明**：数据来源/口径一律 `.sec-note`（12px、`--sub`），放在卡片最后。
 - **页面宽度**：内容区 `max-width:1480px`，左右内边距 `clamp(1rem,3vw,3rem)`；页头右侧操作区用 `st.container(key="hero_actions", horizontal=True, horizontal_alignment="right")`，状态胶囊与按钮同一行、同高 40px。
 - **头部**：左侧 `.fund-head`（名称 + 代码 + 标签 + 最新值 + 单日涨跌 + 截至日期），下方 `.stage-summary` 阶段表现；右侧放选择器。
+- **一个 tab 内的视图切换**用 `st.segmented_control`，外层必须包 `st.container(key=...)` 才能挂样式：`.st-key-trend_mode_switch [role="radiogroup"]`（tab 按钮组：3px 内衬、12px 圆角、34px 高、选中白底 + `--brand` 字）。**不要为了两种视图再开一个 tab**——单只走势和多只对比已合并进「基金走势」（见下）。
 
 ### 交互图表（统一组件体系，禁止用 Altair/st.dataframe 替代）
 - 时间序列图一律用 `app.py` 里的 iframe 组件，共用 `_COMP_BASE_CSS`：
   - 单基金：`_scroll_chart_html`（拖动/滚轮平移、Ctrl+滚轮缩放、双击复位、区间 tab + 日线/月线/年线、悬停提示、区间统计）。区间选项只在 `_TREND_RANGES` 定义一次（近1月/近3月/近6月/近1年/近3年/近5年/今年来/全部），按钮由 `_range_buttons()` 生成，单基金和多基金组件共用，禁止在模板里手写按钮。
-  - 多基金：`_compare_chart_html`（同上交互，多条线同图，图例可点隐藏，下方表格随可见区间实时重算区间涨跌/年化/最大回撤/波动）。**不要为每只基金再单独画一张图。**
+  - 多基金：`_compare_chart_html`（同上交互，多条线同图，图例可点隐藏，下方表格随可见区间实时重算区间涨跌/年化/最大回撤/波动）。**不要为每只基金再单独画一张图。** 入口在「基金走势」tab 的「多只对比」视图（`trend_mode_switch`），不再单独占一个 tab；下方「阶段表现」表对每只基金复刻单只的 6 个阶段数字（`_stage_rows`）。
   - 收益日历：`_calendar_html`（日/周/月/年 格子 + ‹ 选择器 › 翻页）。
   - 指数估值：`_valuation_html`（市场 tab + 搜索 + 估值档筛选、表头排序、点行看近10年 PE/PB 走势与 30/50/70% 分位线）。默认按评分降序，未点选时详情跟随列表第一行（不写死某个指数）。评分/回撤口径见 `allweather/valuation.py::score / drawdown_10y`（沿用 etf-dashboard-auto）。
   - iframe 内的 `@media` 断点按 **iframe 自身宽度**（≈ 页面内容区宽 − 卡片内边距）计算，不是浏览器窗口宽度；多列表格用像素列宽 + 逐级隐藏次要列，验收时至少截 1440 / 1180 / 900 三档。
@@ -99,11 +100,11 @@ This file provides guidance to Claude Code when working with code in this reposi
 ### 组件细则
 - **涨跌着色**：涨=`--red`，跌=`--green`，0/无数据=`--sub`/`--muted`；格子底色可按涨跌幅深浅做热力（同色系透明度）。class 用 `.up`/`.down`/`.neutral`。
 - **数字**：涨跌幅一律带符号两位小数 `+1.23%`；数值列右对齐、`tabular-nums`；无数据显示 `—`。
-- **表格**：iframe 内用 `.cmp-tbl` 风格（表头 12px `--sub`、行分隔 `--line-soft`、首列左对齐其余右对齐）；页面级用 `.tbl`。不用 st.dataframe 展示涨跌色。
+- **表格**：iframe 内用 `.cmp-tbl` 风格（表头 12px `--sub`、行分隔 `--line-soft`、首列左对齐其余右对齐）；页面级用 `.tbl`（`_render_table`）。不用 st.dataframe 展示涨跌色。列多（≥6 列）的表必须传 `_render_table(..., min_width=700)`：窄屏改为卡片内横向滑动，**不要**让单元格压缩到一字一行。
 - **输入控件外观**：所有 selectbox / multiselect / number_input / date_input 用 `--line-strong` 边框、白底、12px 圆角、44px 高，悬停加深、聚焦蓝色描边（app.py「控件」CSS 块统一定义）。主题 secondaryBackgroundColor 是白色，不覆盖的话控件在白卡片里看不见边框。Streamlit ≥1.6x 的下拉控件是 react-aria（`.react-aria-ComboBox > div`），不是 baseweb，新增控件类型要先在真实页面查 DOM。多选已选标签用 `--brand-soft` 中性色，**不用主题红**（红色只表示上涨）。同一行多个输入用 `vertical_alignment="bottom"`，标签单行，长说明放 help。
 - **选择器**：优先 selectbox/multiselect（输入即提示）；空态用 placeholder（如「至少选择 1 个基金」），不塞默认值；不要重复放两个功能相同的搜索框。
   选项上千条时 selectbox/multiselect 必须 `filter_mode="contains"`，multiselect 再加 `select_all=False`。
-- **基金搜索一律用 `fund_search.fund_search()`**（单选/多选两种 mode），**不要把 2.8 万只基金名录塞进 st.selectbox/multiselect**：每个控件会把 1.1MB 选项序列化进页面，切到基金走势/基金对比 tab 时主线程卡 2 秒、点不动。名录由 `ensure_static_names()` 写成 `streamlit_app/static/fund_names.json`（`server.enableStaticServing`），前端首次聚焦才下载、全页共享一份。
+- **基金搜索一律用 `fund_search.fund_search()`**（单选/多选两种 mode），**不要把 2.8 万只基金名录塞进 st.selectbox/multiselect**：每个控件会把 1.1MB 选项序列化进页面，切到基金走势 tab 时主线程卡 2 秒、点不动。名录由 `ensure_static_names()` 写成 `streamlit_app/static/fund_names.json`（`server.enableStaticServing`），前端首次聚焦才下载、全页共享一份。
 - **耗时操作不阻塞页面**：自动拉取放后台线程（`_start_background_fetch`）；按钮触发的更新用 `st.toast` 提示进度，**不用 st.spinner/st.info 在页面里插一行**（会把下方内容顶下去再弹回，页面抖动）。
 - **按钮文案写动作不写状态**：如「更新数据」，状态（是否最新、滞后几天）放 help/图标/颜色里。
 - **净值口径（展示）**：页面上的净值和日涨幅一律用「单位净值 + 官方日涨幅」（`data/nav_detail/`，`_asset_display_series` / `fund_lookup.build_nav`），与支付宝一致；**不要用累计净值算涨跌幅**（累计净值 = 单位净值 + 历年分红，涨跌会被分红稀释，510300 在 2026/10/22 为 −1.51% vs 官方 −1.82%）。「场内价格」= 交易所收盘价，不叫「收盘价」或「净值」。策略回测目前仍读 `data/{name}.csv` 的累计净值，改口径须走策略优化闭环。
