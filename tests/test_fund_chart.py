@@ -42,7 +42,9 @@ PERIODS = ("日", "月", "年")
 # 三个文案参数（持仓页详情图要独立记忆区间与标题）。用 headless Chrome + CDP 实跑 10 项验证：
 # 三角形数量与颜色、统计条笔数、悬停提示列出该笔成交、区间切换只画区间内成交点且不残留、
 # 月线按周期聚合仍标点、区间/周期写入各自 localStorage 键并还原。
-CHART_SOURCE_SHA256 = "789d2fc5aba4429bc46ba09c61bdb39033f3fdf8c8ff6dab93527de099b1458f"
+# 2026/10/27 再更新：tab7 改名「基金检索」，只改了 _scroll_chart_html docstring 里的页名，
+# 绘图与交互逻辑一字未动（diff 仅此一处），故刷新哈希、无需重跑 CDP 用例。
+CHART_SOURCE_SHA256 = "236f735db64513b2159406801aa38d5ca6b09653bd7715a1fb9ea44c86e7b2b2"
 NAMES = {"_scroll_chart_html", "_trend_aggregate", "_trend_window_start",
          "_stage_rows", "_stage_summary_html", "_trend_chart_data",
          "_period_label", "_range_buttons"}

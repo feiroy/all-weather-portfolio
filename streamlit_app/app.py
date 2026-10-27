@@ -419,8 +419,8 @@ div[data-testid="stAlert"] p{ color:var(--brand-strong); }
 }
 [data-testid="stSidebar"] [data-testid="stCaptionContainer"]{ font-size:11px; margin-top:6px; }
 
-/* ========== 基金走势页：含阶段数字的概览 / 走势分析 ========== */
-/* 基金走势 / 收益日历 / 基金对比 共用同一卡片容器 */
+/* ========== 基金检索页：含阶段数字的概览 / 走势分析 ========== */
+/* 基金检索 / 收益日历 / 基金对比 共用同一卡片容器 */
 .st-key-trend_head, .st-key-trend_chart, .st-key-trend_cal, .st-key-cmp_head, .st-key-cmp_chart,
 .st-key-cmp_stage, .st-key-val_head, .st-key-val_table, .st-key-val_chart{
   background:var(--card); border:1px solid var(--line); border-radius:16px;
@@ -1114,7 +1114,7 @@ def _scroll_chart_html(labels, values, win, height=540, rets=None, revision=0, h
 
     trades：历史成交点 [{date:"2026/10/27", side:"买入", label:"1,234.00 份 @ 2.4567"}]，
     按日期落到当前粒度的那一期上，买画红上三角、卖画绿下三角，悬停/点开进提示框。
-    持仓页「点开一只基金」用它标出这只基金自己的买卖时间点（基金走势页不传，行为不变）。
+    持仓页「点开一只基金」用它标出这只基金自己的买卖时间点（基金检索页不传，行为不变）。
     store/default_range/heading：同一个组件的三种文案，持仓页要独立的区间记忆与标题。
     """
     def numbers(items):
@@ -1970,7 +1970,7 @@ def _migrate_trades(a: dict) -> bool:
 
 if acct and _migrate_trades(acct):
     st.toast("已把旧的记账（按场内价/资产名）换成按基金代码与份额", icon=":material/autorenew:")
-# 回测资产（项目默认那 8 个），基金走势/对比页的下拉用
+# 回测资产（项目默认那 8 个），基金检索/对比页的下拉用
 _ACCT_ASSETS = [a for a in ["hs300", "us_sp500", "credit", "bond_10y",
                             "bond_30y", "gold", "nonferr", "wti"] if a in prices.columns]
 _ASSET_LABEL = {a: f"{ETF_META.get(a, {}).get('name', a)} ({ETF_META.get(a, {}).get('code', '')})"
@@ -3052,7 +3052,7 @@ def _hg_slot_options():
     return out
 tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs(
     ["信号仪表盘", "目标权重", "我的持仓", "买卖提醒", "交易记录",
-     "收益对比", "基金走势", "回测表现", "提醒", "指数估值"]
+     "收益对比", "基金检索", "回测表现", "提醒", "指数估值"]
 )
 
 # ============================================================
@@ -3827,9 +3827,9 @@ with tab6:
         _g3.metric("账户净值", f"{float(_mine.iloc[-1]):.4f}",
                    help="1.0000 = 建仓起点。也可以用「份额 × 最新单位净值 + 现金 = 总资产」跟支付宝对一遍。")
         st.caption("两条差距都是「我的账户 ÷ 基准 − 1」的累计值，区间不同会看到不同数字；"
-                   "图上可以拖动缩放、切日/月/年线，和「基金走势」页的用法一致。")
+                   "图上可以拖动缩放、切日/月/年线，和「基金检索」页的用法一致。")
 # ============================================================
-# Tab 7: 基金走势（日 / 月 / 年 的涨跌幅与价格）
+# Tab 7: 基金检索（搜全市场基金 / 8 个回测资产，看日 / 月 / 年 的涨跌幅与价格）
 # ============================================================
 # 范围和采样粒度独立，切周期不改变所选范围。区间口径与支付宝「历史业绩」一致（见 _trend_window_start）。
 
@@ -4093,7 +4093,7 @@ def _val_snapshot():
 
 
 def _val_tag_html(asset, code, name):
-    """基金走势页头部的估值标签：能对应到跟踪指数时显示，否则返回空串。"""
+    """基金检索页头部的估值标签：能对应到跟踪指数时显示，否则返回空串。"""
     from allweather import valuation as _val
     idx = _val.index_for_fund(code, name, asset)
     snap = _val_snapshot()
