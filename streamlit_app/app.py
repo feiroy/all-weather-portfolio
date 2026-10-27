@@ -447,11 +447,9 @@ div[data-testid="stAlert"] p{ color:var(--brand-strong); }
 .st-key-trend_mode_switch button[aria-checked="true"],.st-key-rb_mode_switch button[aria-checked="true"],.st-key-tr_mode_switch button[aria-checked="true"]{background:var(--card) !important;
   box-shadow:0 1px 2px rgba(15,23,42,.08)}
 .st-key-trend_mode_switch button[aria-checked="true"] p,.st-key-rb_mode_switch button[aria-checked="true"] p,.st-key-tr_mode_switch button[aria-checked="true"] p{color:var(--brand) !important;font-weight:600}
-/* 交易记录页：外层容器画卡片，内层 form 去掉自带边框与内边距 —— form 内外的列网格基准宽度才一致，上下才对得齐 */
+/* 交易记录页：记一笔那块画成卡片（已不用 st.form，控件改动即刷新下面的提示） */
 .st-key-tr_card{background:var(--card); border:1px solid var(--line); border-radius:16px;
   padding:20px !important; margin-bottom:18px}
-.st-key-tr_card [data-testid="stForm"]{border:0 !important; padding:0 !important; background:transparent !important}
-.st-key-tr_card [data-testid="stForm"] [data-testid="stVerticalBlock"]{gap:14px}
 .st-key-tr_card [data-testid="stHorizontalBlock"]{gap:14px; align-items:flex-end}
 .st-key-tr_card [data-testid="stButton"] button{height:38px; min-height:38px}
 .fund-head.flat{border:none; box-shadow:none; padding:0; margin:0; background:transparent}
@@ -2286,14 +2284,15 @@ def _pf_list(rows: list[dict], key: str = "pf_list"):
     return out if out in codes else picked
 
 
-# 台账：每一行末尾直接「改 / 删」。st.dataframe 放不了按钮，所以同样走 components v2；
-# 回传 "行号:时间戳"，时间戳让「连点同一行」也能再触发一次 rerun（光回传行号第二次值没变就不动了）。
+# 台账：点行尾铅笔，这一行下面直接展开编辑面板（日期 / 类型 / 基金 / 金额 / 单价 / 手续费），
+# 保存后整页重算；点垃圾桶在行内就地确认删除。全部在组件里完成，不再把人送回页面顶部的表单。
+# 回传都带时间戳：只回传行号时连点同一行第二次值不变，不会触发 rerun。
 _TRADE_LIST_CSS = r"""
 :host{display:block}
 .wrap{font:13px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Noto Sans SC","Microsoft YaHei",sans-serif;
   color:#0F172A;background:#fff;border:1px solid #E2E8F0;border-radius:14px;overflow:hidden}
-.hd,.rw{display:grid;grid-template-columns:96px 62px minmax(0,1fr) 112px 78px 74px 76px;
-  gap:12px;align-items:center;padding:9px 14px}
+.hd,.rw{display:grid;grid-template-columns:92px 62px minmax(0,1fr) 106px 74px 70px 72px;
+  gap:12px;align-items:center;padding:10px 14px}
 .hd{background:#F8FAFC;border-bottom:1px solid #E2E8F0;font-size:12px;color:#64748B}
 .hd .r{text-align:right}
 .rw{border-bottom:1px solid #F1F5F9}
@@ -2316,9 +2315,47 @@ _TRADE_LIST_CSS = r"""
 .op:hover{border-color:#94A3B8;color:#0F172A;background:#F8FAFC}
 .op.del:hover{border-color:#FECACA;color:#C52828;background:#FEF2F2}
 .op svg{width:15px;height:15px}
-@media(max-width:900px){   /* 手机上留「日期 / 类型 / 基金 / 操作」，净值与手续费点开改的时候再看 */
-  .hd,.rw{grid-template-columns:88px 56px minmax(0,1fr) 72px;padding:9px 12px;gap:8px}
+
+/* ---- 就地展开的编辑面板 ---- */
+.ed{background:#F8FAFC;border-bottom:1px solid #E2E8F0;padding:14px;box-shadow:inset 3px 0 0 #3B82F6}
+.ed .r1{display:grid;grid-template-columns:150px 272px minmax(0,1fr);gap:10px}
+.ed .r2{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:10px}
+.ed .r2.one{grid-template-columns:minmax(0,240px)}
+.ed label,.ed .fld{display:flex;flex-direction:column;gap:4px;font-size:11.5px;color:#64748B;min-width:0}
+.ed .lb{font-size:11.5px;color:#64748B}
+.ed input,.ed select{height:34px;border:1px solid #CBD5E1;border-radius:8px;padding:0 9px;
+  font:13px/34px inherit;color:#0F172A;background:#fff;width:100%;box-sizing:border-box;min-width:0}
+.ed input:focus,.ed select:focus{outline:2px solid #BFDBFE;border-color:#3B82F6}
+.ed .chips{display:flex;gap:2px;padding:3px;background:#fff;border:1px solid #CBD5E1;border-radius:9px;height:34px;box-sizing:border-box}
+.ed .chips button{flex:1;border:0;border-radius:6px;background:transparent;color:#475569;
+  font-size:12.5px;cursor:pointer;padding:0}
+.ed .chips button[aria-pressed="true"]{background:#0F172A;color:#fff;font-weight:600}
+.ed .calc{text-align:right;font-size:12px;color:#475569;margin-top:8px;
+  font-variant-numeric:tabular-nums;min-height:18px}
+.ed .foot{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
+.ed .foot button{height:32px;padding:0 16px;border-radius:8px;font-size:13px;cursor:pointer;border:1px solid #CBD5E1}
+.ed .foot .ghost{background:#fff;color:#475569}
+.ed .foot .ghost:hover{background:#F1F5F9}
+.ed .foot .primary{background:#1E40AF;border-color:#1E40AF;color:#fff;font-weight:600}
+.ed .foot .primary:hover{background:#1E3A8A}
+/* ---- 删除就地确认 ---- */
+.cf{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:#FEF2F2;
+  border-bottom:1px solid #FECACA;padding:11px 14px;font-size:12.5px;color:#7F1D1D;
+  box-shadow:inset 3px 0 0 #C52828}
+.cf b{font-weight:600}
+.cf .btns{margin-left:auto;display:flex;gap:8px}
+.cf .btns button{height:30px;padding:0 14px;border-radius:8px;font-size:12.5px;cursor:pointer;border:1px solid #FECACA}
+.cf .btns .danger{background:#C52828;border-color:#C52828;color:#fff;font-weight:600}
+.cf .btns .ghost{background:#fff;color:#7F1D1D}
+@media(max-width:900px){   /* 手机上留「日期 / 类型 / 基金 / 操作」，金额与手续费进编辑面板再看 */
+  .hd,.rw{grid-template-columns:84px 54px minmax(0,1fr) 72px;padding:9px 12px;gap:8px}
   .c-nav,.c-fee,.c-qty{display:none}
+  .ed{padding:12px}
+  .ed .r1{grid-template-columns:1fr 1fr;gap:8px}
+  .ed .r1 label:nth-child(3),.ed .r2{grid-column:1/-1}
+  .ed .r2{grid-template-columns:1fr 1fr;margin-top:8px}
+  .ed .calc{text-align:left}
+  .ed .foot{margin-top:10px}
 }
 """
 
@@ -2330,38 +2367,200 @@ export default function (c) {
   Array.from(parentElement.children).forEach(el => {
     if (el && el.classList && el.classList.contains('wrap')) el.remove();
   });
-  const rows = D.rows || [], on = D.editing;
+  const rows = D.rows || [], funds = D.funds || [];
+  let open = null, confirmDel = null, draft = null;
+
   const esc = s => String(s == null ? '' : s)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
   const SVG = {
     edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
     del: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>'
   };
-  const rowHtml = r => '<div class="rw' + (r.i === on ? ' on' : '') + '" data-i="' + esc(r.i) + '" role="row">'
-    + '<div class="dt">' + esc(r.date) + '</div>'
-    + '<div><span class="bg ' + esc(r.cls) + '">' + esc(r.side) + '</span></div>'
-    + '<div><div class="nm">' + esc(r.name) + '</div><div class="sub">' + esc(r.code) + '</div></div>'
-    + '<div class="num c-qty">' + esc(r.qty) + '</div>'
-    + '<div class="num c-nav">' + esc(r.nav) + '</div>'
-    + '<div class="num c-fee">' + esc(r.fee) + '</div>'
-    + '<div class="ops">'
-    + '<button class="op" type="button" data-act="edit" title="修改这一笔" aria-label="修改这一笔">' + SVG.edit + '</button>'
-    + '<button class="op del" type="button" data-act="del" title="删除这一笔" aria-label="删除这一笔">' + SVG.del + '</button>'
-    + '</div></div>';
+  const fmt = (v, d) => (Number(v) || 0).toLocaleString('en-US',
+    {minimumFractionDigits: d, maximumFractionDigits: d});
+  const round2 = v => Math.round(v * 100) / 100;
+  const isMoneySide = s => s === '转入' || s === '转出';
+
   const root = document.createElement('div');
   root.className = 'wrap';
   root.setAttribute('role', 'table');
-  root.innerHTML = '<div class="hd"><div>日期</div><div>类型</div><div>基金</div>'
-    + '<div class="r c-qty">数量</div><div class="r c-nav">净值</div><div class="r c-fee">手续费</div>'
-    + '<div class="r">操作</div></div>' + rows.map(rowHtml).join('');
-  parentElement.appendChild(root);
-  root.querySelectorAll('.op').forEach(btn => {
-    btn.addEventListener('click', e => {
-      e.stopPropagation();
-      const i = btn.closest('.rw').dataset.i;
-      setStateValue(btn.dataset.act, i + ':' + Date.now());
+
+  // 金额 → 份额：买入按「(金额−手续费)/单价」，卖出按「(金额+手续费)/单价」
+  function sharesOf(d) {
+    if (isMoneySide(d.side)) return {shares: Number(d.amount) || 0, nav: 0, fee: 0};
+    const nav = Number(d.nav) || 0, fee = Number(d.fee) || 0, amt = Number(d.amount) || 0;
+    if (!(nav > 0)) return {shares: 0, nav: nav, fee: fee};
+    const raw = d.side === '买入' ? (amt - fee) / nav : (amt + fee) / nav;
+    return {shares: round2(Math.max(0, raw)), nav: nav, fee: fee};
+  }
+
+  function rowHtml(r, on) {
+    return '<div class="rw' + (on ? ' on' : '') + '" data-i="' + esc(r.i) + '" role="row">'
+      + '<div class="dt">' + esc(r.date) + '</div>'
+      + '<div><span class="bg ' + esc(r.cls) + '">' + esc(r.side) + '</span></div>'
+      + '<div><div class="nm">' + esc(r.name) + '</div><div class="sub">' + esc(r.sub) + '</div></div>'
+      + '<div class="num c-qty">' + esc(r.qty) + '</div>'
+      + '<div class="num c-nav">' + esc(r.nav) + '</div>'
+      + '<div class="num c-fee">' + esc(r.fee) + '</div>'
+      + '<div class="ops">'
+      + '<button class="op" type="button" data-act="edit" title="修改这一笔" aria-label="修改这一笔">' + SVG.edit + '</button>'
+      + '<button class="op del" type="button" data-act="del" title="删除这一笔" aria-label="删除这一笔">' + SVG.del + '</button>'
+      + '</div></div>';
+  }
+
+  function editorHtml(r) {
+    const d = draft;
+    const money = isMoneySide(d.side);
+    const chips = ['买入', '卖出', '转入', '转出'].map(s =>
+      '<button type="button" data-side="' + s + '" aria-pressed="' + (d.side === s) + '">' + s + '</button>').join('');
+    let third;
+    if (money) {
+      third = '<div class="fld"><span class="lb">钱的来源</span><div class="calc" style="padding:0">'
+        + (d.side === '转入' ? '银行卡 → 账户现金（本金增加，不算收益）' : '账户现金 → 银行卡（本金减少）')
+        + '</div></div>';
+    } else {
+      const opts = funds.map(f => {
+        const key = esc(f.code) + '|' + esc(f.slot);
+        const sel = (f.code === d.code && (!d.slot || f.slot === d.slot)) ? ' selected' : '';
+        return '<option value="' + key + '"' + sel + '>' + esc(f.label) + '</option>';
+      }).join('');
+      third = '<label>基金<select data-f="fund">' + opts + '</select></label>';
+    }
+    const r2 = money
+      ? '<div class="r2 one"><label>金额（元）<input type="number" step="0.01" min="0" data-f="amount" value="' + esc(d.amount) + '"></label></div>'
+      : '<div class="r2">'
+        + '<label>金额（元）<input type="number" step="0.01" min="0" data-f="amount" value="' + esc(d.amount) + '"></label>'
+        + '<label>单价（元/' + (d.unit === '股' ? '股' : '份') + '）<input type="number" step="0.0001" min="0" data-f="nav" value="' + esc(d.nav) + '"></label>'
+        + '<label>手续费（元，可留 0）<input type="number" step="0.01" min="0" data-f="fee" value="' + esc(d.fee) + '"></label>'
+        + '</div>';
+    return '<div class="ed" data-i="' + esc(r.i) + '">'
+      + '<div class="r1">'
+      + '<label>日期<input type="date" data-f="date" value="' + esc(d.date) + '"></label>'
+      + '<div class="fld"><span class="lb">类型</span><div class="chips">' + chips + '</div></div>'
+      + third + '</div>' + r2 + '<div class="calc" id="calc"></div>'
+      + '<div class="foot"><button type="button" class="ghost" data-act="cancel">取消</button>'
+      + '<button type="button" class="primary" data-act="save">保存这一笔</button></div></div>';
+  }
+
+  function confirmHtml(r) {
+    return '<div class="cf" data-i="' + esc(r.i) + '"><span>删除这一笔？<b>'
+      + esc(r.date) + ' ' + esc(r.side) + ' ' + esc(r.name) + ' ' + esc(r.qty) + '</b>'
+      + '　删除后持仓与收益会立刻重算。</span>'
+      + '<span class="btns"><button type="button" class="ghost" data-act="cancel">取消</button>'
+      + '<button type="button" class="danger" data-act="delyes">删除</button></span></div>';
+  }
+
+  function refreshCalc() {
+    const el = root.querySelector('#calc');
+    if (!el || !draft) return;
+    if (isMoneySide(draft.side)) {
+      el.textContent = (draft.side === '转入' ? '现金 +¥' : '现金 −¥') + fmt(draft.amount, 2);
+      return;
+    }
+    const r = sharesOf(draft);
+    el.textContent = r.nav > 0
+      ? '= ' + fmt(r.shares, 2) + (draft.unit === '股' ? ' 股' : ' 份') + ' @ ' + Number(draft.nav).toFixed(4)
+      : '单价要大于 0';
+  }
+
+  function render() {
+    const body = rows.map(r => {
+      if (confirmDel === r.i) return rowHtml(r, true) + confirmHtml(r);
+      if (open === r.i) return rowHtml(r, true) + editorHtml(r);
+      return rowHtml(r, false);
+    }).join('');
+    root.innerHTML = '<div class="hd"><div>日期</div><div>类型</div><div>基金 / 说明</div>'
+      + '<div class="r c-qty">数量</div><div class="r c-nav">单价</div><div class="r c-fee">手续费</div>'
+      + '<div class="r">操作</div></div>' + body;
+    bind();
+    refreshCalc();
+  }
+
+  function bind() {
+    root.querySelectorAll('[data-act]').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const act = btn.dataset.act;
+        const holder = btn.closest('[data-i]');
+        const i = holder ? Number(holder.dataset.i) : -1;
+        if (act === 'edit') {
+          const r = rows.find(x => x.i === i);
+          if (!r) return;
+          open = i; confirmDel = null;
+          draft = {i: r.i, date: r.dateRaw, side: r.side, code: r.code, slot: r.slot,
+                   amount: r.amount, nav: r.navf, fee: r.feef, unit: r.unit, shares: r.shares};
+          render();
+        } else if (act === 'del') {
+          confirmDel = i; open = null; draft = null; render();
+        } else if (act === 'delyes') {
+          setStateValue('del', i + ':' + Date.now());
+        } else if (act === 'cancel') {
+          confirmDel = null; open = null; draft = null; render();
+        } else if (act === 'save') {
+          save();
+        }
+      });
     });
-  });
+    root.querySelectorAll('.chips button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        draft.side = btn.dataset.side;
+        render();
+      });
+    });
+    root.querySelectorAll('[data-f]').forEach(el => {
+      const f = el.dataset.f;
+      const onEdit = () => {
+        if (f === 'fund') {
+          const parts = String(el.value).split('|');
+          draft.code = parts[0] || ''; draft.slot = parts[1] || '';
+          const meta = funds.find(x => x.code === draft.code && x.slot === draft.slot) || {};
+          draft.unit = meta.unit || '份';
+        } else if (f === 'date') {
+          draft.date = el.value;
+        } else {
+          draft[f] = el.value;
+        }
+        refreshCalc();
+      };
+      el.addEventListener('input', onEdit);
+      el.addEventListener('change', onEdit);
+    });
+  }
+
+  function save() {
+    if (!draft) return;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(draft.date || ''))) {
+      const el = root.querySelector('#calc');
+      if (el) el.textContent = '日期要选一下';
+      return;
+    }
+    const r = sharesOf(draft);
+    if (!isMoneySide(draft.side) && !draft.code) {
+      const el = root.querySelector('#calc');
+      if (el) el.textContent = '先选一只基金';
+      return;
+    }
+    if (!(r.shares > 0)) {
+      const el = root.querySelector('#calc');
+      if (el) el.textContent = isMoneySide(draft.side) ? '金额要大于 0' : '金额和单价要填对（份额要大于 0）';
+      return;
+    }
+    // 只是打开又不改金额时，沿用原来的份额，避免「四舍五入」把份额算歪
+    const same = Math.abs(r.shares - (Number(draft.shares) || 0)) < 0.01
+      && Number(draft.amount) === (Number(rows.find(x => x.i === draft.i).amount) || 0);
+    const payload = {
+      i: draft.i, ts: Date.now(), date: draft.date, side: draft.side,
+      slot: draft.slot || '', code: isMoneySide(draft.side) ? '' : (draft.code || ''),
+      shares: same ? Number(draft.shares) : r.shares,
+      nav: isMoneySide(draft.side) ? 0 : r.nav,
+      fee: isMoneySide(draft.side) ? 0 : r.fee
+    };
+    setStateValue('save', JSON.stringify(payload));
+  }
+
+  render();
+  parentElement.appendChild(root);
   return () => root.remove();
 }
 """
@@ -2369,38 +2568,46 @@ export default function (c) {
 _TRADE_LIST = st.components.v2.component("aw_trade_list", css=_TRADE_LIST_CSS, js=_TRADE_LIST_JS)
 
 
-def _trade_list(rows: list[dict], editing=None, key: str = "trade_list"):
-    """渲染台账并返回 (修改请求, 删除请求)，都是「行号:时间戳」字符串，没点过就是 None。"""
+def _trade_list(rows: list[dict], funds: list[dict] | None = None, key: str = "trade_list"):
+    """渲染台账并返回 (保存请求, 删除请求)：保存是 JSON 字符串，删除是「行号:时间戳」，没点过就是 None。"""
     if not rows:
         return None, None
-    res = _TRADE_LIST(key=key, data={"rows": rows, "editing": editing},
-                      default={"edit": None, "del": None},
-                      on_edit_change=lambda: None, on_del_change=lambda: None)
+    res = _TRADE_LIST(key=key, data={"rows": rows, "funds": funds or []},
+                      default={"save": None, "del": None},
+                      on_save_change=lambda: None, on_del_change=lambda: None)
     if not hasattr(res, "get"):
         return None, None
-    return res.get("edit"), res.get("del")
+    return res.get("save"), res.get("del")
 
 
 def _trade_row(i: int, t: dict) -> dict:
-    """一笔成交 → 台账一行（已按基金单位格式化成显示字符串）。"""
-    side = str(t.get("side") or "")
+    """一笔成交 → 台账一行：既给显示用的字符串，也给编辑面板要用的原始数值。"""
+    side = "转入" if t.get("side") in ("转入", "入金") else (
+        "转出" if t.get("side") in ("转出", "出金") else str(t.get("side") or ""))
     money = side in _MONEY_SIDES
     _, meta = HG.fund_meta(holdings, t.get("code", ""))
     name = ((meta.get("name") if meta else "") or FL.fund_name(t.get("code", ""))
             or ("账户现金" if money else "—"))
+    shares, nav, fee = (float(t.get("shares") or 0), float(t.get("nav") or 0),
+                        float(t.get("fee") or 0))
     if money:
-        qty, nav_s, code = f"¥{float(t.get('shares') or 0):,.0f}", "—", ""
+        qty, nav_s, code_s, unit = f"¥{shares:,.0f}", "—", "", "元"
+        amount = shares
+        sub = side + "到" + ("账户现金" if side == "转入" else "银行卡")
     else:
         unit = ((meta.get("unit") if meta else None) or HG.default_unit(t.get("code", "")))
-        sh = float(t.get("shares") or 0)
-        qty = f"{sh:,.2f} 份" if unit == "份额" else f"{sh:,.0f} 股"
-        _nav = float(t.get("nav") or 0)
-        nav_s, code = (f"{_nav:.4f}" if _nav > 0 else "—"), str(t.get("code") or "")
-    _fee = float(t.get("fee") or 0)
-    return {"i": i, "date": _cn_date(t.get("date")), "side": side or "—",
+        qty = f"{shares:,.2f} 份" if unit == "份额" or unit == "份" else f"{shares:,.0f} 股"
+        nav_s, code_s = (f"{nav:.4f}" if nav > 0 else "—"), str(t.get("code") or "")
+        amount = shares * nav + fee if side == "买入" else shares * nav - fee
+        sub = code_s
+    return {"i": i, "date": _cn_date(t.get("date")), "dateRaw": str(t.get("date"))[:10],
+            "side": side, "slot": str(t.get("slot") or ""), "code": code_s,
             "cls": "buy" if side == "买入" else ("sell" if side == "卖出" else "money"),
-            "name": str(name), "code": code, "qty": qty, "nav": nav_s,
-            "fee": (f"{_fee:,.2f}" if _fee else "—")}
+            "name": str(name), "sub": sub, "qty": qty, "nav": nav_s,
+            "fee": (f"{fee:,.2f}" if fee else "—"),
+            "amount": round(amount, 2), "navf": (0.0 if money else nav),
+            "feef": (0.0 if money else fee), "shares": shares,
+            "unit": ("股" if unit == "股" else "份")}
 
 
 def _code_trades(code: str) -> list[dict]:
@@ -3613,27 +3820,30 @@ with tab4:
 # Tab 5: 交易记录（补录 + 台账）—— 只记录支付宝上实际发生了什么
 # ============================================================
 with tab5:
-    st.subheader("交易记录 · 支付宝上真实发生的每一笔")
-    st.caption(
-        "这一页只记账：买入、卖出、转入、转出各记一笔，台账按录入顺序列出全部成交（最后一笔在最后）。"
-        "「买卖提醒」是按策略算出来的计划，这里是**实际做了什么**；两边都落进同一份账户文件，改任何一边都会重算持仓和收益。"
+    _cash, _mv_all, _total = (float(_plan["cash"]), float(_plan["mv_all"]),
+                              float(_plan["total"]))
+    st.markdown(
+        '<div class="sec-head"><span class="t">交易记录</span>'
+        f'<span class="r">现金 <b>¥{_cash:,.0f}</b>　持仓 <b>¥{_mv_all:,.0f}</b>'
+        f'　总资产 <b>¥{_total:,.0f}</b></span></div>',
+        unsafe_allow_html=True,
     )
+    st.caption("这一页只记「实际做了什么」，每一笔都会立刻重算持仓和收益。"
+               "「买卖提醒」里的那份是策略算出来的计划，记不记由你。")
 
     _slot_opts = _hg_slot_options()
     if acct is None:
-        st.markdown("**先建一个账户**")
-        st.caption("建完账户再逐笔补录；也可以先在支付宝买，买完回来补录买入和转入。")
-        with st.form("acct_init"):
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                s_init = st.selectbox("跟随策略", list(STRATEGIES),
-                                      format_func=lambda k: STRATEGIES[k]["name"])
-            with c2:
-                cap0 = st.number_input("初始资金（元）", min_value=1000.0, value=500000.0,
-                                       step=10000.0, format="%.0f")
-            with c3:
-                start0 = st.date_input("起始日期", value=prices.index[-1].date())
-            if st.form_submit_button("创建账户", type="primary"):
+        st.markdown('<div class="sec-head"><span class="t">先建一个账户</span></div>',
+                    unsafe_allow_html=True)
+        st.caption("账户就是一笔本金 + 一串成交记录；建完再逐笔补录（也可以在支付宝买完后回来补录）。")
+        with st.container(key="tr_card"):
+            c1, c2, c3 = st.columns(3, gap="small", vertical_alignment="bottom")
+            s_init = c1.selectbox("跟随策略", list(STRATEGIES),
+                                  format_func=lambda k: STRATEGIES[k]["name"])
+            cap0 = c2.number_input("初始资金（元）", min_value=1000.0, value=500000.0,
+                                   step=10000.0, format="%.0f")
+            start0 = c3.date_input("起始日期", value=prices.index[-1].date())
+            if st.button("创建账户", type="primary", key="tr_acct_new"):
                 save_acct({"strategy": s_init, "capital": float(cap0),
                            "created": str(start0), "trades": []}, ACCT_FILE)
                 st.rerun()
@@ -3641,138 +3851,138 @@ with tab5:
         st.warning("还没有挂任何基金：先到「我的持仓」给位置加至少一只基金，才能记账。")
     else:
         _trades = acct.setdefault("trades", [])
-        # 点台账行尾的铅笔进入修改；这笔被删掉或序号越界就自动退回新建
-        _edit_i = st.session_state.get("_tr_edit_idx")
-        if not (isinstance(_edit_i, int) and 0 <= _edit_i < len(_trades)):
-            _edit_i = None
-            st.session_state.pop("_tr_edit_idx", None)
-        _src = _trades[_edit_i] if _edit_i is not None else None
+        _funds = [{"slot": s, "code": c, "label": lb,
+                   "unit": ("股" if HG.default_unit(c) == "股" else "份")}
+                  for s, c, lb in _slot_opts]
 
-        if _src is None:
-            st.markdown("**补录一笔操作**")
-        else:
-            _what = " · ".join(x for x in [
-                _cn_date(_src.get("date")), str(_src.get("side") or ""),
-                (FL.fund_name(_src.get("code", "")) or str(_src.get("code") or ""))
-                if _src.get("code") else ""] if x)
-            _hh = st.columns([5, 1], vertical_alignment="center")
-            _hh[0].markdown(f"**正在修改第 {_edit_i} 笔** · {_what}")
-            if _hh[1].button("取消修改", key="tr_cancel", use_container_width=True):
-                st.session_state.pop("_tr_edit_idx", None)
-                st.rerun()
-        st.caption("买入 / 卖出 = 在账户里买卖基金；转入 = 从银行卡或支付宝再放钱进来（记入本金，不算收益）；"
-                   "转出 = 把钱取出去。**卖出基金后钱自动回到现金，不用再记转入。**")
-
-        _fund_map = {(s, f["code"]): f
-                     for s in HG.SLOTS for f in HG.funds(holdings.get(s, {}))}
-        _pairs = [(s, c) for s, c, _ in _slot_opts]
-        _src_code, _src_slot = str((_src or {}).get("code") or ""), str((_src or {}).get("slot") or "")
-        _idx0 = next((k for k, (s, c) in enumerate(_pairs)
-                      if c == _src_code and (not _src_slot or s == _src_slot)), 0)
-        _side0 = str((_src or {}).get("side") or "买入")
-        _side0 = ("转入" if _side0 in ("转入", "入金")
-                  else "转出" if _side0 in ("转出", "出金") else _side0)
-        if _side0 not in ("买入", "卖出", "转入", "转出"):
-            _side0 = "买入"
-
-        # 整个表单（含 form 外那两个联动控件）装进同一个卡片里：
-        # 外层给卡片样式、内层 form 去掉自带边框与内边距，两边的列宽基准才一样，上下才对得齐。
+        # ---------------- 记一笔：金额优先，和支付宝「买入 5,000 元」的说法一致 ----------------
         with st.container(key="tr_card"):
-            rA = st.columns([1, 1, 1], gap="small", vertical_alignment="bottom")
-            # 日期和类型放 form 外：改日期要立刻刷新下面的净值提示，改类型要立刻换成「只填金额」
-            tr_date = rA[0].date_input("日期", value=pd.Timestamp((_src or {}).get("date") or _hg_last).date(),
-                                       format="YYYY/MM/DD")
+            st.markdown('<div class="sec-head"><span class="t">记一笔</span></div>',
+                        unsafe_allow_html=True)
+            rA = st.columns([1, 1.15, 1.6], gap="small", vertical_alignment="bottom")
+            tr_date = rA[0].date_input("日期", value=pd.Timestamp(_hg_last).date(),
+                                       format="YYYY/MM/DD", key="tr_date")
             with rA[1]:
                 with st.container(key="tr_mode_switch"):
                     tr_side = st.segmented_control(
-                        "类型", ["买入", "卖出", "转入", "转出"], default=_side0,
-                        help="买入 / 卖出 = 在账户里买卖基金。转入 = 从银行卡或支付宝再放钱进来"
-                             "（记入本金，不算收益）；转出 = 把钱取出去。转入 / 转出和具体哪只基金无关。",
-                    ) or _side0
+                        "类型",
+                        ["买入", "卖出", "转入", "转出"],
+                        default="买入", key="tr_side",
+                        help="买入 / 卖出 = 在账户里用现金换基金、或用基金换回现金（钱自动回到现金）。\n\n"
+                             "转入 / 转出 = 钱在这个账户和银行卡之间进出，和具体哪只基金无关。",
+                    ) or "买入"
             _is_money = tr_side in _MONEY_SIDES
 
-            with st.form("acct_trade"):
-                if _is_money:
-                    rB = st.columns([1, 1, 1], gap="small", vertical_alignment="bottom")
-                    _amt0 = (float(_src.get("shares") or 0)
-                             if _src and (_src.get("side") in _MONEY_SIDES) else 0.0)
-                    tr_amount = rB[0].number_input("金额（元）", min_value=0.0, value=_amt0,
-                                                   step=1000.0, format="%.2f")
-                    tr_slot, tr_shares, tr_nav, tr_fee = ("", ""), float(tr_amount), 0.0, 0.0
-                    _ok = rB[1].form_submit_button("保存修改" if _src else "记一笔", type="primary")
-                else:
-                    rB = st.columns([1, 1, 1], gap="small", vertical_alignment="bottom")
-                    tr_slot = rB[0].selectbox("基金", _slot_opts, index=_idx0,
-                                              format_func=lambda x: x[2])
-                    _f_now = _fund_map.get((tr_slot[0], tr_slot[1]), {})
-                    _unit_otc = HG.is_otc(_f_now) if _f_now else True
-                    _sh0 = (float(_src.get("shares") or 0)
-                            if _src and (_src.get("side") not in _MONEY_SIDES) else 0.0)
-                    tr_shares = rB[1].number_input(
-                        "份额（场外）" if _unit_otc else "股数（场内）",
-                        min_value=0.0, value=_sh0, step=100.0, format="%.2f")
-                    _nav_hint = _hg_nav_on(None, tr_date, tr_slot[1])
-                    # 改的是同一只、同一天的成交时，用原来记下的净值（真实成交价可能与当日净值不同）
-                    _nav0 = 0.0
-                    if (_src and str(_src.get("code") or "") == str(tr_slot[1])
-                            and str(_src.get("date"))[:10] == str(tr_date)):
-                        _nav0 = float(_src.get("nav") or 0)
-                    tr_nav = rB[2].number_input(
-                        "成交净值（元/份）", min_value=0.0,
-                        value=round(_nav0 if _nav0 > 0 else float(_nav_hint or 0), 4),
-                        step=0.0001, format="%.4f",
-                        help="场外按当天收盘净值成交；留 0 会自动取该日净值。")
-                    rC = st.columns([1, 1, 1], gap="small", vertical_alignment="bottom")
-                    tr_fee = rC[0].number_input(
-                        "手续费（元）", min_value=0.0,
-                        value=float((_src or {}).get("fee") or 0) if _src else 0.0,
-                        step=1.0, format="%.2f")
-                    _ok = rC[1].form_submit_button("保存修改" if _src else "记一笔", type="primary")
-                if _ok:
-                    _t = {"date": str(tr_date), "side": tr_side,
-                          "slot": (tr_slot[0] if tr_slot else ""),
-                          "code": (tr_slot[1] if tr_slot else ""),
-                          "shares": float(tr_shares), "nav": float(tr_nav), "fee": float(tr_fee)}
-                    if float(tr_shares) <= 0:
-                        st.warning("金额要大于 0" if _is_money else "数量要大于 0")
-                    elif not _is_money and not _t["code"]:
-                        st.warning("该基金要先在「我的持仓」里挂上")
-                    else:
-                        if _src is not None:
-                            _trades[_edit_i] = {**_trades[_edit_i], **_t}
-                            st.session_state.pop("_tr_edit_idx", None)
-                            _msg = "已保存修改"
-                        else:
-                            _trades.append(_t)
-                            _msg = "已记录"
-                        save_acct(acct, ACCT_FILE)
-                        st.toast(_msg, icon=":material/check_circle:")
-                        st.rerun()
+            if _is_money:
+                rB = st.columns([1.6, 1.0, 1.0, 0.8, 0.8], gap="small", vertical_alignment="bottom")
+                tr_amount = rB[0].number_input("金额（元）", min_value=0.0, step=1000.0,
+                                               format="%.2f", key="tr_amount_money")
+                tr_slot, tr_nav, tr_fee = ("", ""), 0.0, 0.0
+                _side_note = ("银行卡 / 支付宝 → 账户现金：现金变多，本金同步变多，**不算收益**。"
+                              if tr_side == "转入" else
+                              "账户现金 → 银行卡：现金变少，本金同步变少。卖完基金想取钱才用这个，"
+                              "卖出基金本身不会自动取钱。")
+                _act = rB[4]
+            else:
+                rB = st.columns([1.6, 1.0, 1.0, 0.8, 0.8], gap="small", vertical_alignment="bottom")
+                tr_slot = rB[0].selectbox("基金", _slot_opts,
+                                          format_func=lambda x: x[2], key="tr_fund")
+                tr_amount = rB[1].number_input("金额（元）", min_value=0.0, step=1000.0,
+                                               format="%.2f", key="tr_amount")
+                _nav_hint = _hg_nav_on(None, tr_date, tr_slot[1])
+                tr_nav = rB[2].number_input(
+                    "单价（元/" + ("股" if HG.default_unit(tr_slot[1]) == "股" else "份") + "）",
+                    min_value=0.0, value=round(float(_nav_hint or 0), 4),
+                    step=0.0001, format="%.4f", key=f"tr_nav_{tr_slot[1]}_{tr_date}",
+                    help="默认取这天的净值（场外按当日收盘净值成交）；支付宝里成交价不一样时改这里。")
+                tr_fee = rB[3].number_input("手续费（元）", min_value=0.0, step=1.0,
+                                            format="%.2f", key="tr_fee")
+                _side_note = ("买入：现金 → 基金。金额按单价折成份额，现金减少。"
+                              if tr_side == "买入" else
+                              "卖出：基金 → 现金。钱自动回到账户现金里，**不用再记一笔转入**。")
+                _act = rB[4]
 
-        st.markdown(f"**台账 · 全部成交（{len(_trades)} 笔）**")
+            _sh_new = 0.0
+            if _is_money:
+                _sh_new = float(tr_amount)
+            elif tr_nav > 0:
+                _sh_new = ((float(tr_amount) - float(tr_fee)) / float(tr_nav) if tr_side == "买入"
+                           else (float(tr_amount) + float(tr_fee)) / float(tr_nav))
+            # 现金只看「金额」：买入付出去多少、卖出到账多少、转入转出进出多少（手续费已含在金额里）
+            _cash_after = (_cash + float(tr_amount) if tr_side in ("卖出", "转入")
+                           else _cash - float(tr_amount))
+            _hint = _side_note
+            if _is_money and tr_amount > 0:
+                _hint += f"　记完现金 ¥{_cash:,.0f} → ¥{_cash_after:,.0f}"
+            elif not _is_money and tr_amount > 0 and tr_nav > 0:
+                _hint += (f"　≈ {_sh_new:,.2f} "
+                          + ("股" if HG.default_unit(tr_slot[1]) == "股" else "份")
+                          + f"，现金 ¥{_cash:,.0f} → ¥{_cash_after:,.0f}")
+            st.caption(_hint)
+
+            if _act.button("记一笔", type="primary", key="tr_add"):
+                _t = {"date": str(tr_date), "side": tr_side,
+                      "slot": (tr_slot[0] if tr_slot else ""),
+                      "code": (tr_slot[1] if tr_slot else ""),
+                      "shares": round(float(_sh_new), 4),
+                      "nav": float(tr_nav), "fee": float(tr_fee)}
+                if float(tr_amount) <= 0:
+                    st.warning("金额要大于 0")
+                elif not _is_money and float(tr_nav) <= 0:
+                    st.warning("单价要大于 0 —— 换一天或手工填那天的成交净值")
+                else:
+                    _trades.append(_t)
+                    save_acct(acct, ACCT_FILE)
+                    st.toast("已记录", icon=":material/check_circle:")
+                    st.rerun()
+
+        # ---------------- 全部成交：行内改 / 行内删 ----------------
+        st.markdown(
+            '<div class="sec-head"><span class="t">全部成交</span>'
+            f'<span class="r">{len(_trades)} 笔 · 最近的在上 · 点铅笔就地改，垃圾桶就地删</span></div>',
+            unsafe_allow_html=True,
+        )
         if not _trades:
             st.caption("还没有成交。上面记一笔，或者在「买卖提醒」把那份清单一次登记进来。")
         else:
-            _e_sig, _d_sig = _trade_list([_trade_row(i, t) for i, t in enumerate(_trades)],
-                                         editing=_edit_i)
-            if _d_sig and _d_sig != st.session_state.get("_tr_del_sig"):
-                st.session_state["_tr_del_sig"] = _d_sig
-                _di = int(str(_d_sig).split(":")[0])
+            # 最近的排最上面（按成交日期，再按录入顺序倒序）：刚记错的那笔就在第一行
+            _rows = [_trade_row(i, t) for i, t in
+                     sorted(enumerate(_trades),
+                            key=lambda kv: (str(kv[1].get("date") or ""), kv[0]), reverse=True)]
+            _saved, _dsig = _trade_list(_rows, _funds)
+            if _saved and _saved != st.session_state.get("_tr_save_sig"):
+                st.session_state["_tr_save_sig"] = _saved
+                try:
+                    _p = json.loads(_saved)
+                except Exception:                 # noqa: BLE001
+                    _p = None
+                if isinstance(_p, dict):
+                    _i = int(_p.get("i", -1))
+                    if 0 <= _i < len(_trades):
+                        _new = {"date": str(_p.get("date") or ""),
+                                "side": str(_p.get("side") or ""),
+                                "slot": str(_p.get("slot") or ""),
+                                "code": str(_p.get("code") or ""),
+                                "shares": float(_p.get("shares") or 0),
+                                "nav": float(_p.get("nav") or 0),
+                                "fee": float(_p.get("fee") or 0)}
+                        if _new["shares"] > 0 and _new["date"]:
+                            _trades[_i] = {**_trades[_i], **_new}
+                            save_acct(acct, ACCT_FILE)
+                            st.toast("已保存这一笔", icon=":material/check_circle:")
+                        else:
+                            st.warning("这一笔没保存：日期或金额不对")
+                st.rerun()
+            if _dsig and _dsig != st.session_state.get("_tr_del_sig"):
+                st.session_state["_tr_del_sig"] = _dsig
+                _di = int(str(_dsig).split(":")[0])
                 if 0 <= _di < len(_trades):
                     _trades.pop(_di)
                     save_acct(acct, ACCT_FILE)
-                    st.session_state.pop("_tr_edit_idx", None)
                     st.toast("已删除这一笔", icon=":material/delete:")
                 st.rerun()
-            if _e_sig and _e_sig != st.session_state.get("_tr_edit_sig"):
-                st.session_state["_tr_edit_sig"] = _e_sig
-                _ei = int(str(_e_sig).split(":")[0])
-                if 0 <= _ei < len(_trades):
-                    st.session_state["_tr_edit_idx"] = _ei
-                st.rerun()
-            st.caption("行尾的铅笔改这一笔（日期、数量、净值、手续费都能改），垃圾桶删掉；"
-                       "改完点「保存修改」，不想改了点上方的「取消修改」。")
         st.caption(f"账户文件：{ACCT_FILE.name}（保存在 data/ 下，重装或换机时记得备份）")
+
 
 # ============================================================
 # Tab 6: 收益对比（我的账户 vs 项目默认基金 vs 策略理论）
