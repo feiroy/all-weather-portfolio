@@ -641,6 +641,378 @@ _TREND_STAGES = {
 }
 
 
+
+
+def _trend_aggregate(series, period):
+    """只聚合数值，保留每期最后一条记录的真实日期，不伪造未来期末日期。"""
+    clean = pd.to_numeric(series, errors="coerce").dropna().sort_index()
+    clean = clean.loc[~clean.index.duplicated(keep="last")]
+    clean = clean.loc[np.isfinite(clean) & (clean.index <= pd.Timestamp(date.today()))]
+    if period != "日":
+        freq = "M" if period == "月" else "Y"
+        clean = clean.groupby(clean.index.to_period(freq), sort=True).tail(1)
+    return clean
+
+
+def _trend_window_start(series, span):
+    """区间起点下标 = 基准那一条（与支付宝/天天基金「历史业绩」同口径）。
+
+    - 近N月/年：基准 = 截止日往前推 N 个自然月/年那天的净值；那天不是交易日就用之前最近一个交易日。
+      例：最新 2026/10/23，近3月基准 = 2026/07/23 的净值。
+    - 今年来：基准 = 去年最后一个交易日的净值（不是今年第一天，否则会漏掉第一天的涨跌）。
+    - 数据不够长：从第一条开始。
+    """
+    if series.empty:
+        return 0
+    kind, amount = span
+    if kind == "all":
+        return 0
+    if kind == "count":
+        return max(0, len(series) - int(amount))
+    end = series.index[-1]
+    if kind == "ytd":
+        i = int(series.index.searchsorted(pd.Timestamp(year=end.year, month=1, day=1), side="left")) - 1
+    else:
+        i = int(series.index.searchsorted(end - pd.DateOffset(**{kind: int(amount)}), side="right")) - 1
+    return max(0, min(i, len(series) - 1))
+
+
+def _period_label(t, period):
+    """期间标签：日=2026/09/24；月=2026年9月；年=2026年（CLAUDE.md 日期规范）。"""
+    if period == "日":
+        return f"{t:%Y/%m/%d}"
+    if period == "月":
+        return f"{t.year}年{t.month}月"
+    return f"{t.year}年"
+
+
+# ------------------------------------------------------------------
+# 多基金走势对比组件（iframe）：与 _scroll_chart_html 同交互、同样式，多条线同图
+# ------------------------------------------------------------------
+_CMP_COLORS = ["#2563EB", "#D97706", "#7C3AED", "#0891B2", "#DB2777",
+               "#4F46E5", "#EA580C", "#0F172A", "#A16207", "#9333EA"]   # 避开红/绿，红绿只表示涨跌
+
+_CMP_CSS = r"""
+#legend{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.lg{font:inherit;font-size:12px;display:inline-flex;align-items:center;gap:6px;border:1px solid #E2E8F0;border-radius:999px;
+  background:#fff;color:#0F172A;padding:5px 12px;cursor:pointer;max-width:100%}
+.lg:hover{border-color:#CBD5E1}
+.lg i{width:10px;height:10px;border-radius:50%;flex:none}
+.lg span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:280px}
+.lg[aria-pressed="false"]{opacity:.45}.lg[aria-pressed="false"] span{text-decoration:line-through}
+.hint{font-size:12px;color:#94A3B8}
+.tbl-wrap{overflow-x:auto}
+.cmp-tbl{width:100%;border-collapse:collapse;margin-top:12px;font-size:13px;font-variant-numeric:tabular-nums}
+.cmp-tbl th{font-weight:500;color:#475569;font-size:12px;text-align:right;padding:8px 10px;border-bottom:1px solid #E2E8F0;white-space:nowrap}
+.cmp-tbl td{text-align:right;padding:10px;border-bottom:1px solid #EEF2F7;white-space:nowrap}
+.cmp-tbl th:first-child,.cmp-tbl td:first-child{text-align:left;padding-left:0}
+.cmp-tbl td:first-child{max-width:320px;overflow:hidden;text-overflow:ellipsis;color:#0F172A}
+.cmp-tbl td b{font-weight:600}
+.cmp-tbl i,#tip i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:8px;vertical-align:0}
+#tip{width:420px}
+#tip .tip-row{display:grid;grid-template-columns:minmax(0,1fr) 62px 66px 62px;gap:8px}
+#tip .tip-row .tip-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#tip .tip-row b{text-align:right}
+#tip .tip-head{color:#94A3B8;font-size:11px}#tip .tip-head span:not(:first-child){text-align:right}
+"""
+
+
+def _compare_payload(series_map):
+    """多基金按期对齐（日=日期、月=年月、年=年份），返回 names / histories（与走势组件同结构）。"""
+    names = list(series_map)
+    hist = {}
+    keyfmt = {"日": "%Y%m%d", "月": "%Y%m", "年": "%Y"}
+    for period in ("日", "月", "年"):
+        keyed = {}
+        for nm, s in series_map.items():
+            agg = _trend_aggregate(s, period)
+            keyed[nm] = {t.strftime(keyfmt[period]): (t, float(v)) for t, v in agg.items()}
+        keys = sorted(set().union(*[k.keys() for k in keyed.values()]))
+        if not keys:
+            continue
+        stamps = [max(keyed[nm][k][0] for nm in names if k in keyed[nm]) for k in keys]
+        idx = pd.Series(range(len(stamps)), index=pd.DatetimeIndex(stamps))
+        hist[period] = {
+            "labels": [_period_label(t, period) for t in stamps],
+            "dates": [t.strftime("%Y/%m/%d") for t in stamps],
+            "vals": {nm: [round(keyed[nm][k][1], 6) if k in keyed[nm] else None for k in keys] for nm in names},
+            "windows": {label: {"start": _trend_window_start(idx, span),
+                                "count": len(idx) - _trend_window_start(idx, span)}
+                        for label, span in _TREND_RANGES.items()},
+        }
+    return names, hist
+
+
+def _compare_chart_html(series_map, height=560, default_range="近1年", title="走势对比"):
+    names, hist = _compare_payload(series_map)
+    payload = json.dumps({"names": names, "colors": _CMP_COLORS, "histories": hist,
+                          "height": int(height), "defaultRange": default_range},
+                         ensure_ascii=False, allow_nan=False).replace("<", "\\u003c")
+    btns = _range_buttons(default_range)
+    template = r"""<style>
+__BASE_CSS__
+__CMP_CSS__
+</style>
+<div id="wrap" aria-busy="false">
+<div class="heading"><h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4v16h16M7 14l4-5 4 3 5-7"/></svg>__TITLE__</h3><span id="updating" role="status">正在更新</span></div>
+<div class="controls"><div id="range-controls" role="group" aria-label="常用区间">__BTNS__</div>
+<select id="period" aria-label="周期"><option value="日">日线</option><option value="月">月线</option><option value="年">年线</option></select></div>
+<div id="legend"></div>
+<div class="state-line"><span id="selection" aria-live="polite"></span><span class="date-line"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2" fill="none"/><path d="M8 3v5m8-5v5M4 10h16"/></svg><span id="range"></span></span></div>
+<div id="notice" role="status"></div>
+<svg id="chart" role="img" aria-label="多基金走势对比，可拖动和缩放" tabindex="0"></svg>
+<div id="stats"></div><div id="tip"></div>
+</div>
+<script>
+(() => {
+  const D = __CMP_DATA__;
+  const names = D.names, COL = D.colors;
+  const svg = document.getElementById('chart'), wrap = document.getElementById('wrap');
+  const tip = document.getElementById('tip'), range = document.getElementById('range'), legend = document.getElementById('legend');
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  const valid = v => v !== null && v !== undefined && Number.isFinite(v);
+  const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const pct = v => valid(v) ? (v > 0 ? '+' : '') + v.toFixed(2) + '%' : '—';
+  const color = v => !valid(v) || Math.abs(v) < 1e-10 ? '#475569' : (v > 0 ? '#C52828' : '#16703B');
+  const col = nm => COL[names.indexOf(nm) % COL.length];
+  const PPY = {'日': 252, '月': 12, '年': 1};
+  const toMs = s => new Date(s.replace(/\//g, '-') + 'T00:00:00').getTime();
+  for (const k in D.histories) {            // 各基金单期涨跌幅：相对本基金上一条有效记录
+    const Hh = D.histories[k]; Hh.steps = {};
+    for (const nm of names) {
+      const v = Hh.vals[nm], r = new Array(v.length).fill(null); let prev = null;
+      for (let i = 0; i < v.length; i++) if (valid(v[i])) { if (prev !== null && prev > 0) r[i] = (v[i] / prev - 1) * 100; prev = v[i]; }
+      Hh.steps[nm] = r;
+    }
+  }
+  // 与单只走势同一套记忆：切视图 / 增删基金都会重建 iframe，区间与周期从 localStorage 还原
+  const STORE = 'awTrend.multi';
+  const memo = (() => { try { return JSON.parse(localStorage.getItem(STORE) || '{}'); } catch (e) { return {}; } })();
+  const saveMemo = () => { try { localStorage.setItem(STORE, JSON.stringify({period, range: lastRange})); } catch (e) {} };
+  let period = D.histories[memo.period] ? memo.period : '日';
+  let lastRange = (D.histories[period].windows || {})[memo.range] ? memo.range : D.defaultRange;
+  let activeRange = lastRange, customDates = null;
+  let P = D.histories[period], n = P.dates.length;
+  const hidden = new Set();
+  const H = D.height, L = 64, R = 16, T = 32, B = 32, GAP = 30;
+  // 与走势分析同一布局：净值 55% / 相对起点涨跌幅 27% / 单期涨跌幅 18%
+  const PH = H - T - B - GAP * 2, AH = PH * .55, RH = PH * .27, BH = PH * .18;
+  const rTop = T + AH + GAP, bTop = rTop + RH + GAP;
+  let initialCount = P.windows[lastRange].count, initialStart = P.windows[lastRange].start;
+  let count = initialCount, start = initialStart, W = 0, PW = 0, frame = 0;
+  let dragging = null, pinned = null, hover = null, bases = {};
+  const periodControl = document.getElementById('period');
+  for (const o of periodControl.options) o.disabled = !D.histories[o.value];
+  periodControl.value = period;
+  legend.innerHTML = names.map((nm, k) => `<button class="lg" data-k="${k}" aria-pressed="true" title="点击隐藏/显示"><i style="background:${col(nm)}"></i><span>${esc(nm)}</span></button>`).join('');
+  legend.querySelectorAll('.lg').forEach(b => b.onclick = () => {
+    const nm = names[+b.dataset.k];
+    if (hidden.has(nm)) hidden.delete(nm); else if (names.length - hidden.size > 1) hidden.add(nm);
+    b.setAttribute('aria-pressed', String(!hidden.has(nm))); requestDraw();
+  });
+  const shown = () => names.filter(nm => !hidden.has(nm));
+  const x = i => L + (i + .5 - start) * PW / count;
+  const bounds = () => {
+    if (count <= 0) return [0, -1];
+    let first = Math.max(0, Math.ceil(start - .5 + 1e-8));
+    let last = Math.min(n - 1, Math.floor(start + count - .5 - 1e-8));
+    if (last < first) first = last = clamp(Math.round(start + count / 2 - .5), 0, n - 1);
+    return [first, last];
+  };
+  const rel = (nm, i) => { const b = bases[nm], v = P.vals[nm][i]; return (b !== null && b !== undefined && valid(v)) ? (v / P.vals[nm][b] - 1) * 100 : null; };
+  function requestDraw() { if (!frame) frame = requestAnimationFrame(() => { frame = 0; draw(); }); }
+  function update(nextStart, nextCount) {
+    if (!n) return;
+    count = clamp(nextCount, 1, n);
+    start = clamp(nextStart, 0, Math.max(0, n - count));
+    activeRange = Math.abs(count - initialCount) < 1e-6 && Math.abs(start - initialStart) < 1e-6 ? lastRange : null;
+    const [first, last] = bounds();
+    customDates = activeRange ? null : [P.dates[first], P.dates[last]];
+    hover = null; requestDraw();
+  }
+  function useRange(label) {
+    lastRange = activeRange = label; customDates = null;
+    initialCount = P.windows[label].count; initialStart = P.windows[label].start;
+    count = initialCount; start = initialStart; pinned = hover = null;
+    wrap.setAttribute('aria-busy', 'true'); requestDraw(); saveMemo();
+  }
+  document.querySelectorAll('[data-range]').forEach(b => b.onclick = () => useRange(b.dataset.range));
+  periodControl.onchange = () => {
+    const keepDates = activeRange ? null : customDates;
+    period = periodControl.value; P = D.histories[period]; n = P.dates.length;
+    initialCount = P.windows[lastRange].count; initialStart = P.windows[lastRange].start;
+    if (keepDates) {
+      const first = P.dates.findIndex(d => d >= keepDates[0]);
+      let last = P.dates.length - 1;
+      while (last >= 0 && P.dates[last] > keepDates[1]) last--;
+      start = Math.max(0, first); count = first < 0 || last < first ? 0 : last - first + 1;
+      activeRange = null;
+    } else { start = initialStart; count = initialCount; }
+    pinned = hover = null; wrap.setAttribute('aria-busy', 'true'); requestDraw(); saveMemo();
+  };
+  function zoom(factor, px = L + PW / 2) {
+    if (!PW) return;
+    const fraction = clamp((px - L) / PW, 0, 1), anchor = start + fraction * count;
+    update(anchor - fraction * clamp(count * factor, 1, n), clamp(count * factor, 1, n));
+  }
+  function line(nm, valAt, yf, first, last, w, dot) {
+    const pts = []; let c = '';
+    for (let i = first; i <= last; i++) { const v = valAt(nm, i); if (!valid(v)) continue;
+      pts.push(`${x(i)},${yf(v)}`); if (dot) c += `<circle cx="${x(i)}" cy="${yf(v)}" r="2.3" fill="${col(nm)}"/>`; }
+    return `<polyline points="${pts.join(' ')}" fill="none" stroke="${col(nm)}" stroke-width="${w}" stroke-linejoin="round"/>` + c;
+  }
+  function draw() {
+    const width = wrap.getBoundingClientRect().width;
+    if (width <= L + R) return;
+    W = width; PW = W - L - R;
+    svg.setAttribute('width', W); svg.setAttribute('height', H); svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    const [first, last] = bounds(), visibleCount = Math.max(0, last - first + 1);
+    document.querySelectorAll('[data-range]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.range === activeRange)));
+    const selection = document.getElementById('selection');
+    selection.textContent = `当前：${activeRange || '自选区间'} · ${period}线`;
+    selection.dataset.custom = String(!activeRange);
+    wrap.setAttribute('aria-busy', 'false');
+    if (!visibleCount) {
+      range.textContent = customDates ? customDates.join(' — ') : '暂无有效日期';
+      document.getElementById('notice').textContent = '该范围暂无此粒度的数据，请更换范围或周期。';
+      svg.innerHTML = ''; tip.style.display = 'none'; document.getElementById('stats').innerHTML = ''; fit(); return;
+    }
+    document.getElementById('notice').textContent = visibleCount === 1 ? '该范围仅有1期数据，保留真实单点。' : '';
+    range.textContent = `${P.dates[first]} — ${P.dates[last]}`;
+    const S = shown(); bases = {};
+    for (const nm of S) { bases[nm] = null; for (let i = first; i <= last; i++) { const v = P.vals[nm][i]; if (valid(v) && v > 0) { bases[nm] = i; break; } } }
+    const step = PW / count, dot = step >= 7;
+    let grid = '', marks = '', ticks = '';
+    // ① 净值面板：各基金自己的复权净值（最新值 = 最新单位净值）；量纲不同时左轴按可见范围统一缩放
+    let lo = null, hi = null;
+    for (const nm of S) for (let i = first; i <= last; i++) { const v = P.vals[nm][i]; if (valid(v)) { lo = lo === null ? v : Math.min(lo, v); hi = hi === null ? v : Math.max(hi, v); } }
+    if (lo === null) { lo = 0; hi = 1; }
+    const padN = (hi - lo) * .12 || Math.max(Math.abs(hi) * .02, .01); lo -= padN; hi += padN;
+    const yN = v => T + (hi - v) * AH / (hi - lo);
+    ticks += `<text x="${L}" y="18" font-size="12" fill="#475569">净值</text>`;
+    for (let k = 0; k <= 4; k++) {
+      const v = lo + (hi - lo) * k / 4, yy = yN(v);
+      grid += `<line x1="${L}" y1="${yy}" x2="${W-R}" y2="${yy}" stroke="#EEF2F7"/>`;
+      ticks += `<text x="${L-8}" y="${yy+4}" text-anchor="end" font-size="10" fill="#475569">${v.toFixed(hi - lo < .5 ? 4 : 3)}</text>`;
+    }
+    for (const nm of S) marks += line(nm, (m, i) => P.vals[m][i], yN, first, last, 2, dot);
+    // ② 相对起点涨跌幅：各基金以可见区间首个有效值为 0%（同一把尺子比强弱）
+    let rlo = 0, rhi = 0;
+    for (const nm of S) for (let i = first; i <= last; i++) { const r = rel(nm, i); if (valid(r)) { rlo = Math.min(rlo, r); rhi = Math.max(rhi, r); } }
+    const padR = (rhi - rlo) * .1 || 1; rlo -= padR; rhi += padR;
+    const yR = v => rTop + (rhi - v) * RH / (rhi - rlo);
+    ticks += `<text x="${L}" y="${rTop-10}" font-size="12" fill="#475569">相对起点涨跌幅</text>`
+      + `<text x="${L-8}" y="${rTop+9}" text-anchor="end" font-size="11" fill="#475569">${pct(rhi - padR)}</text>`
+      + `<text x="${L-8}" y="${yR(0)+3.5}" text-anchor="end" font-size="11" fill="#475569">0%</text>`
+      + `<text x="${L-8}" y="${rTop+RH-1}" text-anchor="end" font-size="11" fill="#475569">${pct(rlo + padR)}</text>`;
+    marks += `<line x1="${L}" y1="${yR(0)}" x2="${W-R}" y2="${yR(0)}" stroke="#94A3B8" stroke-dasharray="2 4"/>`;
+    for (const nm of S) marks += line(nm, rel, yR, first, last, 1.6, false);
+    // ③ 单期涨跌幅（0 轴居中）
+    const zero = bTop + BH / 2;
+    let bmax = .5;
+    for (const nm of S) for (let i = first; i <= last; i++) { const v = P.steps[nm][i]; if (valid(v)) bmax = Math.max(bmax, Math.abs(v)); }
+    const yB = v => zero - v * (BH / 2 - 4) / bmax;
+    ticks += `<text x="${L}" y="${bTop-10}" font-size="12" fill="#475569">单${period}涨跌幅</text>`
+      + `<text x="${L-8}" y="${bTop+9}" text-anchor="end" font-size="11" fill="#475569">+${bmax.toFixed(2)}%</text>`
+      + `<text x="${L-8}" y="${zero+3.5}" text-anchor="end" font-size="11" fill="#475569">0%</text>`
+      + `<text x="${L-8}" y="${bTop+BH-1}" text-anchor="end" font-size="11" fill="#475569">-${bmax.toFixed(2)}%</text>`;
+    marks += `<line x1="${L}" y1="${zero}" x2="${W-R}" y2="${zero}" stroke="#E2E8F0" stroke-dasharray="3 3"/>`;
+    for (const nm of S) marks += line(nm, (m, i) => P.steps[m][i], yB, first, last, 1.2, false);
+    const spacing = Math.max(1, Math.ceil(74 / step)), ids = [];
+    for (let i = first; i <= last; i += spacing) ids.push(i);
+    if (ids.length > 1 && last - ids[ids.length-1] < spacing) ids.pop();
+    if (!ids.includes(last)) ids.push(last);
+    const labs = [];
+    for (const i of ids) { const cx = clamp(x(i), L + 40, W - R - 40); while (labs.length && cx - labs[labs.length-1].cx < 70) labs.pop(); labs.push({i, cx}); }
+    for (const {i, cx} of labs) ticks += `<text x="${cx}" y="${H-15}" text-anchor="middle" font-size="10" fill="#475569">${esc(P.labels[i])}</text>`;
+    svg.innerHTML = `<defs><clipPath id="plot-clip"><rect x="${L}" y="${T-5}" width="${PW}" height="${H-T-B+10}"/></clipPath></defs>${grid}<g clip-path="url(#plot-clip)">${marks}<line id="guide" y1="${T}" y2="${H-B}" stroke="#94A3B8" stroke-dasharray="4 4" visibility="hidden"/></g>${ticks}`;
+    // 当前可见区间指标（随拖动/缩放/切周期实时重算）
+    const rows = S.map(nm => {
+      const b = bases[nm]; let e = null;
+      for (let i = last; i >= first; i--) if (valid(P.vals[nm][i])) { e = i; break; }
+      const head = `<td title="${esc(nm)}"><i style="background:${col(nm)}"></i>${esc(nm)}</td>`;
+      if (b === null || e === null) return `<tr>${head}<td colspan="6" style="color:#94A3B8">该区间无数据</td></tr>`;
+      const v0 = P.vals[nm][b], v1 = P.vals[nm][e], chg = (v1 / v0 - 1) * 100;
+      const yrs = (toMs(P.dates[e]) - toMs(P.dates[b])) / (365.25 * 864e5);
+      const ann = yrs >= .25 ? (Math.pow(v1 / v0, 1 / yrs) - 1) * 100 : null;
+      let peak = null, mdd = 0; const rs = [];
+      for (let i = b; i <= e; i++) { const v = P.vals[nm][i]; if (!valid(v)) continue;
+        if (peak === null || v > peak) peak = v; mdd = Math.min(mdd, (v / peak - 1) * 100);
+        if (i > b && valid(P.steps[nm][i])) rs.push(P.steps[nm][i] / 100); }
+      let vol = null;
+      if (rs.length >= 3) { const m = rs.reduce((a, c) => a + c, 0) / rs.length;
+        vol = Math.sqrt(rs.reduce((a, c) => a + (c - m) ** 2, 0) / (rs.length - 1)) * Math.sqrt(PPY[period]) * 100; }
+      return `<tr>${head}<td>${v0.toFixed(4)} → ${v1.toFixed(4)}</td><td><b style="color:${color(chg)}">${pct(chg)}</b></td><td style="color:${color(ann)}">${pct(ann)}</td>`
+        + `<td style="color:${color(mdd)}">${mdd < 0 ? pct(mdd) : '0.00%'}</td><td>${valid(vol) ? vol.toFixed(2) + '%' : '—'}</td>`
+        + `<td>${esc(P.dates[b])} — ${esc(P.dates[e])}</td></tr>`;
+    }).join('');
+    document.getElementById('stats').innerHTML =
+      `<div class="summary-main"><div class="summary-result"><span>当前区间指标</span></div>`
+      + `<span class="hint">拖动/滚轮平移 · Ctrl+滚轮缩放 · 双击复位 · 点图例隐藏/显示</span></div>`
+      + `<div class="tbl-wrap"><table class="cmp-tbl"><thead><tr><th>基金</th><th>净值 起 → 止</th><th>区间涨跌</th><th>年化</th><th>最大回撤</th><th>波动(年化)</th><th>起止</th></tr></thead><tbody>${rows}</tbody></table></div>`
+      + `<div class="amp-row"><small>净值为复权净值（最新值 = 最新单位净值，历史按日增长率含分红还原）；以各基金可见区间内首个有效值为 0% 基准；区间不足 3 个月不计年化；波动按${period}收益年化。</small></div>`;
+    if (pinned !== null) showTip(pinned); else tip.style.display = 'none';
+    fit();
+  }
+  function showTip(i, clientY = null) {
+    const [first, last] = bounds(), guide = document.getElementById('guide');
+    if (!Number.isInteger(i) || i < first || i > last) { tip.style.display = 'none'; if (guide) guide.setAttribute('visibility', 'hidden'); return; }
+    if (guide) { guide.setAttribute('x1', x(i)); guide.setAttribute('x2', x(i)); guide.setAttribute('visibility', 'visible'); }
+    tip.innerHTML = `<b>${esc(P.dates[i])}</b><div class="tip-row tip-head"><span>基金</span><span>净值</span><span>相对起点</span><span>单${period}</span></div>`
+      + shown().map(nm => { const r = rel(nm, i), st = P.steps[nm][i], v = P.vals[nm][i];
+          return `<div class="tip-row"><span class="tip-label"><i style="background:${col(nm)}"></i>${esc(nm)}</span><b>${valid(v) ? v.toFixed(4) : '—'}</b><b style="color:${color(r)}">${pct(r)}</b><b style="color:${color(st)}">${pct(st)}</b></div>`; }).join('')
+      + (pinned !== null ? '<small class="tip-label">已固定，再次点击取消</small>' : '');
+    tip.style.display = 'block';
+    const wrapBox = wrap.getBoundingClientRect(), chartBox = svg.getBoundingClientRect();
+    const chartTop = chartBox.top - wrapBox.top;
+    const screenX = chartBox.left - wrapBox.left + x(i) * chartBox.width / W;
+    const preferredLeft = screenX + 12 + tip.offsetWidth <= wrapBox.width - 4 ? screenX + 12 : screenX - tip.offsetWidth - 12;
+    tip.style.left = clamp(preferredLeft, 4, Math.max(4, wrapBox.width - tip.offsetWidth - 4)) + 'px';
+    const cursorY = clientY === null ? null : clientY - chartBox.top;
+    const anchorY = cursorY === null ? chartTop + T + 4 : chartTop + cursorY + (cursorY > chartBox.height / 2 ? -tip.offsetHeight - 14 : 14);
+    tip.style.top = clamp(anchorY, chartTop + 4, Math.max(chartTop + 4, chartBox.bottom - wrapBox.top - tip.offsetHeight - 4)) + 'px';
+  }
+  function fit() {}   // 高度由 st.iframe(height="content") 自动测量，组件内不再改 iframe 尺寸
+  const localX = e => e.clientX - svg.getBoundingClientRect().left;
+  svg.addEventListener('pointerdown', e => {
+    if (e.button !== 0 || !PW || !count || localX(e) < L || localX(e) > W - R) return;
+    dragging = {id: e.pointerId, x: e.clientX, start, count, moved: false};
+    svg.setPointerCapture(e.pointerId); svg.classList.add('dragging');
+  });
+  svg.addEventListener('pointermove', e => {
+    if (dragging) {
+      const delta = e.clientX - dragging.x;
+      if (Math.abs(delta) > 3) dragging.moved = true;
+      if (dragging.moved) { pinned = null; update(dragging.start - delta * dragging.count / PW, dragging.count); }
+    } else if (pinned === null && PW) {
+      const px = localX(e);
+      hover = px < L || px > W - R ? null : Math.floor(start + (px - L) * count / PW);
+      showTip(hover, e.clientY);
+    }
+  });
+  function release(e) {
+    if (!dragging) return;
+    if (!dragging.moved && e.type === 'pointerup') { const i = Math.floor(start + (localX(e) - L) * count / PW); pinned = pinned === i ? null : i; showTip(pinned, e.clientY); }
+    if (svg.hasPointerCapture(e.pointerId)) svg.releasePointerCapture(e.pointerId);
+    dragging = null; svg.classList.remove('dragging');
+  }
+  svg.addEventListener('pointerup', release); svg.addEventListener('pointercancel', release);
+  svg.addEventListener('pointerleave', () => { if (pinned === null && !dragging) showTip(null); });
+  svg.addEventListener('wheel', e => {
+    if (!PW || !count) return;
+    e.preventDefault(); pinned = null;
+    if (e.ctrlKey || e.metaKey) zoom(Math.exp(clamp(e.deltaY, -400, 400) * .003), localX(e));
+    else { const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY; update(start + delta * (e.deltaMode === 1 ? 16 : 1) * count / PW, count); }
+  }, {passive: false});
+  svg.addEventListener('dblclick', () => useRange(lastRange));
+  new ResizeObserver(requestDraw).observe(wrap);
+  requestDraw();
+})();
+</script>"""
+    return (template.replace("__BASE_CSS__", _COMP_BASE_CSS).replace("__CMP_CSS__", _CMP_CSS)
+            .replace("__BTNS__", btns).replace("__CMP_DATA__", payload).replace("__TITLE__", title))
+
+
 def _scroll_chart_html(labels, values, win, height=540, rets=None, revision=0, histories=None):
     """全历史数据 + 有界索引视窗；只绘制可见部分，不创建超宽画布。
 
@@ -1473,7 +1845,7 @@ _ACCT_ASSETS = [a for a in ["hs300", "us_sp500", "credit", "bond_10y",
 _ASSET_LABEL = {a: f"{ETF_META.get(a, {}).get('name', a)} ({ETF_META.get(a, {}).get('code', '')})"
                 for a in _ACCT_ASSETS}
 
-# 账户重放结果（按份额记账）：tab3 持仓摘要、tab4 建仓/调仓、tab5 实操账户、tab8 提醒共用
+# 账户重放结果（按份额记账）：tab3 我的持仓、tab4 调仓登记、tab7 提醒共用
 _acct_daily, _acct_pos, _acct_cost, _acct_cash, _acct_units = (
     _replay_holdings(acct.get("trades", []), acct.get("capital", 0), acct.get("created"))
     if acct else (pd.DataFrame(), {}, {}, 0.0, 0.0)
@@ -1549,8 +1921,21 @@ with _hero_cols[1], st.container(key="hero_actions", horizontal=True, horizontal
 # ============================================================
 # Main Tabs
 # ============================================================
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs(
-    ["信号仪表盘", "目标权重", "我的持仓", "建仓 / 调仓", "实操账户",
+
+
+def _hg_slot_options():
+    """记账下拉选项：每**只基金**一项，value=(位置, 代码)，显示「位置 · 代码 名称」。
+
+    一个位置挂多只时这里就有多行 —— 成交必须记到具体那一只基金上。
+    """
+    out = []
+    for s in HG.SLOTS:
+        for f in HG.funds(holdings.get(s, {})):
+            out.append((s, f["code"],
+                        f'{HG.SLOT_LABEL[s]} · {f["code"]} {f.get("name") or ""}'.strip()))
+    return out
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
+    ["信号仪表盘", "目标权重", "我的持仓", "调仓登记",
      "基金走势", "回测表现", "提醒", "指数估值"]
 )
 
@@ -1785,173 +2170,294 @@ def _hg_apply(code_map: dict[str, tuple[str, str]]) -> dict:
 
 
 with tab3:
-    st.subheader("我的持仓 · 策略位置 → 我实际买的基金")
+    st.subheader("我的持仓 · 我买了什么，跑得怎么样")
     st.caption(
-        "策略算的是 8 个**位置**的权重（增长↑权益、收益垫、增长↓国债、通胀↑黄金/有色/能源）。"
-        "这里把每个位置换成你自己买的基金，之后的建仓、调仓、记账、提醒全部按你的基金算。"
-        "策略本身和回测不动，仍用项目默认的 8 个代码。"
+        "策略算的是 8 个**位置**的权重（增长↑权益、收益垫、增长↓国债、通胀↑黄金/有色/能源），"
+        "这里把每个位置换成你自己买的基金。上半是**账户表现**（我的净值 vs 项目默认基金 vs 策略理论），"
+        "下半是**逐只持仓明细**；换基金、改买卖单位、开关位置都在页面底部展开。"
     )
 
-    # ---- 摘要：明细、浮盈亏、买卖建议统一在「建仓 / 调仓」那一张表，这里不重复画表 ----
-    _tot = float(sum(_hg_mv.values()) + float(_acct_cash or 0))
-    _devs = {}
-    for _s in HG.active(holdings):
-        _w_now = (float(_hg_mv.get(_s, 0.0)) / _tot) if _tot else 0.0
-        _devs[_s] = _w_now - float(_hg_w.get(_s, 0) or 0)
-    _worst = max(_devs, key=lambda k: abs(_devs[k])) if _devs else None
-    _d1, _d2, _d3, _d4 = st.columns(4)
-    _n_funds_cfg = len(HG.all_codes(holdings))
-    _n_funds_held = sum(1 for _c, _sh in _acct_pos.items()
-                        if float(_sh or 0) > 0 and _c in _hg_configured_codes)
-    _d1.metric("总资产", f"¥{_tot:,.0f}" if _tot else "—")
-    _d2.metric("现金", f"¥{float(_acct_cash or 0):,.0f}")
-    _d3.metric("持仓只数", f"{_n_funds_held} / {_n_funds_cfg}")
-    _d4.metric("最大偏离",
-               (f"{_devs[_worst]*100:+.1f}pp" if _worst and abs(_devs[_worst]) >= 0.03 else "都在 3pp 内"),
-               delta=(HG.SLOT_LABEL[_worst] if _worst and abs(_devs[_worst]) >= 0.03 else None),
-               delta_color="off")
-    if not _tot:
-        st.caption("还没有持仓：到「建仓 / 调仓」按计划金额建仓，或到「实操账户」录入已有成交。")
+    # ---- 账户概览：全站唯一一处「总资产 / 现金 / 收益 / 回撤」口径 ----
+    _tot = float(_acct_daily["equity"].iloc[-1]) if (acct and len(_acct_daily)) else 0.0
+    _cap0 = float((acct or {}).get("capital", 0) or 0)
+    _stn = acct_stats(_acct_daily) if (acct and len(_acct_daily)) else {"nav": 1.0, "ret": 0.0, "mdd": 0.0}
+    _m1, _m2, _m3, _m4 = st.columns(4)
+    _m1.metric("总资产", f"¥{_tot:,.0f}" if _tot else "—")
+    _m2.metric("累计收益", f"¥{_tot - _cap0:,.0f}" if _tot else "—",
+               delta=(f"{_stn['ret']*100:+.2f}%" if _tot else None))
+    _m3.metric("现金", f"¥{float(_acct_cash or 0):,.0f}")
+    _m4.metric("最大回撤", f"{_stn['mdd']*100:.2f}%" if _tot else "—")
+    if _tot:
+        st.caption(f"账户起始 {_cn_date(acct['created'])} · 净值日期 {_cn_date(_hg_last)} · "
+                   f"{len(_acct_daily)} 个数据日 · 持仓配置更新于 {_hg_state.get('updated') or '—'}")
     else:
-        st.caption(f"逐只的份额、成本、浮盈亏与买卖建议见「建仓 / 调仓」 · 净值日期 {_cn_date(_hg_last)}"
-                   + (f" · 配置更新于 {_hg_state.get('updated', '—')}" if _hg_state.get("updated") else ""))
+        st.caption("还没有账户和持仓：到「调仓登记」登记第一笔成交（或从零建仓），这里就会出现净值曲线和明细。")
 
+    # ---- 我的净值 vs 项目默认基金 vs 策略理论（三条都归一到起点 1.0）----
     st.divider()
-    st.markdown("**换基金 / 加基金** — 一个位置可以挂多只同类基金，也可以一只都不挂")
-    st.caption("同位置挂多只时按下面表里的「占比」分该位置的目标金额（留空或全 0 就是等权）；"
-               "一只都不挂 = 这个位置暂时不投，它的权重会按同桶比例让给别的位置。")
-    # 加基金后要让搜索框回到空态：key 里带版本号，换号即重建组件（直接 pop 已渲染的 widget key 会报错）
-    _add_ver = int(st.session_state.get("hg_add_ver", 0))
-    _slot_cols = st.columns(2, gap="medium")
-    _pending_add, _pending_on = {}, {}
-    for _i, _s in enumerate(HG.SLOTS):
-        _h = holdings.get(_s, {})
-        _fs_ = HG.funds(_h)
-        with _slot_cols[_i % 2], st.container(border=True):
-            _c1, _c2 = st.columns([2.4, 1], vertical_alignment="center")
-            _c1.markdown(f"**{HG.SLOT_LABEL[_s]}**")
-            with _c2:
-                _on_now = bool(_h.get("on", True))
-                _on_new = st.toggle("参与", value=_on_now, key=f"hg_on_{_s}",
-                                    help="关掉后这个位置不参与建仓/调仓/提醒，权重让给同桶别的位置")
-                if _on_new != _on_now:
-                    _pending_on[_s] = _on_new
-            if _fs_:
-                _sh_ = HG.share_of(_h)
-                st.caption(" · ".join(f'{f["code"]} {f.get("name") or ""} {x*100:.0f}%'
-                                      for f, x in zip(_fs_, _sh_)))
-            else:
-                st.caption("**未挂基金** — 这个位置不持有")
-            _picked = FS.fund_search(
-                f"hg_add_{_s}_{_add_ver}", mode="single", default=None,
-                placeholder="搜索基金，加到这一位置（可多次加不同基金）",
-            )
-            if _picked and str(_picked) not in HG.codes(_h):
-                _pending_add[_s] = str(_picked)
+    st.markdown("**账户净值 vs 两条基准**")
+    st.caption(
+        "三条线同一起点、同样目标权重、同样每月再平衡，所以差多少就是差在哪："
+        "**项目默认基金**是用项目自带那 8 个代码按你现在的权重重放 —— 和它的差＝「换基金」带来的；"
+        "**策略理论**是回测曲线 —— 和它的差还含调仓时点、申赎费用，以及回测按累计净值、实盘按单位净值的口径差。"
+    )
 
-    if _pending_add or _pending_on:
-        _new = {s: HG._norm_slot(holdings.get(s)) for s in HG.SLOTS}
-        for _s, _c in _pending_add.items():
-            if _c:
-                _new[_s] = HG.add_fund(_new[_s], _c, FL.fund_name(_c) or _c)
-        for _s, _onv in _pending_on.items():
-            _new[_s]["on"] = _onv
-        HG.save(_new)
-        st.session_state["hg_add_ver"] = _add_ver + 1
-        st.rerun()
+    _mine = _acct_daily["nav"].dropna() if (acct is not None and len(_acct_daily)) else pd.Series(dtype=float)
+    if acct is None or len(_mine) <= 1:
+        st.info("账户还没有净值曲线：在「调仓登记」登记成交后自动生成。")
+    else:
+        _curves, _gap_def, _gap_strat = {}, None, None
+        if float(_mine.iloc[0]) > 0:
+            _curves["我的账户"] = _mine / float(_mine.iloc[0])
+        _bench_def = BM.replay_target(w, acct.get("created"), nav_getter=HG.nav_series)
+        if _bench_def is not None and len(_bench_def.dropna()) > 1:
+            _bd = _bench_def.dropna()
+            _curves["项目默认基金"] = _bd / float(_bd.iloc[0])
+        _bench_strat = BM.strategy_curve(_BENCH_COL.get(acct.get("strategy"), ""),
+                                         start=acct.get("created"))
+        if _bench_strat is not None and len(_bench_strat.dropna()) > 1:
+            _bs = _bench_strat.dropna()
+            _curves["策略理论"] = _bs / float(_bs.iloc[0])
+        # 差距按两条线共同覆盖的最后一天算，避免其中一条缺数据时把区间拉长
+        for _nm, _tag in (("项目默认基金", "def"), ("策略理论", "strat")):
+            if "我的账户" in _curves and _nm in _curves:
+                _a, _b = _curves["我的账户"], _curves[_nm]
+                _e = min(_a.index[-1], _b.index[-1])
+                _v = float(_a.loc[:_e].iloc[-1] / _b.loc[:_e].iloc[-1] - 1)
+                if _tag == "def":
+                    _gap_def = _v
+                else:
+                    _gap_strat = _v
+        if len(_curves) > 1:
+            st.iframe(_compare_chart_html(_curves, height=420, default_range="全部",
+                                          title="净值对比"),
+                      height="content")
+        else:
+            st.info("基准曲线暂时取不到，只显示我的账户净值。")
+        _g1, _g2, _g3 = st.columns(3)
+        _g1.metric("vs 项目默认基金", f"{_gap_def*100:+.2f}pp" if _gap_def is not None else "—",
+                   help="把项目默认那 8 个代码按你现在的权重、同样的再平衡节奏重放一遍。"
+                        "这一列只体现「换成你的基金」带来的差异。")
+        _g2.metric("vs 策略理论", f"{_gap_strat*100:+.2f}pp" if _gap_strat is not None else "—",
+                   help="回测曲线从建仓日起归一。差的是选基、调仓时点、费用，"
+                        "以及回测用累计净值/实盘用单位净值的口径差。")
+        _g3.metric("账户净值", f"{float(_mine.iloc[-1]):.4f}",
+                   help="1.0000 = 建仓起点。也可以用「份额 × 最新单位净值 + 现金 = 总资产」跟支付宝对一遍。")
 
-    # ---- 一只基金一行：单位/每手/最低金额/占比可改，「移除」勾上保存即删 ----
-    _rows = []
+    # ---- 逐只持仓明细：份额、成本、浮盈亏、当前/目标占比、偏离 ----
+    st.divider()
+    st.markdown("**持仓明细**")
+    _px_rows, _sum_mv, _sum_cost, _sum_tgt = [], 0.0, 0.0, 0.0
     for _s in HG.SLOTS:
         _h = holdings.get(_s, {})
-        for _f, _x in zip(HG.funds(_h), HG.share_of(_h)):
+        _fs = HG.funds(_h)
+        if not _fs:
+            continue
+        for _i, (_f, _x) in enumerate(zip(_fs, HG.share_of(_h))):
             _code = _f["code"]
             _col = _hg_panel[_code].dropna() if _code in _hg_panel.columns else pd.Series(dtype=float)
-            _rows.append({
-                "位置": HG.SLOT_LABEL[_s],
-                "代码": _code,
-                "我的基金": _f.get("name") or FL.fund_name(_code) or "—",
-                "买卖单位": _f.get("unit", "股"),
-                "每手": int(_f.get("lot") or 1),
-                "最低申购金额": float(_f.get("min_amount") or 1.0),
-                "占比%": round(_x * 100, 2),
-                "净值": round(float(_col.iloc[-1]), 4) if len(_col) else None,
-                "移除": False,
-                "_slot": _s,
-            })
+            _px = float(_col.iloc[-1]) if len(_col) else 0.0
+            _sh = float(_acct_pos.get(_code, 0) or 0)
+            _cur = _sh * _px
+            _cst = float(_acct_cost.get(_code, 0) or 0)
+            _pl = (_px / _cst - 1) if (_cst > 0 and _px > 0) else None
+            _w_now = (_cur / _tot) if _tot else 0.0
+            _w_tgt = float(_hg_w.get(_s, 0) or 0) * _x
+            _dev = _w_now - _w_tgt
+            _sum_mv += _cur
+            _sum_cost += _sh * _cst
+            _sum_tgt += _w_tgt
+            _px_rows.append([
+                (HG.SLOT_LABEL[_s] if _i == 0 else '<span class="muted">↳</span>'),
+                f'{_f.get("name") or _code}<br><span class="muted">{_code} · {"场外" if HG.is_otc(_f) else "场内"}'
+                + (f' · 位置内 {_x*100:.0f}%' if len(_fs) > 1 else "") + '</span>',
+                f"{_sh:,.2f}" if HG.is_otc(_f) else f"{_sh:,.0f}",
+                (f'{_px:.4f}<br><span class="muted">成本 {_cst:.4f}</span>' if (_px > 0 and _cst > 0)
+                 else (f"{_px:.4f}" if _px else "—")),
+                f"{_cur:,.0f}",
+                "—" if _pl is None else f'<span class="{"up" if _pl >= 0 else "down"}">{_pl*100:+.2f}%</span>',
+                f"{_w_now*100:.1f}%",
+                f"{_w_tgt*100:.1f}%",
+                ('<span class="muted">—</span>' if abs(_dev) < 0.005
+                 else f'<span class="{"up" if _dev > 0 else "down"}">{_dev*100:+.1f}pp</span>'),
+            ])
+    # 配置里已经没有、但账上还留着份额的代码：列出来提醒，不参与目标权重
+    for _oc, _ov in (_hg_other_mv or {}).items():
+        if _ov <= 0:
+            continue
+        _px_rows.append([
+            "其他", f'{FL.fund_name(_oc) or _oc}<br><span class="muted">{_oc} · 不在配置里</span>',
+            "—", "—", f"{_ov:,.0f}", "—",
+            f"{(_ov / _tot * 100) if _tot else 0:.1f}%", "0.0%", '<span class="muted">—</span>',
+        ])
 
-    if not _rows:
-        st.info("还没有挂任何基金 —— 用上面的搜索框加一只，或点下面的「恢复项目默认代码」。")
-        _edited = None
+    if not _px_rows:
+        st.info("还没有挂任何基金 —— 展开下面的「换基金 / 加基金」给位置加一只，"
+                "或点「恢复项目默认代码」。")
     else:
-        _edited = st.data_editor(
-            pd.DataFrame(_rows),
-            column_config={
-                "位置": st.column_config.TextColumn("位置", disabled=True),
-                "代码": st.column_config.TextColumn("代码", disabled=True,
-                                                   help="用上方搜索框加，勾「移除」再保存即删"),
-                "我的基金": st.column_config.TextColumn("我的基金", disabled=True),
-                "买卖单位": st.column_config.SelectboxColumn("买卖单位", options=["股", "份额"],
-                                                         help="场内按股（100 股一手），场外按份额（按金额申购）"),
-                "每手": st.column_config.NumberColumn("每手/最小", min_value=1, step=1),
-                "最低申购金额": st.column_config.NumberColumn("最低申购(元)", min_value=1.0, step=1.0),
-                "占比%": st.column_config.NumberColumn("占该位置", min_value=0.0, max_value=100.0,
-                                                      step=5.0, format="%.1f%%",
-                                                      help="该位置内这只基金分到多少比例；同位置全部为 0 时按等权"),
-                "净值": st.column_config.NumberColumn(f"净值({_cn_date(_hg_last)})", format="%.4f",
-                                                     disabled=True),
-                "移除": st.column_config.CheckboxColumn("移除", help="勾上→保存，这只基金就从该位置删掉"),
-                "_slot": None,
-            },
-            hide_index=True, width="stretch", key="hg_editor",
+        _pl_all = ((_sum_mv / _sum_cost - 1) if _sum_cost > 0 else None)
+        # 合计市值要含「配置外但账上还有」的那部分，否则和上面的「其他」行对不上
+        _other_total = sum(v for v in (_hg_other_mv or {}).values() if v > 0)
+        _mv_all = _sum_mv + _other_total
+        _render_table(
+            [("位置", "left"), ("我的基金", "left"), ("份额/股数", "right"),
+             ("净值 / 成本", "right"), ("市值(¥)", "right"), ("浮盈亏", "right"),
+             ("当前占比", "right"), ("目标占比", "right"), ("偏离", "right")],
+            _px_rows,
+            totals=["合计", "—", "—", "—", f"{_mv_all:,.0f}",
+                    ("—" if _pl_all is None else f'{_pl_all*100:+.2f}%'),
+                    f"{(_mv_all / _tot * 100) if _tot else 0:.1f}%",
+                    f"{_sum_tgt*100:.1f}%", "—"],
+            min_width=980,
         )
+        _empty_slots = [s for s in HG.SLOTS
+                        if holdings.get(s, {}).get("on", True) and not HG.funds(holdings.get(s, {}))]
+        if _empty_slots:
+            st.caption("这些位置没有挂基金（不持有，目标权重已按同桶比例让给其它位置）："
+                       + "、".join(HG.SLOT_LABEL[s] for s in _empty_slots)
+                       + "。要买就展开下面给它加一只。")
+        st.caption("逐只的「该买多少 / 该卖多少」在「调仓登记」算，这里只看持仓本身。")
 
-    _miss = [f'{_c} {FL.fund_name(_c) or ""}'.strip()
-             for _c in HG.all_codes(holdings)
-             if _c not in _hg_panel.columns or not len(_hg_panel[_c].dropna())]
-    if _miss:
-        st.warning("这些基金还没有净值数据，拉取后建仓/调仓/提醒才能算：" + "；".join(_miss))
-        if st.button("拉取缺的净值", key="hg_fetch_missing", type="primary"):
-            st.toast("正在拉取净值…", icon=":material/sync:", duration="long")
-            for _c in HG.all_codes(holdings):
-                if _c not in _hg_panel.columns or not len(_hg_panel[_c].dropna()):
-                    try:
-                        FL.ensure_fresh(_c)
-                    except Exception:  # noqa: BLE001
-                        pass
-            st.cache_data.clear()
-            st.rerun()
+    # ---- 配置区：加删基金、买卖单位、位置开关（低频操作，收在展开里）----
+    st.divider()
+    with st.expander("换基金 / 加基金 / 买卖单位 / 位置开关",
+                     expanded=not bool(HG.all_codes(holdings))):
+        st.caption(
+            "一个位置可以挂多只同类基金，也可以一只都不挂。同位置挂多只时按「占比」分该位置的目标金额"
+            "（留空或全 0 就是等权）；一只都不挂 = 这个位置暂时不投，它的权重会按同桶比例让给别的位置。"
+        )
+        # 加基金后要让搜索框回到空态：key 里带版本号，换号即重建组件（直接 pop 已渲染的 widget key 会报错）
+        _add_ver = int(st.session_state.get("hg_add_ver", 0))
+        _slot_cols = st.columns(2, gap="medium")
+        _pending_add, _pending_on = {}, {}
+        for _i, _s in enumerate(HG.SLOTS):
+            _h = holdings.get(_s, {})
+            _fs_ = HG.funds(_h)
+            with _slot_cols[_i % 2], st.container(border=True):
+                _c1, _c2 = st.columns([2.4, 1], vertical_alignment="center")
+                _c1.markdown(f"**{HG.SLOT_LABEL[_s]}**")
+                with _c2:
+                    _on_now = bool(_h.get("on", True))
+                    _on_new = st.toggle("参与", value=_on_now, key=f"hg_on_{_s}",
+                                        help="关掉后这个位置不参与建仓/调仓/提醒，权重让给同桶别的位置")
+                    if _on_new != _on_now:
+                        _pending_on[_s] = _on_new
+                if _fs_:
+                    _sh_ = HG.share_of(_h)
+                    st.caption(" · ".join(f'{f["code"]} {f.get("name") or ""} {x*100:.0f}%'
+                                          for f, x in zip(_fs_, _sh_)))
+                else:
+                    st.caption("**未挂基金** — 这个位置不持有")
+                _picked = FS.fund_search(
+                    f"hg_add_{_s}_{_add_ver}", mode="single", default=None,
+                    placeholder="搜索基金，加到这一位置（可多次加不同基金）",
+                )
+                if _picked and str(_picked) not in HG.codes(_h):
+                    _pending_add[_s] = str(_picked)
 
-    with st.container(horizontal=True, horizontal_alignment="right", gap="small"):
-        if _edited is not None and st.button("保存修改", type="primary", key="hg_save"):
+        if _pending_add or _pending_on:
             _new = {s: HG._norm_slot(holdings.get(s)) for s in HG.SLOTS}
-            _drop = []
-            for r in _edited.to_dict("records"):
-                _s, _c = r.get("_slot"), r.get("代码")
-                if not _s or not _c:
-                    continue
-                if r.get("移除"):
-                    _drop.append((_s, _c))
-                    continue
-                for _f in _new[_s]["funds"]:
-                    if _f["code"] == _c:
-                        _f["unit"] = r.get("买卖单位") or "股"
-                        _f["lot"] = max(1, int(r.get("每手") or 1))
-                        _f["min_amount"] = max(1.0, float(r.get("最低申购金额") or 1.0))
-                        _f["share"] = max(0.0, float(r.get("占比%") or 0.0)) / 100
-            for _s, _c in _drop:
-                _new[_s] = HG.remove_fund(_new[_s], _c)
+            for _s, _c in _pending_add.items():
+                if _c:
+                    _new[_s] = HG.add_fund(_new[_s], _c, FL.fund_name(_c) or _c)
+            for _s, _onv in _pending_on.items():
+                _new[_s]["on"] = _onv
             HG.save(_new)
-            st.toast("持仓设置已保存", icon=":material/check_circle:")
-            st.rerun()
-        if st.button("恢复项目默认代码", key="hg_reset"):
-            HG.save(HG._default_holdings())
-            st.toast("已恢复为项目默认的 8 个代码", icon=":material/check_circle:")
+            st.session_state["hg_add_ver"] = _add_ver + 1
             st.rerun()
 
-    with st.expander("换成场外（支付宝可买）同类基金 — 一键填入参考代码"):
+        # 一只基金一行：单位/每手/最低金额/占比可改，「移除」勾上保存即删
+        _rows_cfg = []
+        for _s in HG.SLOTS:
+            _h = holdings.get(_s, {})
+            for _f, _x in zip(HG.funds(_h), HG.share_of(_h)):
+                _code = _f["code"]
+                _col = _hg_panel[_code].dropna() if _code in _hg_panel.columns else pd.Series(dtype=float)
+                _rows_cfg.append({
+                    "位置": HG.SLOT_LABEL[_s],
+                    "代码": _code,
+                    "我的基金": _f.get("name") or FL.fund_name(_code) or "—",
+                    "买卖单位": _f.get("unit", "股"),
+                    "每手": int(_f.get("lot") or 1),
+                    "最低申购金额": float(_f.get("min_amount") or 1.0),
+                    "占比%": round(_x * 100, 2),
+                    "净值": round(float(_col.iloc[-1]), 4) if len(_col) else None,
+                    "移除": False,
+                    "_slot": _s,
+                })
+
+        if not _rows_cfg:
+            st.info("还没有挂任何基金 —— 用上面的搜索框加一只，或点下面的「恢复项目默认代码」。")
+            _edited = None
+        else:
+            _edited = st.data_editor(
+                pd.DataFrame(_rows_cfg),
+                column_config={
+                    "位置": st.column_config.TextColumn("位置", disabled=True),
+                    "代码": st.column_config.TextColumn("代码", disabled=True,
+                                                       help="用上方搜索框加，勾「移除」再保存即删"),
+                    "我的基金": st.column_config.TextColumn("我的基金", disabled=True),
+                    "买卖单位": st.column_config.SelectboxColumn("买卖单位", options=["股", "份额"],
+                                                             help="场内按股（100 股一手），场外按份额（按金额申购）"),
+                    "每手": st.column_config.NumberColumn("每手/最小", min_value=1, step=1),
+                    "最低申购金额": st.column_config.NumberColumn("最低申购(元)", min_value=1.0, step=1.0),
+                    "占比%": st.column_config.NumberColumn("占该位置", min_value=0.0, max_value=100.0,
+                                                          step=5.0, format="%.1f%%",
+                                                          help="该位置内这只基金分到多少比例；同位置全部为 0 时按等权"),
+                    "净值": st.column_config.NumberColumn(f"净值({_cn_date(_hg_last)})", format="%.4f",
+                                                         disabled=True),
+                    "移除": st.column_config.CheckboxColumn("移除", help="勾上→保存，这只基金就从该位置删掉"),
+                    "_slot": None,
+                },
+                hide_index=True, width="stretch", key="hg_editor",
+            )
+
+        _miss = [f'{_c} {FL.fund_name(_c) or ""}'.strip()
+                 for _c in HG.all_codes(holdings)
+                 if _c not in _hg_panel.columns or not len(_hg_panel[_c].dropna())]
+        if _miss:
+            st.warning("这些基金还没有净值数据，拉取后建仓/调仓/提醒才能算：" + "；".join(_miss))
+            if st.button("拉取缺的净值", key="hg_fetch_missing", type="primary"):
+                st.toast("正在拉取净值…", icon=":material/sync:", duration="long")
+                for _c in HG.all_codes(holdings):
+                    if _c not in _hg_panel.columns or not len(_hg_panel[_c].dropna()):
+                        try:
+                            FL.ensure_fresh(_c)
+                        except Exception:  # noqa: BLE001
+                            pass
+                st.cache_data.clear()
+                st.rerun()
+
+        with st.container(horizontal=True, horizontal_alignment="right", gap="small"):
+            if _edited is not None and st.button("保存修改", type="primary", key="hg_save"):
+                _new = {s: HG._norm_slot(holdings.get(s)) for s in HG.SLOTS}
+                _drop = []
+                for r in _edited.to_dict("records"):
+                    _s, _c = r.get("_slot"), r.get("代码")
+                    if not _s or not _c:
+                        continue
+                    if r.get("移除"):
+                        _drop.append((_s, _c))
+                        continue
+                    for _f in _new[_s]["funds"]:
+                        if _f["code"] == _c:
+                            _f["unit"] = r.get("买卖单位") or "股"
+                            _f["lot"] = max(1, int(r.get("每手") or 1))
+                            _f["min_amount"] = max(1.0, float(r.get("最低申购金额") or 1.0))
+                            _f["share"] = max(0.0, float(r.get("占比%") or 0.0)) / 100
+                for _s, _c in _drop:
+                    _new[_s] = HG.remove_fund(_new[_s], _c)
+                HG.save(_new)
+                st.toast("持仓设置已保存", icon=":material/check_circle:")
+                st.rerun()
+            if st.button("恢复项目默认代码", key="hg_reset"):
+                HG.save(HG._default_holdings())
+                st.toast("已恢复为项目默认的 8 个代码", icon=":material/check_circle:")
+                st.rerun()
+
+        st.markdown("**换成场外（支付宝可买）同类基金 — 一键填入参考代码**")
         st.caption("下面是同类基金的参考代码，跟踪指数和费率不一定和原版一致，填入后请自己核对；"
-                   "收益差异会在「提醒」页用「项目默认基金」那列体现出来。"
+                   "收益差异会在上面的「vs 项目默认基金」里体现出来。"
                    "填入会把该位置**替换**成这一只（原来挂的多只会被清掉）。")
         _preset_rows = [[HG.SLOT_LABEL[s], ETF_META.get(s, {}).get("code", ""),
                          ETF_META.get(s, {}).get("name", ""), c, n] for s, c, n in _HG_PRESET]
@@ -1963,28 +2469,36 @@ with tab3:
             st.rerun()
 
 # ============================================================
-# Tab 4: 建仓 / 调仓（同一张表：空仓就是建仓，有持仓就是调仓）
+# Tab 4: 调仓登记（算差额 → 登记成交 → 留台账）
 # ============================================================
 with tab4:
-    st.subheader("建仓 / 调仓清单")
+    st.subheader("调仓登记 · 算差额，登记成交")
     st.caption(
-        "一张表管两件事：还没持仓时按「计划投入金额」分配（建仓），有持仓时按账户总资产（持仓 + 现金）"
-        "和目标权重算出该买 / 卖多少（调仓）。确认后直接写成成交，「实操账户」会立刻跟着变。"
+        "这一页只做两件事：按目标权重算出每只**该买多少 / 该卖多少**，确认后登记成成交。"
+        "持仓现状和收益对比在「我的持仓」看，登记完成那边会立刻跟着变。"
     )
 
-    _rb_mv = float(sum(_hg_mv.values()))
+    _has_acct = acct is not None
     _rb_cash = float(_acct_cash or 0)
-    _rb_asset = _rb_mv + _rb_cash
+    # 调仓基数用账户真实总资产（含配置里已经没有、但账上还留着份额的代码），
+    # 否则换过基金之后，老持仓会从基数里"消失"，算出来的比例偏大。
+    _rb_asset = (float(_acct_daily["equity"].iloc[-1])
+                 if (_has_acct and len(_acct_daily)) else 0.0)
+    _rb_mv = max(0.0, _rb_asset - _rb_cash)
 
     _MODE_REB, _MODE_NEW = "按账户调仓", "从零建仓"
+    # 没有账户时只提供「从零建仓」：这时候没有真实份额可调，只能按计划金额买
+    _modes = [_MODE_REB, _MODE_NEW] if _has_acct else [_MODE_NEW]
+    _default_mode = _MODE_REB if (_has_acct and _rb_mv > 0) else _MODE_NEW
     with st.container(key="rb_mode_switch"):
         _rb_mode = st.segmented_control(
-            "模式", [_MODE_REB, _MODE_NEW], default=_MODE_REB if _rb_mv > 0 else _MODE_NEW,
+            "模式", _modes, default=_default_mode if _default_mode in _modes else _MODE_NEW,
             key="rb_mode", label_visibility="collapsed",
-            help="按账户调仓：拿「实操账户」里的真实份额和总资产来算。\n\n"
+            help="按账户调仓：拿「我的持仓」里的真实份额和总资产（持仓 + 现金）来算。\n\n"
                  "从零建仓：假设还没买入，按你填的金额和目标权重给出每只该买多少。",
-        ) or (_MODE_REB if _rb_mv > 0 else _MODE_NEW)
+        ) or (_default_mode if _default_mode in _modes else _MODE_NEW)
 
+    _rb_amt = 0.0
     if _rb_mode == _MODE_NEW:
         _rc1, _rc2 = st.columns([1, 2.6], vertical_alignment="bottom")
         with _rc1:
@@ -1992,14 +2506,15 @@ with tab4:
                                             step=10000, format="%d", key="rb_amount"))
         with _rc2:
             st.caption("按最新净值估算：场外按金额申购（受最低金额限制），场内按 100 股取整。"
-                       "生成成交后这笔钱就记成各基金的买入份额。")
+                       "登记后这笔钱就记成各基金的买入份额。")
         _rb_asset, _rb_cash, _rb_mv = _rb_amt, 0.0, 0.0
         _rb_shares = {}
     else:
         _rb_shares = {c: float(_acct_pos.get(c, 0) or 0) for c in HG.all_codes(holdings)}
         if _rb_asset <= 0:
-            st.info("账户里还没有钱和持仓：先在「实操账户」创建账户，或切到「从零建仓」。")
+            st.info("账户里还没有钱和持仓：先登记一笔入金，或切到「从零建仓」。")
 
+    # ---- 差额清单：当前权重 vs 目标权重 → 该买卖多少 ----
     _rb_rows, _rb_orders = [], []
     _sum_cur = _sum_buy = _sum_sell = 0.0
     for _s in HG.active(holdings):
@@ -2018,7 +2533,7 @@ with tab4:
         _sum_cur += _slot_cur
         _cur_w = _slot_cur / _rb_asset if _rb_asset else 0.0
         _dev = _cur_w - _slot_tgt_w
-        # 位置该不该动，按位置整体判断（和原来同一口径）；要动才按占比拆到这一位置的各只基金
+        # 位置该不该动按位置整体判断；要动才按占比拆到这一位置的各只基金
         _move_slot = abs(_slot_tgt - _slot_cur) >= max(1.0, _rb_asset * 0.005)
         for _i, (_f, _x, _px, _sh, _cur) in enumerate(_items):
             _code = _f["code"]
@@ -2045,19 +2560,12 @@ with tab4:
                 _rb_orders.append({"date": _hg_last.strftime("%Y-%m-%d"), "slot": _s, "code": _code,
                                    "side": "买入" if _diff > 0 else "卖出",
                                    "shares": round(float(_qty), 4), "nav": round(_px, 4), "fee": 0.0})
-            _cost = float(_acct_cost.get(_code, 0) or 0)
-            _pl = (_px / _cost - 1) if (_cost > 0 and _px > 0) else None
-            # 位置级的当前权重/目标权重/偏离只在这一位置的第一行显示，同位置其余行留空避免重复
-            _multi = len(_items) > 1
+            # 位置级的当前/目标/偏离只在该位置首行显示，同位置其余行留空，避免重复
             _rb_rows.append([
                 (HG.SLOT_LABEL[_s] if _i == 0 else '<span class="muted">↳</span>'),
                 f'{_f.get("name") or _code}<br><span class="muted">{_code} · {"场外" if _otc else "场内"}'
-                + (f' · 位置内 {_x*100:.0f}%' if _multi else "") + '</span>',
-                f"{_sh:,.2f}" if _otc else f"{_sh:,.0f}",
-                (f'{_px:.4f}<br><span class="muted">成本 {_cost:.4f}</span>' if (_px > 0 and _cost > 0)
-                 else (f"{_px:.4f}" if _px else "—")),
+                + (f' · 位置内 {_x*100:.0f}%' if len(_items) > 1 else "") + '</span>',
                 f"{_cur:,.0f}",
-                "—" if _pl is None else f'<span class="{"up" if _pl >= 0 else "down"}">{_pl*100:+.2f}%</span>',
                 (f"{_cur_w*100:.1f}%" if _i == 0 else ""),
                 (f"{_slot_tgt_w*100:.1f}%" if _i == 0 else ""),
                 (('<span class="muted">—</span>' if abs(_dev) < 0.03
@@ -2065,56 +2573,62 @@ with tab4:
                  if _i == 0 else ""),
                 _act,
             ])
-    # 换基金前买的、配置里已经没有的代码：不在目标权重里，只做估值提醒
-    for _oc, _ov in (_hg_other_mv or {}).items():
+    # 配置里已经没有、但账上还留着份额的代码：占着总资产却不在目标权重里，单独列出来
+    for _oc, _ov in ((_hg_other_mv or {}).items() if _rb_mode == _MODE_REB else []):
         if _ov <= 0:
             continue
         _rb_rows.append([
-            "其他", f'{FL.fund_name(_oc) or _oc}<br><span class="muted">{_oc}</span>',
-            "—", "—", f"{_ov:,.0f}", "—",
+            "其他",
+            f'{FL.fund_name(_oc) or _oc}<br><span class="muted">{_oc} · 不在配置里</span>',
+            f"{_ov:,.0f}",
             f"{(_ov / _rb_asset * 100) if _rb_asset else 0:.1f}%", "0.0%",
             '<span class="muted">—</span>',
             '<span class="muted">不在配置里，自行处理</span>',
         ])
-
     _empty_slots = [s for s in HG.SLOTS
                     if holdings.get(s, {}).get("on", True) and not HG.funds(holdings.get(s, {}))]
     if _empty_slots:
         st.caption("这些位置没有挂基金（不持有，目标权重已按同桶比例让给其它位置）："
                    + "、".join(HG.SLOT_LABEL[s] for s in _empty_slots)
-                   + "。要买就在「我的持仓」里给它加基金。")
+                   + "。要买就在「我的持仓」底部给它加一只。")
 
     if not _rb_rows:
         st.warning("没有可算的位置：请先到「我的持仓」设置基金，或点右上角「更新数据」拉取净值。")
     else:
+        _tot_mv = _rb_mv if _rb_mode == _MODE_REB else _sum_cur
         _render_table(
-            [("位置", "left"), ("我的基金", "left"), ("份额/股数", "right"),
-             ("净值 / 成本", "right"), ("市值(¥)", "right"), ("浮盈亏", "right"), ("当前权重", "right"),
-             ("目标权重", "right"), ("偏离", "right"), ("操作", "left")],
+            [("位置", "left"), ("我的基金", "left"), ("当前市值(¥)", "right"),
+             ("当前权重", "right"), ("目标权重(位置)", "right"), ("偏离", "right"), ("操作", "left")],
             _rb_rows,
-            totals=["合计", "—", "—", "—", f"{_sum_cur:,.0f}", "—",
-                    f"{(_sum_cur / _rb_asset * 100) if _rb_asset else 0:.1f}%", "100.0%", "—",
+            totals=["合计", "—", f"{_tot_mv:,.0f}",
+                    f"{(_tot_mv / _rb_asset * 100) if _rb_asset else 0:.1f}%", "100.0%", "—",
                     f"买 ¥{_sum_buy:,.0f} / 卖 ¥{_sum_sell:,.0f}" if (_sum_buy or _sum_sell) else "—"],
-            min_width=980,
+            min_width=900,
         )
-        _k1, _k2, _k3, _k4 = st.columns(4)
-        _k1.metric("调仓基数（总资产）", f"¥{_rb_asset:,.0f}")
-        _k2.metric("持仓市值", f"¥{_sum_cur:,.0f}")
-        _k3.metric("计划买入", f"¥{_sum_buy:,.0f}")
-        _k4.metric("计划卖出", f"¥{_sum_sell:,.0f}")
+        st.caption(f"调仓基数（总资产）¥{_rb_asset:,.0f} = 持仓市值 ¥{_tot_mv:,.0f} + 现金 ¥{_rb_cash:,.0f}。"
+                   "偏离 < 0.5% 视为不用动，省手续费。")
 
-        if acct is None:
-            st.caption("还没有实操账户：先到「实操账户」创建，之后这份清单才能一键记成成交。")
-        elif not _rb_orders:
+        # ---- 登记：把这份清单落成成交 ----
+        st.divider()
+        if not _rb_orders:
             st.success("所有位置偏离都在 0.5% 以内，不用动。" if _rb_asset > 0 else "没有需要下单的位置。")
-        elif st.button(f"按此清单写入成交（{len(_rb_orders)} 笔）", type="primary", key="rb_write",
-                       help="按最新净值日记成买入/卖出成交，金额一栏可直接在「实操账户」的流水里核对"):
-            acct.setdefault("trades", []).extend(_rb_orders)
-            save_acct(acct, ACCT_FILE)
-            st.toast(f"已写入 {len(_rb_orders)} 笔成交", icon=":material/check_circle:")
-            st.rerun()
-        st.caption("成交价以当天实际净值为准，这里按最新净值估算；场外申赎按当日收盘净值，"
-                   "和场内实时价不同。")
+        else:
+            st.markdown("**登记这份清单**")
+            _btn_label = (f"创建账户并按此清单建仓（{len(_rb_orders)} 笔）"
+                          if not _has_acct else f"按此清单登记成交（{len(_rb_orders)} 笔）")
+            if st.button(_btn_label, type="primary", key="rb_write",
+                         help="按最新净值日记成买入/卖出成交，可在下面的台账里核对"):
+                if not _has_acct:
+                    save_acct({"strategy": strat_key, "capital": float(_rb_amt),
+                               "created": str(pd.Timestamp(_hg_last).date()),
+                               "trades": list(_rb_orders)}, ACCT_FILE)
+                else:
+                    acct.setdefault("trades", []).extend(_rb_orders)
+                    save_acct(acct, ACCT_FILE)
+                st.toast(f"已登记 {len(_rb_orders)} 笔成交", icon=":material/check_circle:")
+                st.rerun()
+            st.caption("成交价以当天实际净值为准，这里按最新净值估算；"
+                       "场外申赎按当日收盘净值，和场内实时价不同。")
 
         with st.expander("调仓规则说明"):
             st.markdown("""
@@ -2126,137 +2640,33 @@ with tab4:
             6. 场外当天申赎按当日收盘净值成交，和场内实时价不同
             """)
 
-# ============================================================
-# Tab 5: 实操账户（按我自己的基金、按份额记账）
-# ============================================================
-
-
-def _fmt_money(v):
-    return f"¥{v:,.0f}"
-
-
-def _hg_slot_options():
-    """记账下拉选项：每**只基金**一项，value=(位置, 代码)，显示「位置 · 代码 名称」。
-
-    一个位置挂多只时这里就有多行 —— 成交必须记到具体那一只基金上。
-    """
-    out = []
-    for s in HG.SLOTS:
-        for f in HG.funds(holdings.get(s, {})):
-            out.append((s, f["code"],
-                        f'{HG.SLOT_LABEL[s]} · {f["code"]} {f.get("name") or ""}'.strip()))
-    return out
-
-
-with tab5:
-    st.subheader("实操账户 · 我的基金 vs 两条基准")
-    st.caption(
-        "按份额记账：买多少份、每份净值多少，和支付宝对账单一致。"
-        "入金/出金按当时净值折算份额，所以资金进出不会让收益率虚增。"
-    )
-
+    # ---- 手工补录 + 台账：支付宝上真实发生的成交，可以绕过清单直接记 ----
+    st.divider()
+    _slot_opts = _hg_slot_options()
     if acct is None:
-        st.info("**还没有实操账户** — 创建后录入成交，这里会自动给出：净值曲线、持仓明细，"
-                "以及和「策略理论」「项目默认基金」的对比。")
-        with st.form("acct_init"):
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                s_init = st.selectbox("跟随策略", ["V3c", "B-RP", "B-Con"],
-                                      format_func=lambda k: STRATEGIES[k]["name"])
-            with c2:
-                cap0 = st.number_input("初始资金（元）", min_value=1000.0, value=500000.0,
-                                       step=10000.0, format="%.0f")
-            with c3:
-                start0 = st.date_input("起始日期", value=prices.index[-1].date())
-            if st.form_submit_button("创建账户", type="primary"):
-                save_acct({"strategy": s_init, "capital": float(cap0),
-                           "created": str(start0), "trades": []}, ACCT_FILE)
-                st.rerun()
-    else:
-        daily, pos, cost, cash, units = _acct_daily, _acct_pos, _acct_cost, _acct_cash, _acct_units
-        stn = acct_stats(daily) if len(daily) else {"nav": 1.0, "ret": 0.0, "mdd": 0.0}
-        equity = float(daily["equity"].iloc[-1]) if len(daily) else float(acct.get("capital", 0))
-        pnl = equity - float(acct.get("capital", 0))
-
-        # ---- 两条基准 ----
-        bench_def = BM.replay_target(w, acct.get("created"), nav_getter=HG.nav_series)
-        bench_strat = BM.strategy_curve(_BENCH_COL.get(acct.get("strategy"), ""),
-                                        start=acct.get("created"))
-        gap_def = gap_strat = None
-        if len(daily) > 1:
-            if len(bench_def) > 1:
-                _e = min(bench_def.index[-1], daily.index[-1])
-                gap_def = float(daily["nav"].loc[:_e].iloc[-1]
-                                / (bench_def.loc[:_e].iloc[-1] / bench_def.iloc[0]) - 1)
-            if bench_strat is not None and len(bench_strat) > 1:
-                _e = min(bench_strat.index[-1], daily.index[-1])
-                gap_strat = float(daily["nav"].loc[:_e].iloc[-1]
-                                  / (bench_strat.loc[:_e].iloc[-1] / bench_strat.iloc[0]) - 1)
-
-        st.caption(f"账户起始 {_cn_date(acct['created'])} · 净值日期 {_cn_date(_hg_last)} · "
-                   f"{len(daily)} 个数据日 · 持仓配置更新于 {_hg_state.get('updated') or '—'}")
-
-        with st.expander("⚙️ 账户设置（起始日期 / 清空）"):
-            _sc1, _sc2 = st.columns([3, 2])
-            with _sc1:
-                _new_start = st.date_input(
-                    "账户起始日期（净值曲线从这天开始）",
-                    value=pd.Timestamp(acct["created"]).date(),
-                    min_value=prices.index.min().date(),
-                    max_value=prices.index.max().date(),
-                    key="acct_start_date",
-                )
-            with _sc2:
-                st.write("")
-                st.write("")
-                if st.button("保存起始日期", key="acct_start_save", type="primary"):
-                    acct["created"] = str(_new_start)
-                    save_acct(acct, ACCT_FILE)
+        st.info("还没有账户。上面的清单可以直接建仓；如果是先有账户再买入，"
+                "先登记一笔「入金」创建账户。")
+        with st.expander("先创建一个空账户", expanded=True):
+            with st.form("acct_init"):
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    s_init = st.selectbox("跟随策略", list(STRATEGIES), format_func=lambda k: STRATEGIES[k]["name"])
+                with c2:
+                    cap0 = st.number_input("初始资金（元）", min_value=1000.0, value=500000.0,
+                                           step=10000.0, format="%.0f")
+                with c3:
+                    start0 = st.date_input("起始日期", value=prices.index[-1].date())
+                if st.form_submit_button("创建账户", type="primary"):
+                    save_acct({"strategy": s_init, "capital": float(cap0),
+                               "created": str(start0), "trades": []}, ACCT_FILE)
                     st.rerun()
-            if st.button("清空账户（删除全部成交）", key="acct_reset_top"):
-                ACCT_FILE.unlink(missing_ok=True)
-                st.rerun()
-
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("总资产", _fmt_money(equity))
-        m2.metric("累计收益", _fmt_money(pnl), delta=f"{stn['ret']*100:+.2f}%")
-        m3.metric("现金", _fmt_money(cash))
-        m4.metric("最大回撤", f"{stn['mdd']*100:.2f}%")
-        b1, b2, b3 = st.columns(3)
-        b1.metric("vs 策略理论", f"{gap_strat*100:+.2f}pp" if gap_strat is not None else "—",
-                  help="回测曲线（output/nv_curves.csv）从建仓日起归一。差的是选基、调仓时点、"
-                       "费用，以及回测用累计净值/实盘用单位净值的口径差。")
-        b2.metric("vs 项目默认基金", f"{gap_def*100:+.2f}pp" if gap_def is not None else "—",
-                  help="同样从建仓日起、同样目标权重、每月再平衡，但用项目默认那 8 个代码重放。"
-                       "这一列主要体现「换基金带来多少差异」。")
-        b3.metric("怎么校验最准", "对支付宝",
-                  help="最硬的校验：份额 × 最新单位净值 + 现金 = 总资产，"
-                       "收益率和支付宝「持有收益」应该一致。")
-
-        # ---- 净值曲线 ----
-        if len(daily) > 1:
-            _labels = [t.strftime("%Y/%m/%d") for t in daily.index]
-            _mine = [float(v) for v in daily["nav"]]
-            st.markdown('<div class="sec-note">账户净值：1.0 = 建仓起点，可拖动缩放。'
-                        '两条基准的差距见上方「vs 策略理论 / vs 项目默认基金」。</div>',
-                        unsafe_allow_html=True)
-            st.iframe(_scroll_chart_html(_labels, _mine, len(_labels), height=460,
-                                         revision=len(daily)),
-                      height="content")
-
-        # 逐只持仓、成本、浮盈亏都在「建仓 / 调仓」那一张表里，这里不再画第二遍
-        st.caption("逐只的份额、成本价、浮盈亏与买卖建议见「建仓 / 调仓」；"
-                   "本页只看账户整体的净值曲线和两条基准。")
-
-        # ---- 录入成交 ----
-        st.divider()
-        st.markdown("**录入成交**")
-        _slot_opts = _hg_slot_options()
-        if not _slot_opts:
-            st.warning("还没有挂任何基金：先到「我的持仓」给位置加至少一只基金，才能记账。")
-        else:
-            _fund_map = {(s, f["code"]): f
-                         for s in HG.SLOTS for f in HG.funds(holdings.get(s, {}))}
+    elif not _slot_opts:
+        st.warning("还没有挂任何基金：先到「我的持仓」给位置加至少一只基金，才能记账。")
+    else:
+        _fund_map = {(s, f["code"]): f
+                     for s in HG.SLOTS for f in HG.funds(holdings.get(s, {}))}
+        with st.expander("手工补录一笔（入金 / 出金 / 买入 / 卖出）", expanded=not len(acct.get("trades", []))):
+            st.caption("清单之外的真实操作在这里记：比如支付宝上先转了钱进来，或者临时手动买了一笔。")
             with st.form("acct_trade", clear_on_submit=True):
                 r1 = st.columns([1.1, 0.9, 2.2], gap="small")
                 tr_date = r1[0].date_input("日期", value=pd.Timestamp(_hg_last).date(), format="YYYY/MM/DD")
@@ -2290,27 +2700,27 @@ with tab5:
                         st.toast("已记录", icon=":material/check_circle:")
                         st.rerun()
 
-        # ---- 成交流水 ----
-        with st.expander(f"成交流水（{len(acct.get('trades', []))} 笔）", expanded=False):
+        with st.expander(f"台账 · 成交流水（{len(acct.get('trades', []))} 笔）", expanded=False):
             _tr_rows = []
             for i, t in enumerate(acct.get("trades", [])):
-                _sl = t.get("slot", "")
                 _s_code, _f_meta = HG.fund_meta(holdings, t.get("code", ""))
                 _nm = (_f_meta.get("name") if _f_meta else "") or FL.fund_name(t.get("code", "")) \
-                    or t.get("code", "")
+                    or t.get("code", "") or "—"
                 _u = (_f_meta.get("unit") if _f_meta else None) or "份额"
                 _qty = (f"¥{float(t.get('shares', 0)):,.0f}" if t.get("side") in ("入金", "出金")
                         else (f'{float(t.get("shares", 0)):,.2f} 份' if _u == "份额"
                               else f'{float(t.get("shares", 0)):,.0f} 股'))
                 _tr_rows.append([
                     _cn_date(t.get("date")), t.get("side"),
-                    f'{_nm}<br><span class="muted">{t.get("code", "")}</span>',
+                    f'{_nm}<br><span class="muted">{t.get("code", "") or "—"}</span>',
                     _qty,
                     f'{float(t.get("nav", 0)):.4f}' if float(t.get("nav", 0) or 0) > 0 else "—",
                     f'{float(t.get("fee", 0)):,.2f}' if float(t.get("fee", 0) or 0) else "—",
                     str(i),
                 ])
-            if _tr_rows:
+            if not _tr_rows:
+                st.caption("暂无成交")
+            else:
                 _render_table([("日期", "left"), ("类型", "left"), ("基金", "left"),
                                ("数量", "right"), ("净值", "right"), ("手续费", "right"),
                                ("#", "right")], _tr_rows)
@@ -2321,58 +2731,14 @@ with tab5:
                     acct["trades"].pop(int(_del))
                     save_acct(acct, ACCT_FILE)
                     st.rerun()
-            else:
-                st.caption("暂无成交")
-
-        st.caption(f"账户文件：{ACCT_FILE.name}（保存在 data/ 下，重装或换机时记得备份）")
+            st.caption(f"账户文件：{ACCT_FILE.name}（保存在 data/ 下，重装或换机时记得备份）")
 
 # ============================================================
-# Tab 6: 基金走势（日 / 月 / 年 的涨跌幅与价格）
+# Tab 5: 基金走势（日 / 月 / 年 的涨跌幅与价格）
 # ============================================================
 # 范围和采样粒度独立，切周期不改变所选范围。区间口径与支付宝「历史业绩」一致（见 _trend_window_start）。
 
 
-def _trend_aggregate(series, period):
-    """只聚合数值，保留每期最后一条记录的真实日期，不伪造未来期末日期。"""
-    clean = pd.to_numeric(series, errors="coerce").dropna().sort_index()
-    clean = clean.loc[~clean.index.duplicated(keep="last")]
-    clean = clean.loc[np.isfinite(clean) & (clean.index <= pd.Timestamp(date.today()))]
-    if period != "日":
-        freq = "M" if period == "月" else "Y"
-        clean = clean.groupby(clean.index.to_period(freq), sort=True).tail(1)
-    return clean
-
-
-def _trend_window_start(series, span):
-    """区间起点下标 = 基准那一条（与支付宝/天天基金「历史业绩」同口径）。
-
-    - 近N月/年：基准 = 截止日往前推 N 个自然月/年那天的净值；那天不是交易日就用之前最近一个交易日。
-      例：最新 2026/10/23，近3月基准 = 2026/07/23 的净值。
-    - 今年来：基准 = 去年最后一个交易日的净值（不是今年第一天，否则会漏掉第一天的涨跌）。
-    - 数据不够长：从第一条开始。
-    """
-    if series.empty:
-        return 0
-    kind, amount = span
-    if kind == "all":
-        return 0
-    if kind == "count":
-        return max(0, len(series) - int(amount))
-    end = series.index[-1]
-    if kind == "ytd":
-        i = int(series.index.searchsorted(pd.Timestamp(year=end.year, month=1, day=1), side="left")) - 1
-    else:
-        i = int(series.index.searchsorted(end - pd.DateOffset(**{kind: int(amount)}), side="right")) - 1
-    return max(0, min(i, len(series) - 1))
-
-
-def _period_label(t, period):
-    """期间标签：日=2026/09/24；月=2026年9月；年=2026年（CLAUDE.md 日期规范）。"""
-    if period == "日":
-        return f"{t:%Y/%m/%d}"
-    if period == "月":
-        return f"{t.year}年{t.month}月"
-    return f"{t.year}年"
 
 
 def _trend_chart_data(series):
@@ -2638,331 +3004,6 @@ __CAL_CSS__
             .replace("__CAL_DATA__", data))
 
 
-# ------------------------------------------------------------------
-# 多基金走势对比组件（iframe）：与 _scroll_chart_html 同交互、同样式，多条线同图
-# ------------------------------------------------------------------
-_CMP_COLORS = ["#2563EB", "#D97706", "#7C3AED", "#0891B2", "#DB2777",
-               "#4F46E5", "#EA580C", "#0F172A", "#A16207", "#9333EA"]   # 避开红/绿，红绿只表示涨跌
-
-_CMP_CSS = r"""
-#legend{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
-.lg{font:inherit;font-size:12px;display:inline-flex;align-items:center;gap:6px;border:1px solid #E2E8F0;border-radius:999px;
-  background:#fff;color:#0F172A;padding:5px 12px;cursor:pointer;max-width:100%}
-.lg:hover{border-color:#CBD5E1}
-.lg i{width:10px;height:10px;border-radius:50%;flex:none}
-.lg span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:280px}
-.lg[aria-pressed="false"]{opacity:.45}.lg[aria-pressed="false"] span{text-decoration:line-through}
-.hint{font-size:12px;color:#94A3B8}
-.tbl-wrap{overflow-x:auto}
-.cmp-tbl{width:100%;border-collapse:collapse;margin-top:12px;font-size:13px;font-variant-numeric:tabular-nums}
-.cmp-tbl th{font-weight:500;color:#475569;font-size:12px;text-align:right;padding:8px 10px;border-bottom:1px solid #E2E8F0;white-space:nowrap}
-.cmp-tbl td{text-align:right;padding:10px;border-bottom:1px solid #EEF2F7;white-space:nowrap}
-.cmp-tbl th:first-child,.cmp-tbl td:first-child{text-align:left;padding-left:0}
-.cmp-tbl td:first-child{max-width:320px;overflow:hidden;text-overflow:ellipsis;color:#0F172A}
-.cmp-tbl td b{font-weight:600}
-.cmp-tbl i,#tip i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:8px;vertical-align:0}
-#tip{width:420px}
-#tip .tip-row{display:grid;grid-template-columns:minmax(0,1fr) 62px 66px 62px;gap:8px}
-#tip .tip-row .tip-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#tip .tip-row b{text-align:right}
-#tip .tip-head{color:#94A3B8;font-size:11px}#tip .tip-head span:not(:first-child){text-align:right}
-"""
-
-
-def _compare_payload(series_map):
-    """多基金按期对齐（日=日期、月=年月、年=年份），返回 names / histories（与走势组件同结构）。"""
-    names = list(series_map)
-    hist = {}
-    keyfmt = {"日": "%Y%m%d", "月": "%Y%m", "年": "%Y"}
-    for period in ("日", "月", "年"):
-        keyed = {}
-        for nm, s in series_map.items():
-            agg = _trend_aggregate(s, period)
-            keyed[nm] = {t.strftime(keyfmt[period]): (t, float(v)) for t, v in agg.items()}
-        keys = sorted(set().union(*[k.keys() for k in keyed.values()]))
-        if not keys:
-            continue
-        stamps = [max(keyed[nm][k][0] for nm in names if k in keyed[nm]) for k in keys]
-        idx = pd.Series(range(len(stamps)), index=pd.DatetimeIndex(stamps))
-        hist[period] = {
-            "labels": [_period_label(t, period) for t in stamps],
-            "dates": [t.strftime("%Y/%m/%d") for t in stamps],
-            "vals": {nm: [round(keyed[nm][k][1], 6) if k in keyed[nm] else None for k in keys] for nm in names},
-            "windows": {label: {"start": _trend_window_start(idx, span),
-                                "count": len(idx) - _trend_window_start(idx, span)}
-                        for label, span in _TREND_RANGES.items()},
-        }
-    return names, hist
-
-
-def _compare_chart_html(series_map, height=560, default_range="近1年"):
-    names, hist = _compare_payload(series_map)
-    payload = json.dumps({"names": names, "colors": _CMP_COLORS, "histories": hist,
-                          "height": int(height), "defaultRange": default_range},
-                         ensure_ascii=False, allow_nan=False).replace("<", "\\u003c")
-    btns = _range_buttons(default_range)
-    template = r"""<style>
-__BASE_CSS__
-__CMP_CSS__
-</style>
-<div id="wrap" aria-busy="false">
-<div class="heading"><h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4v16h16M7 14l4-5 4 3 5-7"/></svg>走势对比</h3><span id="updating" role="status">正在更新</span></div>
-<div class="controls"><div id="range-controls" role="group" aria-label="常用区间">__BTNS__</div>
-<select id="period" aria-label="周期"><option value="日">日线</option><option value="月">月线</option><option value="年">年线</option></select></div>
-<div id="legend"></div>
-<div class="state-line"><span id="selection" aria-live="polite"></span><span class="date-line"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2" fill="none"/><path d="M8 3v5m8-5v5M4 10h16"/></svg><span id="range"></span></span></div>
-<div id="notice" role="status"></div>
-<svg id="chart" role="img" aria-label="多基金走势对比，可拖动和缩放" tabindex="0"></svg>
-<div id="stats"></div><div id="tip"></div>
-</div>
-<script>
-(() => {
-  const D = __CMP_DATA__;
-  const names = D.names, COL = D.colors;
-  const svg = document.getElementById('chart'), wrap = document.getElementById('wrap');
-  const tip = document.getElementById('tip'), range = document.getElementById('range'), legend = document.getElementById('legend');
-  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-  const valid = v => v !== null && v !== undefined && Number.isFinite(v);
-  const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-  const pct = v => valid(v) ? (v > 0 ? '+' : '') + v.toFixed(2) + '%' : '—';
-  const color = v => !valid(v) || Math.abs(v) < 1e-10 ? '#475569' : (v > 0 ? '#C52828' : '#16703B');
-  const col = nm => COL[names.indexOf(nm) % COL.length];
-  const PPY = {'日': 252, '月': 12, '年': 1};
-  const toMs = s => new Date(s.replace(/\//g, '-') + 'T00:00:00').getTime();
-  for (const k in D.histories) {            // 各基金单期涨跌幅：相对本基金上一条有效记录
-    const Hh = D.histories[k]; Hh.steps = {};
-    for (const nm of names) {
-      const v = Hh.vals[nm], r = new Array(v.length).fill(null); let prev = null;
-      for (let i = 0; i < v.length; i++) if (valid(v[i])) { if (prev !== null && prev > 0) r[i] = (v[i] / prev - 1) * 100; prev = v[i]; }
-      Hh.steps[nm] = r;
-    }
-  }
-  // 与单只走势同一套记忆：切视图 / 增删基金都会重建 iframe，区间与周期从 localStorage 还原
-  const STORE = 'awTrend.multi';
-  const memo = (() => { try { return JSON.parse(localStorage.getItem(STORE) || '{}'); } catch (e) { return {}; } })();
-  const saveMemo = () => { try { localStorage.setItem(STORE, JSON.stringify({period, range: lastRange})); } catch (e) {} };
-  let period = D.histories[memo.period] ? memo.period : '日';
-  let lastRange = (D.histories[period].windows || {})[memo.range] ? memo.range : D.defaultRange;
-  let activeRange = lastRange, customDates = null;
-  let P = D.histories[period], n = P.dates.length;
-  const hidden = new Set();
-  const H = D.height, L = 64, R = 16, T = 32, B = 32, GAP = 30;
-  // 与走势分析同一布局：净值 55% / 相对起点涨跌幅 27% / 单期涨跌幅 18%
-  const PH = H - T - B - GAP * 2, AH = PH * .55, RH = PH * .27, BH = PH * .18;
-  const rTop = T + AH + GAP, bTop = rTop + RH + GAP;
-  let initialCount = P.windows[lastRange].count, initialStart = P.windows[lastRange].start;
-  let count = initialCount, start = initialStart, W = 0, PW = 0, frame = 0;
-  let dragging = null, pinned = null, hover = null, bases = {};
-  const periodControl = document.getElementById('period');
-  for (const o of periodControl.options) o.disabled = !D.histories[o.value];
-  periodControl.value = period;
-  legend.innerHTML = names.map((nm, k) => `<button class="lg" data-k="${k}" aria-pressed="true" title="点击隐藏/显示"><i style="background:${col(nm)}"></i><span>${esc(nm)}</span></button>`).join('');
-  legend.querySelectorAll('.lg').forEach(b => b.onclick = () => {
-    const nm = names[+b.dataset.k];
-    if (hidden.has(nm)) hidden.delete(nm); else if (names.length - hidden.size > 1) hidden.add(nm);
-    b.setAttribute('aria-pressed', String(!hidden.has(nm))); requestDraw();
-  });
-  const shown = () => names.filter(nm => !hidden.has(nm));
-  const x = i => L + (i + .5 - start) * PW / count;
-  const bounds = () => {
-    if (count <= 0) return [0, -1];
-    let first = Math.max(0, Math.ceil(start - .5 + 1e-8));
-    let last = Math.min(n - 1, Math.floor(start + count - .5 - 1e-8));
-    if (last < first) first = last = clamp(Math.round(start + count / 2 - .5), 0, n - 1);
-    return [first, last];
-  };
-  const rel = (nm, i) => { const b = bases[nm], v = P.vals[nm][i]; return (b !== null && b !== undefined && valid(v)) ? (v / P.vals[nm][b] - 1) * 100 : null; };
-  function requestDraw() { if (!frame) frame = requestAnimationFrame(() => { frame = 0; draw(); }); }
-  function update(nextStart, nextCount) {
-    if (!n) return;
-    count = clamp(nextCount, 1, n);
-    start = clamp(nextStart, 0, Math.max(0, n - count));
-    activeRange = Math.abs(count - initialCount) < 1e-6 && Math.abs(start - initialStart) < 1e-6 ? lastRange : null;
-    const [first, last] = bounds();
-    customDates = activeRange ? null : [P.dates[first], P.dates[last]];
-    hover = null; requestDraw();
-  }
-  function useRange(label) {
-    lastRange = activeRange = label; customDates = null;
-    initialCount = P.windows[label].count; initialStart = P.windows[label].start;
-    count = initialCount; start = initialStart; pinned = hover = null;
-    wrap.setAttribute('aria-busy', 'true'); requestDraw(); saveMemo();
-  }
-  document.querySelectorAll('[data-range]').forEach(b => b.onclick = () => useRange(b.dataset.range));
-  periodControl.onchange = () => {
-    const keepDates = activeRange ? null : customDates;
-    period = periodControl.value; P = D.histories[period]; n = P.dates.length;
-    initialCount = P.windows[lastRange].count; initialStart = P.windows[lastRange].start;
-    if (keepDates) {
-      const first = P.dates.findIndex(d => d >= keepDates[0]);
-      let last = P.dates.length - 1;
-      while (last >= 0 && P.dates[last] > keepDates[1]) last--;
-      start = Math.max(0, first); count = first < 0 || last < first ? 0 : last - first + 1;
-      activeRange = null;
-    } else { start = initialStart; count = initialCount; }
-    pinned = hover = null; wrap.setAttribute('aria-busy', 'true'); requestDraw(); saveMemo();
-  };
-  function zoom(factor, px = L + PW / 2) {
-    if (!PW) return;
-    const fraction = clamp((px - L) / PW, 0, 1), anchor = start + fraction * count;
-    update(anchor - fraction * clamp(count * factor, 1, n), clamp(count * factor, 1, n));
-  }
-  function line(nm, valAt, yf, first, last, w, dot) {
-    const pts = []; let c = '';
-    for (let i = first; i <= last; i++) { const v = valAt(nm, i); if (!valid(v)) continue;
-      pts.push(`${x(i)},${yf(v)}`); if (dot) c += `<circle cx="${x(i)}" cy="${yf(v)}" r="2.3" fill="${col(nm)}"/>`; }
-    return `<polyline points="${pts.join(' ')}" fill="none" stroke="${col(nm)}" stroke-width="${w}" stroke-linejoin="round"/>` + c;
-  }
-  function draw() {
-    const width = wrap.getBoundingClientRect().width;
-    if (width <= L + R) return;
-    W = width; PW = W - L - R;
-    svg.setAttribute('width', W); svg.setAttribute('height', H); svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-    const [first, last] = bounds(), visibleCount = Math.max(0, last - first + 1);
-    document.querySelectorAll('[data-range]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.range === activeRange)));
-    const selection = document.getElementById('selection');
-    selection.textContent = `当前：${activeRange || '自选区间'} · ${period}线`;
-    selection.dataset.custom = String(!activeRange);
-    wrap.setAttribute('aria-busy', 'false');
-    if (!visibleCount) {
-      range.textContent = customDates ? customDates.join(' — ') : '暂无有效日期';
-      document.getElementById('notice').textContent = '该范围暂无此粒度的数据，请更换范围或周期。';
-      svg.innerHTML = ''; tip.style.display = 'none'; document.getElementById('stats').innerHTML = ''; fit(); return;
-    }
-    document.getElementById('notice').textContent = visibleCount === 1 ? '该范围仅有1期数据，保留真实单点。' : '';
-    range.textContent = `${P.dates[first]} — ${P.dates[last]}`;
-    const S = shown(); bases = {};
-    for (const nm of S) { bases[nm] = null; for (let i = first; i <= last; i++) { const v = P.vals[nm][i]; if (valid(v) && v > 0) { bases[nm] = i; break; } } }
-    const step = PW / count, dot = step >= 7;
-    let grid = '', marks = '', ticks = '';
-    // ① 净值面板：各基金自己的复权净值（最新值 = 最新单位净值）；量纲不同时左轴按可见范围统一缩放
-    let lo = null, hi = null;
-    for (const nm of S) for (let i = first; i <= last; i++) { const v = P.vals[nm][i]; if (valid(v)) { lo = lo === null ? v : Math.min(lo, v); hi = hi === null ? v : Math.max(hi, v); } }
-    if (lo === null) { lo = 0; hi = 1; }
-    const padN = (hi - lo) * .12 || Math.max(Math.abs(hi) * .02, .01); lo -= padN; hi += padN;
-    const yN = v => T + (hi - v) * AH / (hi - lo);
-    ticks += `<text x="${L}" y="18" font-size="12" fill="#475569">净值</text>`;
-    for (let k = 0; k <= 4; k++) {
-      const v = lo + (hi - lo) * k / 4, yy = yN(v);
-      grid += `<line x1="${L}" y1="${yy}" x2="${W-R}" y2="${yy}" stroke="#EEF2F7"/>`;
-      ticks += `<text x="${L-8}" y="${yy+4}" text-anchor="end" font-size="10" fill="#475569">${v.toFixed(hi - lo < .5 ? 4 : 3)}</text>`;
-    }
-    for (const nm of S) marks += line(nm, (m, i) => P.vals[m][i], yN, first, last, 2, dot);
-    // ② 相对起点涨跌幅：各基金以可见区间首个有效值为 0%（同一把尺子比强弱）
-    let rlo = 0, rhi = 0;
-    for (const nm of S) for (let i = first; i <= last; i++) { const r = rel(nm, i); if (valid(r)) { rlo = Math.min(rlo, r); rhi = Math.max(rhi, r); } }
-    const padR = (rhi - rlo) * .1 || 1; rlo -= padR; rhi += padR;
-    const yR = v => rTop + (rhi - v) * RH / (rhi - rlo);
-    ticks += `<text x="${L}" y="${rTop-10}" font-size="12" fill="#475569">相对起点涨跌幅</text>`
-      + `<text x="${L-8}" y="${rTop+9}" text-anchor="end" font-size="11" fill="#475569">${pct(rhi - padR)}</text>`
-      + `<text x="${L-8}" y="${yR(0)+3.5}" text-anchor="end" font-size="11" fill="#475569">0%</text>`
-      + `<text x="${L-8}" y="${rTop+RH-1}" text-anchor="end" font-size="11" fill="#475569">${pct(rlo + padR)}</text>`;
-    marks += `<line x1="${L}" y1="${yR(0)}" x2="${W-R}" y2="${yR(0)}" stroke="#94A3B8" stroke-dasharray="2 4"/>`;
-    for (const nm of S) marks += line(nm, rel, yR, first, last, 1.6, false);
-    // ③ 单期涨跌幅（0 轴居中）
-    const zero = bTop + BH / 2;
-    let bmax = .5;
-    for (const nm of S) for (let i = first; i <= last; i++) { const v = P.steps[nm][i]; if (valid(v)) bmax = Math.max(bmax, Math.abs(v)); }
-    const yB = v => zero - v * (BH / 2 - 4) / bmax;
-    ticks += `<text x="${L}" y="${bTop-10}" font-size="12" fill="#475569">单${period}涨跌幅</text>`
-      + `<text x="${L-8}" y="${bTop+9}" text-anchor="end" font-size="11" fill="#475569">+${bmax.toFixed(2)}%</text>`
-      + `<text x="${L-8}" y="${zero+3.5}" text-anchor="end" font-size="11" fill="#475569">0%</text>`
-      + `<text x="${L-8}" y="${bTop+BH-1}" text-anchor="end" font-size="11" fill="#475569">-${bmax.toFixed(2)}%</text>`;
-    marks += `<line x1="${L}" y1="${zero}" x2="${W-R}" y2="${zero}" stroke="#E2E8F0" stroke-dasharray="3 3"/>`;
-    for (const nm of S) marks += line(nm, (m, i) => P.steps[m][i], yB, first, last, 1.2, false);
-    const spacing = Math.max(1, Math.ceil(74 / step)), ids = [];
-    for (let i = first; i <= last; i += spacing) ids.push(i);
-    if (ids.length > 1 && last - ids[ids.length-1] < spacing) ids.pop();
-    if (!ids.includes(last)) ids.push(last);
-    const labs = [];
-    for (const i of ids) { const cx = clamp(x(i), L + 40, W - R - 40); while (labs.length && cx - labs[labs.length-1].cx < 70) labs.pop(); labs.push({i, cx}); }
-    for (const {i, cx} of labs) ticks += `<text x="${cx}" y="${H-15}" text-anchor="middle" font-size="10" fill="#475569">${esc(P.labels[i])}</text>`;
-    svg.innerHTML = `<defs><clipPath id="plot-clip"><rect x="${L}" y="${T-5}" width="${PW}" height="${H-T-B+10}"/></clipPath></defs>${grid}<g clip-path="url(#plot-clip)">${marks}<line id="guide" y1="${T}" y2="${H-B}" stroke="#94A3B8" stroke-dasharray="4 4" visibility="hidden"/></g>${ticks}`;
-    // 当前可见区间指标（随拖动/缩放/切周期实时重算）
-    const rows = S.map(nm => {
-      const b = bases[nm]; let e = null;
-      for (let i = last; i >= first; i--) if (valid(P.vals[nm][i])) { e = i; break; }
-      const head = `<td title="${esc(nm)}"><i style="background:${col(nm)}"></i>${esc(nm)}</td>`;
-      if (b === null || e === null) return `<tr>${head}<td colspan="6" style="color:#94A3B8">该区间无数据</td></tr>`;
-      const v0 = P.vals[nm][b], v1 = P.vals[nm][e], chg = (v1 / v0 - 1) * 100;
-      const yrs = (toMs(P.dates[e]) - toMs(P.dates[b])) / (365.25 * 864e5);
-      const ann = yrs >= .25 ? (Math.pow(v1 / v0, 1 / yrs) - 1) * 100 : null;
-      let peak = null, mdd = 0; const rs = [];
-      for (let i = b; i <= e; i++) { const v = P.vals[nm][i]; if (!valid(v)) continue;
-        if (peak === null || v > peak) peak = v; mdd = Math.min(mdd, (v / peak - 1) * 100);
-        if (i > b && valid(P.steps[nm][i])) rs.push(P.steps[nm][i] / 100); }
-      let vol = null;
-      if (rs.length >= 3) { const m = rs.reduce((a, c) => a + c, 0) / rs.length;
-        vol = Math.sqrt(rs.reduce((a, c) => a + (c - m) ** 2, 0) / (rs.length - 1)) * Math.sqrt(PPY[period]) * 100; }
-      return `<tr>${head}<td>${v0.toFixed(4)} → ${v1.toFixed(4)}</td><td><b style="color:${color(chg)}">${pct(chg)}</b></td><td style="color:${color(ann)}">${pct(ann)}</td>`
-        + `<td style="color:${color(mdd)}">${mdd < 0 ? pct(mdd) : '0.00%'}</td><td>${valid(vol) ? vol.toFixed(2) + '%' : '—'}</td>`
-        + `<td>${esc(P.dates[b])} — ${esc(P.dates[e])}</td></tr>`;
-    }).join('');
-    document.getElementById('stats').innerHTML =
-      `<div class="summary-main"><div class="summary-result"><span>当前区间指标</span></div>`
-      + `<span class="hint">拖动/滚轮平移 · Ctrl+滚轮缩放 · 双击复位 · 点图例隐藏/显示</span></div>`
-      + `<div class="tbl-wrap"><table class="cmp-tbl"><thead><tr><th>基金</th><th>净值 起 → 止</th><th>区间涨跌</th><th>年化</th><th>最大回撤</th><th>波动(年化)</th><th>起止</th></tr></thead><tbody>${rows}</tbody></table></div>`
-      + `<div class="amp-row"><small>净值为复权净值（最新值 = 最新单位净值，历史按日增长率含分红还原）；以各基金可见区间内首个有效值为 0% 基准；区间不足 3 个月不计年化；波动按${period}收益年化。</small></div>`;
-    if (pinned !== null) showTip(pinned); else tip.style.display = 'none';
-    fit();
-  }
-  function showTip(i, clientY = null) {
-    const [first, last] = bounds(), guide = document.getElementById('guide');
-    if (!Number.isInteger(i) || i < first || i > last) { tip.style.display = 'none'; if (guide) guide.setAttribute('visibility', 'hidden'); return; }
-    if (guide) { guide.setAttribute('x1', x(i)); guide.setAttribute('x2', x(i)); guide.setAttribute('visibility', 'visible'); }
-    tip.innerHTML = `<b>${esc(P.dates[i])}</b><div class="tip-row tip-head"><span>基金</span><span>净值</span><span>相对起点</span><span>单${period}</span></div>`
-      + shown().map(nm => { const r = rel(nm, i), st = P.steps[nm][i], v = P.vals[nm][i];
-          return `<div class="tip-row"><span class="tip-label"><i style="background:${col(nm)}"></i>${esc(nm)}</span><b>${valid(v) ? v.toFixed(4) : '—'}</b><b style="color:${color(r)}">${pct(r)}</b><b style="color:${color(st)}">${pct(st)}</b></div>`; }).join('')
-      + (pinned !== null ? '<small class="tip-label">已固定，再次点击取消</small>' : '');
-    tip.style.display = 'block';
-    const wrapBox = wrap.getBoundingClientRect(), chartBox = svg.getBoundingClientRect();
-    const chartTop = chartBox.top - wrapBox.top;
-    const screenX = chartBox.left - wrapBox.left + x(i) * chartBox.width / W;
-    const preferredLeft = screenX + 12 + tip.offsetWidth <= wrapBox.width - 4 ? screenX + 12 : screenX - tip.offsetWidth - 12;
-    tip.style.left = clamp(preferredLeft, 4, Math.max(4, wrapBox.width - tip.offsetWidth - 4)) + 'px';
-    const cursorY = clientY === null ? null : clientY - chartBox.top;
-    const anchorY = cursorY === null ? chartTop + T + 4 : chartTop + cursorY + (cursorY > chartBox.height / 2 ? -tip.offsetHeight - 14 : 14);
-    tip.style.top = clamp(anchorY, chartTop + 4, Math.max(chartTop + 4, chartBox.bottom - wrapBox.top - tip.offsetHeight - 4)) + 'px';
-  }
-  function fit() {}   // 高度由 st.iframe(height="content") 自动测量，组件内不再改 iframe 尺寸
-  const localX = e => e.clientX - svg.getBoundingClientRect().left;
-  svg.addEventListener('pointerdown', e => {
-    if (e.button !== 0 || !PW || !count || localX(e) < L || localX(e) > W - R) return;
-    dragging = {id: e.pointerId, x: e.clientX, start, count, moved: false};
-    svg.setPointerCapture(e.pointerId); svg.classList.add('dragging');
-  });
-  svg.addEventListener('pointermove', e => {
-    if (dragging) {
-      const delta = e.clientX - dragging.x;
-      if (Math.abs(delta) > 3) dragging.moved = true;
-      if (dragging.moved) { pinned = null; update(dragging.start - delta * dragging.count / PW, dragging.count); }
-    } else if (pinned === null && PW) {
-      const px = localX(e);
-      hover = px < L || px > W - R ? null : Math.floor(start + (px - L) * count / PW);
-      showTip(hover, e.clientY);
-    }
-  });
-  function release(e) {
-    if (!dragging) return;
-    if (!dragging.moved && e.type === 'pointerup') { const i = Math.floor(start + (localX(e) - L) * count / PW); pinned = pinned === i ? null : i; showTip(pinned, e.clientY); }
-    if (svg.hasPointerCapture(e.pointerId)) svg.releasePointerCapture(e.pointerId);
-    dragging = null; svg.classList.remove('dragging');
-  }
-  svg.addEventListener('pointerup', release); svg.addEventListener('pointercancel', release);
-  svg.addEventListener('pointerleave', () => { if (pinned === null && !dragging) showTip(null); });
-  svg.addEventListener('wheel', e => {
-    if (!PW || !count) return;
-    e.preventDefault(); pinned = null;
-    if (e.ctrlKey || e.metaKey) zoom(Math.exp(clamp(e.deltaY, -400, 400) * .003), localX(e));
-    else { const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY; update(start + delta * (e.deltaMode === 1 ? 16 : 1) * count / PW, count); }
-  }, {passive: false});
-  svg.addEventListener('dblclick', () => useRange(lastRange));
-  new ResizeObserver(requestDraw).observe(wrap);
-  requestDraw();
-})();
-</script>"""
-    return (template.replace("__BASE_CSS__", _COMP_BASE_CSS).replace("__CMP_CSS__", _CMP_CSS)
-            .replace("__BTNS__", btns).replace("__CMP_DATA__", payload))
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -3274,7 +3315,7 @@ _CAT = {"hs300": "宽基·A股", "us_sp500": "宽基·美股", "credit": "信用
 _BT_FIXED = [{"code": f"bt:{a}", "label": f"{ETF_META.get(a, {}).get('code', '')} {ETF_META.get(a, {}).get('name', a)}",
               "tag": "回测资产"} for a in _ACCT_ASSETS]
 
-with tab6:
+with tab5:
     # 视图切换：单只走势 / 多只对比（原「基金对比」页合并到这里，少一个标签页）
     _MODE_S, _MODE_C = "单只走势", "多只对比"
     with st.container(key="trend_mode_switch"):
@@ -3478,19 +3519,19 @@ with tab6:
                 _render_table([("基金", "left")] + [(f"{_l}", "right") for _l in _TREND_STAGES], _rows,
                               min_width=700)
 # ============================================================
-# Tab 7: 三策略比较 / 调频影响（统一月度、年度、多年视图）
+# Tab 6: 三策略比较 / 调频影响（统一月度、年度、多年视图）
 # ============================================================
-with tab7:
+with tab6:
     st.caption("这里是**项目原始策略**的历史回测：三策略对比、调频影响，"
                "以及最下方「历史调仓」里每月的目标权重和当月收益。"
-               "我自己持仓的收益在「实操账户」看。")
+               "我自己持仓的收益在「我的持仓」看。")
     from streamlit_app.performance import render_performance
     render_performance(PROJECT_ROOT)
 
 
 
 # ============================================================
-# Tab 8: 提醒（偏离 / 估值 / 体检）—— 全部按我持仓的基金算
+# Tab 7: 提醒（偏离 / 估值 / 体检）—— 全部按我持仓的基金算
 # ============================================================
 def _alert_card(level, title, body, tip=""):
     _cls = {"urgent": "warn", "warn": "warn", "info": "", "ok": "calm"}.get(level, "")
@@ -3499,7 +3540,7 @@ def _alert_card(level, title, body, tip=""):
             f'<div class="m">{body}</div>{_tip}</div></div>')
 
 
-with tab8:
+with tab7:
     st.subheader("提醒 · 按我持仓的基金算")
     st.caption("三类提醒分开看：偏离是「该不该调仓」，估值是「贵不贵」，体检是「账户本身怎么样」。")
 
@@ -3598,9 +3639,9 @@ with tab8:
 
 
 # ============================================================
-# Tab 9: 指数估值 —— 蛋卷估值快照 + 近10年 PE/PB 走势（仅展示，不进入策略计算）
+# Tab 8: 指数估值 —— 蛋卷估值快照 + 近10年 PE/PB 走势（仅展示，不进入策略计算）
 # ============================================================
-with tab9:
+with tab8:
     _vp = _valuation_payload()
     if not _vp:
         with st.container(key="val_head"):
