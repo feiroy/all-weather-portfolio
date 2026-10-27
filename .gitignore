@@ -25,7 +25,7 @@ data/dividend_idx.csv
 data/dividend_total_return.csv
 
 # 线上部署产物（scripts/build_web.py 生成）
-deploy_web/
+deploy_web_pub/
 .workbuddy/web_password.txt
 
 # 后台自动更新的节流标记

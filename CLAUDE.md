@@ -128,12 +128,14 @@ This file provides guidance to Claude Code when working with code in this reposi
 
 - 适用范围：`streamlit_app/`、`rebal/*.py` 生成的 HTML 报告、`docs/`、Excel/Markdown 报告。
 
-## 线上部署（手机访问）
-- 打包：`./myenv/bin/python scripts/build_web.py` → `deploy_web/`（只含代码、streamlit_app/static/fund_names.json、data/、output/nv_curves.csv、自选基金净值缓存 data/fund_nav/，约 19MB；不含 myenv）。`--password` 生成新访问密码（明文只存本机 `.workbuddy/web_password.txt`，线上只放哈希）。
-- 发布：用 WorkBuddy「发布应用」，目录固定为 `deploy_web/`（目录决定线上应用，不要换目录），启动 `sh start.sh`（Streamlit 监听 $PORT、绑定 0.0.0.0）。每次发布前必须重新打包，且要用户明确说"发布/同步到线上"。
+## 线上部署（手机外网访问）
+- **必须用个人 WorkBuddy 账号发布**：公司账号发出来的域名是 `*.app-tencent.workbuddy.host`，公网 DNS 解析到 21.x 内网地址，只有公司内网能打开（手机走 5G 会连接超时）。个人账号发布的手机外网可直接访问，已验证。
+- 打包：`./myenv/bin/python scripts/build_web.py` → `deploy_web_pub/`（只含代码、streamlit_app/static/fund_names.json、data/、output/nv_curves.csv、自选基金净值缓存 data/fund_nav/，约 19MB；不含 myenv）。`--password` 生成新访问密码（明文只存本机 `.workbuddy/web_password.txt`，线上只放哈希）。
+- 发布：用 WorkBuddy「发布应用」，**目录固定为 `deploy_web_pub/`**（目录决定线上应用，换目录就变成另一个应用、网址也变），启动 `sh start.sh`（Streamlit 监听 $PORT、绑定 0.0.0.0）。每次发布前必须重新打包，且要用户明确说"发布/同步到线上"。
 - 访问密码：`_password_gate()` 只在有密码哈希时启用，本机运行不受影响；登录后网址带 `?k=` 令牌，手机收藏该网址免输密码，换密码后令牌失效。
-- 线上数据：发布时带上本机快照；线上「更新数据」写在云端沙箱，重新发布会被本机快照覆盖；线上录入的模拟账户成交不回传本机。
-- **访问范围**：当前账号发布出来的域名是 `*.app-tencent.workbuddy.host`，公网 DNS 解析到 21.x 内网地址，**只有公司内网（办公网/iOA）能打开，手机走 5G 或家里 Wi-Fi 会连接超时**。
+- 线上数据：发布时带上本机快照；线上「更新数据」写在云端沙箱，重新发布会被本机快照覆盖；线上录入的持仓成交不回传本机 —— **真实记账以本机为准**，线上主要用来看和核对。
+- 线上沙箱拉估值可能失败（akshare 接口变更 / 无外网），`valuation.py` 已兜底：源不可用时沿用本地数据，不弹红字。行情 `data/*.csv` 照常可拉。
+- 管理入口：设置 → 数据管理 → 发布的应用。
 
 ## Git 规则
 - 单人项目，直接推 main。`git add -A && git commit -m "..." && git push`

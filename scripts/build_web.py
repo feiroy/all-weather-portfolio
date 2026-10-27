@@ -1,10 +1,10 @@
-"""打包线上版网页到 deploy_web/（只放运行需要的文件，不上传 myenv、测试、报告）。
+"""打包线上版网页到 deploy_web_pub/（只放运行需要的文件，不上传 myenv、测试、报告）。
 
 用法：
     ./myenv/bin/python scripts/build_web.py              # 沿用已有访问密码
     ./myenv/bin/python scripts/build_web.py --password   # 生成新的随机访问密码（旧的手机书签失效）
 
-产物 deploy_web/：
+产物 deploy_web_pub/：
     allweather/  streamlit_app/        代码
     data/                              行情、估值、净值明细、模拟账户（本机快照）
     data/fund_nav/                     自选基金净值缓存 + 全市场申购状态（本机 rebal/nav 的拷贝）
@@ -13,9 +13,12 @@
     .streamlit/secrets.toml            访问密码哈希（不进 git）
     requirements.txt  start.sh         线上安装与启动
 
-线上环境说明：
+线上环境说明（用**个人 WorkBuddy 账号**发布，手机外网可访问）：
     - 「更新数据」在线上照常可用，数据写在线上沙箱里，重新发布会被本机快照覆盖；
-    - 线上录入的模拟账户成交不会同步回本机，以本机为准。
+    - 线上录入的持仓成交不会同步回本机，真实记账以本机为准，线上主要用来看；
+    - 线上沙箱拉估值可能失败（akshare 接口变更 / 无外网），valuation.py 已做兜底：
+      源不可用时沿用本地数据，不弹红字。行情（data/*.csv）照常可拉。
+    - 目录固定为 deploy_web_pub/，不要改目录名，否则会变成另一个应用、网址也会变。
 """
 from __future__ import annotations
 
@@ -26,7 +29,7 @@ import shutil
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-OUT = ROOT / "deploy_web"
+OUT = ROOT / "deploy_web_pub"
 REBAL_NAV = Path.home() / "WorkBuddy" / "2026-10-23-10-28-09" / "rebal" / "nav"
 SECRET = OUT / ".streamlit" / "secrets.toml"
 PW_NOTE = ROOT / ".workbuddy" / "web_password.txt"     # 明文密码只留本机（.workbuddy 不上传、不进 git）

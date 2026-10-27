@@ -87,6 +87,15 @@ def update_hs300_pe_pb() -> tuple[list[str], list[str]]:
         path = DATA_DIR / fname
         try:
             new = fetch()
+            if new is None or (hasattr(new, "empty") and new.empty):
+                # 数据源返回空（akshare 接口变更 / 沙箱无外网）：本地有数据就沿用，不弹红字
+                if path.exists():
+                    _old = pd.read_csv(path)
+                    _last = pd.to_datetime(_old[_old.columns[0]]).max()
+                    msgs.append(f"{fname} 源暂不可用，沿用本地至 {_last:%Y/%m/%d}")
+                else:
+                    errs.append(f"{fname}: 源返回空且无本地数据")
+                continue
             if rename:
                 new = new.rename(columns=rename)
             date_col = new.columns[0]
@@ -109,7 +118,13 @@ def update_hs300_pe_pb() -> tuple[list[str], list[str]]:
             out.to_csv(path, index=False)
             msgs.append(f"{fname} +{len(add)} 行（至 {pd.Timestamp(out[date_col].iloc[-1]):%Y/%m/%d}）")
         except Exception as e:  # noqa: BLE001
-            errs.append(f"{fname}: {str(e).splitlines()[0][:120]}")
+            # 数据源不可用（akshare 接口变更 / 沙箱无外网）时降级为沿用本地，避免红字告警
+            if path.exists():
+                _old = pd.read_csv(path)
+                _last = pd.to_datetime(_old[_old.columns[0]]).max()
+                msgs.append(f"{fname} 源暂不可用，沿用本地至 {_last:%Y/%m/%d}")
+            else:
+                errs.append(f"{fname}: {str(e).splitlines()[0][:120]}")
     return msgs, errs
 
 
