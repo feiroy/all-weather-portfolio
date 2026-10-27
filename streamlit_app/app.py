@@ -264,6 +264,82 @@ hr{ border-color:var(--line); margin:1.6rem 0; }
 [data-testid="stMetricValue"]{ font-size:27px !important; font-weight:650; letter-spacing:-.6px; }
 [data-testid="stMetricDelta"]{ font-size:12px !important; }
 
+/* ========== 我的持仓：支付宝式头卡与基金卡 ========== */
+/* 头卡只有一个：总资产大字 + 今日/持有/收益率，蓝底白字（与侧栏 brand 同一渐变） */
+.pf-head{
+  background:linear-gradient(135deg,#1E3A8A 0%,#1E40AF 55%,#3B82F6 100%);
+  border-radius:18px; padding:20px 22px 16px; color:#fff; box-shadow:var(--shadow2);
+  margin:4px 0 14px;
+}
+.pf-head .pf-k{ font-size:12px; opacity:.82; letter-spacing:.4px; }
+.pf-head .pf-amt{
+  font-size:38px; font-weight:700; letter-spacing:-1.4px; line-height:1.12;
+  margin:5px 0 3px; font-variant-numeric:tabular-nums;
+}
+.pf-head .pf-sub{ font-size:12px; opacity:.8; }
+.pf-head .pf-grid{
+  display:grid; grid-template-columns:repeat(4,1fr); gap:14px;
+  margin-top:16px; padding-top:14px; border-top:1px solid rgba(255,255,255,.22);
+}
+.pf-head .pf-grid .k{ font-size:11.5px; opacity:.82; }
+.pf-head .pf-grid .v{
+  font-size:16px; font-weight:650; margin-top:3px; font-variant-numeric:tabular-nums;
+}
+.pf-head .pf-grid .v.up{ color:#FCA5A5; }    /* 蓝底上用浅红/浅绿，保持红涨绿跌语义 */
+.pf-head .pf-grid .v.down{ color:#86EFAC; }
+
+/* 基金卡片流：一条基金一张卡，含量额大字 + 三列收益 + 买卖标记 */
+.pf-cards{ display:grid; grid-template-columns:repeat(auto-fill,minmax(330px,1fr)); gap:12px; margin:12px 0 4px; }
+.pf-card{
+  background:var(--card); border:1px solid var(--line); border-radius:16px;
+  padding:14px 16px 12px; box-shadow:var(--shadow); display:flex; flex-direction:column;
+}
+.pf-card:hover{ box-shadow:var(--shadow2); }
+.pf-card .pf-top{ display:flex; align-items:flex-start; gap:8px; }
+.pf-card .pf-slot{ font-size:11px; color:var(--muted); letter-spacing:.3px; margin-bottom:3px; }
+.pf-card .pf-name{ font-size:14.5px; font-weight:650; letter-spacing:-.2px; line-height:1.35; }
+.pf-card .pf-code{ font-size:11.5px; color:var(--sub); font-variant-numeric:tabular-nums; margin-top:2px; }
+.pf-card .pf-tag{
+  font-size:10.5px; color:var(--sub); background:var(--bg); border:1px solid var(--line);
+  border-radius:999px; padding:1px 7px; margin-left:6px; white-space:nowrap;
+}
+.pf-card .pf-amt{
+  font-size:25px; font-weight:700; letter-spacing:-.9px; margin-top:12px;
+  font-variant-numeric:tabular-nums;
+}
+.pf-card .pf-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:10px; }
+.pf-card .pf-grid .k{ font-size:11px; color:var(--sub); }
+.pf-card .pf-grid .v{ font-size:13px; font-weight:600; margin-top:2px; font-variant-numeric:tabular-nums; }
+.pf-card .pf-grid .v.up{ color:var(--red); }
+.pf-card .pf-grid .v.down{ color:var(--green); }
+.pf-card .pf-foot{
+  display:flex; gap:6px 14px; flex-wrap:wrap; margin-top:12px; padding-top:9px;
+  border-top:1px solid var(--line-soft); font-size:11.5px; color:var(--sub);
+  font-variant-numeric:tabular-nums;
+}
+/* 买卖标记：贴卡片右上角，红买绿卖，和支付宝走势图里的「买入 / 卖出」气泡同色 */
+.pf-badge{
+  margin-left:auto; border-radius:999px; padding:4px 11px; font-size:11.5px;
+  font-weight:650; white-space:nowrap; border:1px solid transparent;
+}
+.pf-badge.buy{ background:#FEF2F2; color:var(--red); border-color:#FECACA; }
+.pf-badge.sell{ background:#F0FDF4; color:var(--green); border-color:#BBF7D0; }
+.pf-badge.hold{ background:var(--bg); color:var(--muted); border-color:var(--line); font-weight:500; }
+.pf-badge.warn{ background:#FFFBEB; color:var(--amber); border-color:#FDE68A; font-weight:500; }
+
+/* 调仓页顶部的结论条：这一轮该不该动、买多少卖多少，一行说完 */
+.pf-summary{
+  display:flex; align-items:center; gap:12px 22px; flex-wrap:wrap;
+  background:var(--card); border:1px solid var(--line); border-left:4px solid var(--brand);
+  border-radius:12px; padding:14px 18px; margin:6px 0 14px; box-shadow:var(--shadow);
+}
+.pf-summary .lead{ font-size:14px; font-weight:650; color:var(--ink); }
+.pf-summary .item{ font-size:13px; color:var(--sub); font-variant-numeric:tabular-nums; }
+.pf-summary .item b{ font-size:15px; margin-left:4px; }
+.pf-summary .item b.buy{ color:var(--red); }
+.pf-summary .item b.sell{ color:var(--green); }
+.pf-summary.quiet{ border-left-color:var(--line-strong); }
+
 /* ========== 按钮 ========== */
 .stButton>button, .stDownloadButton>button{
   border-radius:10px; border:1px solid var(--line); font-weight:500; font-size:14px;
@@ -1845,7 +1921,7 @@ _ACCT_ASSETS = [a for a in ["hs300", "us_sp500", "credit", "bond_10y",
 _ASSET_LABEL = {a: f"{ETF_META.get(a, {}).get('name', a)} ({ETF_META.get(a, {}).get('code', '')})"
                 for a in _ACCT_ASSETS}
 
-# 账户重放结果（按份额记账）：tab3 我的持仓、tab4 调仓登记、tab7 提醒共用
+# 账户重放结果（按份额记账）：tab3 我的持仓、tab4 买卖提醒、tab7 提醒共用
 _acct_daily, _acct_pos, _acct_cost, _acct_cash, _acct_units = (
     _replay_holdings(acct.get("trades", []), acct.get("capital", 0), acct.get("created"))
     if acct else (pd.DataFrame(), {}, {}, 0.0, 0.0)
@@ -1878,6 +1954,149 @@ _hg_other_mv = {
     for c, sh in _acct_pos.items()
     if sh > 0 and c not in _hg_configured_codes
 }
+
+
+def _hg_plan() -> dict:
+    """按策略目标权重算「该买多少 / 该卖多少」—— 全站唯一一份调仓计划。
+
+    「我的持仓」的买卖标记、「买卖提醒」的清单与一键登记都读这一份，
+    两处不再各算一遍，避免数字对不上。
+
+    口径：调仓基数 = 账户真实总资产（含配置里已删、账上还有份额的代码）；
+    位置整体偏离 < 0.5% 视为不用动（省手续费），要动的位置再按位置内占比拆到每只基金。
+    """
+    asset = float(_acct_daily["equity"].iloc[-1]) if (acct is not None and len(_acct_daily)) else 0.0
+    cash = float(_acct_cash or 0)
+    rows, orders, by_code = [], [], {}
+    buy_total = sell_total = mv_total = today_pnl = 0.0
+    for s in HG.active(holdings):
+        funds = HG.funds(holdings[s])
+        if not funds:
+            continue
+        tgt_w = float(_hg_w.get(s, 0) or 0)
+        tgt = tgt_w * asset
+        items = []
+        for f, x in zip(funds, HG.share_of(holdings[s])):
+            code = f["code"]
+            col = _hg_panel[code].dropna() if code in _hg_panel.columns else pd.Series(dtype=float)
+            px = float(col.iloc[-1]) if len(col) else 0.0
+            px_prev = float(col.iloc[-2]) if len(col) > 1 else px
+            sh = float(_acct_pos.get(code, 0) or 0)
+            cst = float(_acct_cost.get(code, 0) or 0)
+            items.append({"f": f, "x": float(x), "code": code, "px": px, "px_prev": px_prev,
+                          "shares": sh, "cost": cst, "mv": sh * px,
+                          "pl": ((px / cst - 1) if (cst > 0 and px > 0) else None)})
+        slot_mv = sum(it["mv"] for it in items)
+        mv_total += slot_mv
+        today_pnl += sum((it["px"] - it["px_prev"]) * it["shares"] for it in items)
+        slot_w = (slot_mv / asset) if asset else 0.0
+        moved = abs(tgt - slot_mv) >= max(1.0, asset * 0.005)
+        for i, it in enumerate(items):
+            f = it["f"]
+            diff = (tgt * it["x"] - it["mv"]) if moved else 0.0
+            side, qty, amt, note = "", 0.0, 0.0, ""
+            if it["px"] <= 0:
+                note = "缺净值"
+            elif not moved or abs(diff) < 1.0:
+                note = ""
+            else:
+                qty, amt = HG.order_quantity(f, abs(diff), it["px"])
+                if qty <= 0:
+                    note = "不足一手"
+                elif diff > 0:
+                    side, buy_total = "买入", buy_total + amt
+                else:
+                    side, sell_total = "卖出", sell_total + amt
+            it.update({"slot": s, "side": side, "qty": qty, "amount": amt, "note": note,
+                       "otc": HG.is_otc(f),
+                       "w_now": (it["mv"] / asset) if asset else 0.0,
+                       "w_tgt": tgt_w * it["x"],
+                       # 位置级偏离只在该位置首行有意义，同位置其余行留 0 不显示
+                       "dev": ((slot_w - tgt_w) if i == 0 else 0.0),
+                       "slot_w": slot_w, "slot_tgt_w": tgt_w,
+                       "slot_first": i == 0, "slot_n": len(items)})
+            if side:
+                orders.append({"date": _hg_last.strftime("%Y-%m-%d"), "slot": s, "code": it["code"],
+                               "side": side, "shares": round(float(qty), 4),
+                               "nav": round(it["px"], 4), "fee": 0.0})
+                by_code[it["code"]] = {"side": side, "amount": amt, "qty": qty}
+            rows.append(it)
+    # 配置里已经没有、但账上还留着份额的代码：占着总资产却不在目标权重里
+    other = [{"code": c, "mv": v} for c, v in (_hg_other_mv or {}).items() if v > 0]
+    cap0 = float((acct or {}).get("capital", 0) or 0)
+    total = mv_total + sum(o["mv"] for o in other) + cash
+    return {"asset": asset, "cash": cash, "mv": mv_total, "total": total, "other": other,
+            "rows": rows, "orders": orders, "by_code": by_code,
+            "buy": buy_total, "sell": sell_total, "today": today_pnl,
+            "pnl": (total - cap0) if cap0 else 0.0,
+            "pnl_pct": ((total - cap0) / cap0) if cap0 else 0.0,
+            "has_acct": acct is not None}
+
+
+_plan = _hg_plan()
+
+
+def _pf_sign(v: float) -> str:
+    return "up" if v > 0 else ("down" if v < 0 else "")
+
+
+def _pf_badge(it: dict) -> str:
+    """买卖标记 —— 一张卡只看右上角就知道这一轮该买还是该卖。"""
+    if it.get("side") == "买入":
+        return f'<span class="pf-badge buy">买入 ¥{it["amount"]:,.0f}</span>'
+    if it.get("side") == "卖出":
+        return f'<span class="pf-badge sell">卖出 ¥{it["amount"]:,.0f}</span>'
+    if it.get("note") == "缺净值":
+        return '<span class="pf-badge warn">缺净值</span>'
+    if it.get("note") == "不足一手":
+        return '<span class="pf-badge warn">不足一手</span>'
+    if it.get("shares", 0) <= 0:
+        return '<span class="pf-badge hold">未持有</span>'
+    return '<span class="pf-badge hold">持有不动</span>'
+
+
+def _pf_card(it: dict) -> str:
+    """一张基金卡：金额大字 + 今日/持有/收益率 + 买卖标记（支付宝资产详情页的信息层级）。"""
+    code, f = it["code"], it["f"]
+    name = html_escape(str(f.get("name") or FL.fund_name(code) or code))
+    slot = html_escape(HG.SLOT_LABEL.get(it["slot"], it["slot"]))
+    tag = "场外" if it["otc"] else "场内"
+    if it["slot_n"] > 1:
+        tag += f" · 位置内 {it['x']*100:.0f}%"
+    shares, px, px_prev, cost = it["shares"], it["px"], it["px_prev"], it["cost"]
+    mv = it["mv"]
+    day = (px - px_prev) * shares
+    day_pct = ((px / px_prev - 1) * 100) if (px_prev > 0 and shares > 0) else 0.0
+    hold = mv - shares * cost
+    hold_pct = (it["pl"] or 0.0) * 100
+    qty = f"{shares:,.2f} 份" if it["otc"] else f"{shares:,.0f} 股"
+    dev = it["w_now"] - it["w_tgt"]
+    dev_html = ("—" if abs(dev) < 0.005 else
+                f'<span class="{_pf_sign(dev)}">{dev*100:+.1f}pp</span>')
+    hold_cell = ("—" if shares <= 0 else
+                 f'<span class="{_pf_sign(hold)}">{hold:+,.0f}<br>{hold_pct:+.2f}%</span>')
+    day_cell = ("—" if shares <= 0 else
+                f'<span class="{_pf_sign(day)}">{day:+,.2f}<br>{day_pct:+.2f}%</span>')
+    return (
+        '<div class="pf-card">'
+        '<div class="pf-top"><div style="min-width:0">'
+        f'<div class="pf-slot">{slot}</div>'
+        f'<div class="pf-name">{name}</div>'
+        f'<div class="pf-code">{code}<span class="pf-tag">{tag}</span></div>'
+        '</div>' + _pf_badge(it) + '</div>'
+        f'<div class="pf-amt">¥{mv:,.0f}</div>'
+        '<div class="pf-grid">'
+        f'<div><div class="k">今日收益</div><div class="v">{day_cell}</div></div>'
+        f'<div><div class="k">持有收益</div><div class="v">{hold_cell}</div></div>'
+        f'<div><div class="k">占比 / 目标</div><div class="v">'
+        f'{it["w_now"]*100:.1f}% / {it["w_tgt"]*100:.1f}%<br>偏离 {dev_html}</div></div>'
+        '</div>'
+        '<div class="pf-foot">'
+        f'<span>{qty}</span>'
+        + (f'<span>成本 {cost:.4f}</span>' if cost > 0 else '')
+        + (f'<span>净值 {px:.4f}</span>' if px > 0 else '<span>缺净值</span>')
+        + '</div></div>'
+    )
 
 # ============================================================
 # Hero
@@ -1935,7 +2154,7 @@ def _hg_slot_options():
                         f'{HG.SLOT_LABEL[s]} · {f["code"]} {f.get("name") or ""}'.strip()))
     return out
 tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
-    ["信号仪表盘", "目标权重", "我的持仓", "调仓登记",
+    ["信号仪表盘", "目标权重", "我的持仓", "买卖提醒",
      "基金走势", "回测表现", "提醒", "指数估值"]
 )
 
@@ -2170,28 +2389,77 @@ def _hg_apply(code_map: dict[str, tuple[str, str]]) -> dict:
 
 
 with tab3:
-    st.subheader("我的持仓 · 我买了什么，跑得怎么样")
+    st.subheader("我的持仓 · 有什么，跑得怎么样")
     st.caption(
-        "策略算的是 8 个**位置**的权重（增长↑权益、收益垫、增长↓国债、通胀↑黄金/有色/能源），"
-        "这里把每个位置换成你自己买的基金。上半是**账户表现**（我的净值 vs 项目默认基金 vs 策略理论），"
-        "下半是**逐只持仓明细**；换基金、改买卖单位、开关位置都在页面底部展开。"
+        "一张卡一只基金：金额、今日收益、持有收益、占比，右上角直接标出**这一轮该买还是该卖**。"
+        "下面是账户净值和两条基准的对比；换基金、改买卖单位、开关位置都在页底展开。"
     )
 
-    # ---- 账户概览：全站唯一一处「总资产 / 现金 / 收益 / 回撤」口径 ----
-    _tot = float(_acct_daily["equity"].iloc[-1]) if (acct and len(_acct_daily)) else 0.0
-    _cap0 = float((acct or {}).get("capital", 0) or 0)
-    _stn = acct_stats(_acct_daily) if (acct and len(_acct_daily)) else {"nav": 1.0, "ret": 0.0, "mdd": 0.0}
-    _m1, _m2, _m3, _m4 = st.columns(4)
-    _m1.metric("总资产", f"¥{_tot:,.0f}" if _tot else "—")
-    _m2.metric("累计收益", f"¥{_tot - _cap0:,.0f}" if _tot else "—",
-               delta=(f"{_stn['ret']*100:+.2f}%" if _tot else None))
-    _m3.metric("现金", f"¥{float(_acct_cash or 0):,.0f}")
-    _m4.metric("最大回撤", f"{_stn['mdd']*100:.2f}%" if _tot else "—")
-    if _tot:
-        st.caption(f"账户起始 {_cn_date(acct['created'])} · 净值日期 {_cn_date(_hg_last)} · "
-                   f"{len(_acct_daily)} 个数据日 · 持仓配置更新于 {_hg_state.get('updated') or '—'}")
+    # ---- 头卡：全站唯一一处「总金额 / 今日 / 持有收益」----
+    _tot = _plan["total"]
+    _n_funds = len([r for r in _plan["rows"] if r["shares"] > 0])
+    _head_sub = (f"账户起始 {_cn_date(acct['created'])} · 净值日期 {_cn_date(_hg_last)} · {_n_funds} 只基金"
+                 if acct else "还没有账户")
+    st.markdown(
+        '<div class="pf-head">'
+        '<div class="pf-k">总金额（元）</div>'
+        f'<div class="pf-amt">¥{_tot:,.2f}</div>'
+        f'<div class="pf-sub">{_head_sub}</div>'
+        '<div class="pf-grid">'
+        f'<div><div class="k">今日收益</div><div class="v {_pf_sign(_plan["today"])}">'
+        f'{_plan["today"]:+,.2f}</div></div>'
+        f'<div><div class="k">持有收益</div><div class="v {_pf_sign(_plan["pnl"])}">'
+        f'{_plan["pnl"]:+,.2f}</div></div>'
+        f'<div><div class="k">持有收益率</div><div class="v {_pf_sign(_plan["pnl_pct"])}">'
+        f'{_plan["pnl_pct"] * 100:+.2f}%</div></div>'
+        f'<div><div class="k">现金</div><div class="v">¥{_plan["cash"]:,.0f}</div></div>'
+        '</div></div>',
+        unsafe_allow_html=True,
+    )
+
+    # ---- 这一轮要动几笔：卡片上有逐只标记，明细在「买卖提醒」----
+    if _plan["has_acct"] and (_plan["buy"] or _plan["sell"]):
+        st.markdown(
+            '<div class="pf-summary">'
+            f'<span class="lead">按策略，这一轮要动 {len(_plan["orders"])} 笔</span>'
+            f'<span class="item">买入<b class="buy">¥{_plan["buy"]:,.0f}</b></span>'
+            f'<span class="item">卖出<b class="sell">¥{_plan["sell"]:,.0f}</b></span>'
+            '<span class="item">逐只金额在「买卖提醒」页</span>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+    elif _plan["has_acct"] and _plan["rows"] and _plan["asset"] > 0:
+        st.markdown(
+            '<div class="pf-summary quiet"><span class="lead">按策略，这一轮不用动</span>'
+            '<span class="item">所有位置偏离都在 0.5% 以内</span></div>',
+            unsafe_allow_html=True,
+        )
+
+    # ---- 基金卡片：一只一张，右上角是买卖标记 ----
+    if not _plan["rows"] and not _plan["other"]:
+        st.info("还没有挂任何基金 —— 展开页底的「换基金 / 加基金」给位置加一只，"
+                "或点「恢复项目默认代码」。")
     else:
-        st.caption("还没有账户和持仓：到「调仓登记」登记第一笔成交（或从零建仓），这里就会出现净值曲线和明细。")
+        _cards = "".join(_pf_card(it) for it in _plan["rows"])
+        for _o in _plan["other"]:
+            _onm = html_escape(FL.fund_name(_o["code"]) or _o["code"])
+            _cards += (
+                '<div class="pf-card"><div class="pf-top"><div style="min-width:0">'
+                '<div class="pf-slot">其他</div>'
+                f'<div class="pf-name">{_onm}</div>'
+                f'<div class="pf-code">{_o["code"]}<span class="pf-tag">不在配置里</span></div>'
+                '</div><span class="pf-badge warn">自行处理</span></div>'
+                f'<div class="pf-amt">¥{_o["mv"]:,.0f}</div>'
+                '<div class="pf-foot"><span>配置里已删掉，账上还留着份额</span></div></div>'
+            )
+        st.markdown(f'<div class="pf-cards">{_cards}</div>', unsafe_allow_html=True)
+
+        _empty_slots = [s for s in HG.SLOTS
+                        if holdings.get(s, {}).get("on", True) and not HG.funds(holdings.get(s, {}))]
+        if _empty_slots:
+            st.caption("这些位置没有挂基金（不持有，目标权重已按同桶比例让给其它位置）："
+                       + "、".join(HG.SLOT_LABEL[s] for s in _empty_slots)
+                       + "。要买就展开页底给它加一只。")
 
     # ---- 我的净值 vs 项目默认基金 vs 策略理论（三条都归一到起点 1.0）----
     st.divider()
@@ -2204,7 +2472,7 @@ with tab3:
 
     _mine = _acct_daily["nav"].dropna() if (acct is not None and len(_acct_daily)) else pd.Series(dtype=float)
     if acct is None or len(_mine) <= 1:
-        st.info("账户还没有净值曲线：在「调仓登记」登记成交后自动生成。")
+        st.info("账户还没有净值曲线：在「买卖提醒」登记成交后自动生成。")
     else:
         _curves, _gap_def, _gap_strat = {}, None, None
         if float(_mine.iloc[0]) > 0:
@@ -2243,80 +2511,6 @@ with tab3:
                         "以及回测用累计净值/实盘用单位净值的口径差。")
         _g3.metric("账户净值", f"{float(_mine.iloc[-1]):.4f}",
                    help="1.0000 = 建仓起点。也可以用「份额 × 最新单位净值 + 现金 = 总资产」跟支付宝对一遍。")
-
-    # ---- 逐只持仓明细：份额、成本、浮盈亏、当前/目标占比、偏离 ----
-    st.divider()
-    st.markdown("**持仓明细**")
-    _px_rows, _sum_mv, _sum_cost, _sum_tgt = [], 0.0, 0.0, 0.0
-    for _s in HG.SLOTS:
-        _h = holdings.get(_s, {})
-        _fs = HG.funds(_h)
-        if not _fs:
-            continue
-        for _i, (_f, _x) in enumerate(zip(_fs, HG.share_of(_h))):
-            _code = _f["code"]
-            _col = _hg_panel[_code].dropna() if _code in _hg_panel.columns else pd.Series(dtype=float)
-            _px = float(_col.iloc[-1]) if len(_col) else 0.0
-            _sh = float(_acct_pos.get(_code, 0) or 0)
-            _cur = _sh * _px
-            _cst = float(_acct_cost.get(_code, 0) or 0)
-            _pl = (_px / _cst - 1) if (_cst > 0 and _px > 0) else None
-            _w_now = (_cur / _tot) if _tot else 0.0
-            _w_tgt = float(_hg_w.get(_s, 0) or 0) * _x
-            _dev = _w_now - _w_tgt
-            _sum_mv += _cur
-            _sum_cost += _sh * _cst
-            _sum_tgt += _w_tgt
-            _px_rows.append([
-                (HG.SLOT_LABEL[_s] if _i == 0 else '<span class="muted">↳</span>'),
-                f'{_f.get("name") or _code}<br><span class="muted">{_code} · {"场外" if HG.is_otc(_f) else "场内"}'
-                + (f' · 位置内 {_x*100:.0f}%' if len(_fs) > 1 else "") + '</span>',
-                f"{_sh:,.2f}" if HG.is_otc(_f) else f"{_sh:,.0f}",
-                (f'{_px:.4f}<br><span class="muted">成本 {_cst:.4f}</span>' if (_px > 0 and _cst > 0)
-                 else (f"{_px:.4f}" if _px else "—")),
-                f"{_cur:,.0f}",
-                "—" if _pl is None else f'<span class="{"up" if _pl >= 0 else "down"}">{_pl*100:+.2f}%</span>',
-                f"{_w_now*100:.1f}%",
-                f"{_w_tgt*100:.1f}%",
-                ('<span class="muted">—</span>' if abs(_dev) < 0.005
-                 else f'<span class="{"up" if _dev > 0 else "down"}">{_dev*100:+.1f}pp</span>'),
-            ])
-    # 配置里已经没有、但账上还留着份额的代码：列出来提醒，不参与目标权重
-    for _oc, _ov in (_hg_other_mv or {}).items():
-        if _ov <= 0:
-            continue
-        _px_rows.append([
-            "其他", f'{FL.fund_name(_oc) or _oc}<br><span class="muted">{_oc} · 不在配置里</span>',
-            "—", "—", f"{_ov:,.0f}", "—",
-            f"{(_ov / _tot * 100) if _tot else 0:.1f}%", "0.0%", '<span class="muted">—</span>',
-        ])
-
-    if not _px_rows:
-        st.info("还没有挂任何基金 —— 展开下面的「换基金 / 加基金」给位置加一只，"
-                "或点「恢复项目默认代码」。")
-    else:
-        _pl_all = ((_sum_mv / _sum_cost - 1) if _sum_cost > 0 else None)
-        # 合计市值要含「配置外但账上还有」的那部分，否则和上面的「其他」行对不上
-        _other_total = sum(v for v in (_hg_other_mv or {}).values() if v > 0)
-        _mv_all = _sum_mv + _other_total
-        _render_table(
-            [("位置", "left"), ("我的基金", "left"), ("份额/股数", "right"),
-             ("净值 / 成本", "right"), ("市值(¥)", "right"), ("浮盈亏", "right"),
-             ("当前占比", "right"), ("目标占比", "right"), ("偏离", "right")],
-            _px_rows,
-            totals=["合计", "—", "—", "—", f"{_mv_all:,.0f}",
-                    ("—" if _pl_all is None else f'{_pl_all*100:+.2f}%'),
-                    f"{(_mv_all / _tot * 100) if _tot else 0:.1f}%",
-                    f"{_sum_tgt*100:.1f}%", "—"],
-            min_width=980,
-        )
-        _empty_slots = [s for s in HG.SLOTS
-                        if holdings.get(s, {}).get("on", True) and not HG.funds(holdings.get(s, {}))]
-        if _empty_slots:
-            st.caption("这些位置没有挂基金（不持有，目标权重已按同桶比例让给其它位置）："
-                       + "、".join(HG.SLOT_LABEL[s] for s in _empty_slots)
-                       + "。要买就展开下面给它加一只。")
-        st.caption("逐只的「该买多少 / 该卖多少」在「调仓登记」算，这里只看持仓本身。")
 
     # ---- 配置区：加删基金、买卖单位、位置开关（低频操作，收在展开里）----
     st.divider()
@@ -2469,236 +2663,149 @@ with tab3:
             st.rerun()
 
 # ============================================================
-# Tab 4: 调仓登记（算差额 → 登记成交 → 留台账）
+# Tab 4: 买卖提醒（按策略算买卖 → 登记成交 → 留台账）
 # ============================================================
 with tab4:
-    st.subheader("调仓登记 · 算差额，登记成交")
+    st.subheader("买卖提醒 · 按策略算，登记每一笔操作")
     st.caption(
-        "这一页只做两件事：按目标权重算出每只**该买多少 / 该卖多少**，确认后登记成成交。"
-        "持仓现状和收益对比在「我的持仓」看，登记完成那边会立刻跟着变。"
+        "这一页只有两件事：按策略告诉你**该买什么、该卖什么**，再把你实际做的操作**登记**进来。"
+        "持仓和收益在「我的持仓」看，登记之后那边立刻跟着变。"
     )
 
-    _has_acct = acct is not None
-    _rb_cash = float(_acct_cash or 0)
-    # 调仓基数用账户真实总资产（含配置里已经没有、但账上还留着份额的代码），
-    # 否则换过基金之后，老持仓会从基数里"消失"，算出来的比例偏大。
-    _rb_asset = (float(_acct_daily["equity"].iloc[-1])
-                 if (_has_acct and len(_acct_daily)) else 0.0)
-    _rb_mv = max(0.0, _rb_asset - _rb_cash)
-
-    _MODE_REB, _MODE_NEW = "按账户调仓", "从零建仓"
-    # 没有账户时只提供「从零建仓」：这时候没有真实份额可调，只能按计划金额买
-    _modes = [_MODE_REB, _MODE_NEW] if _has_acct else [_MODE_NEW]
-    _default_mode = _MODE_REB if (_has_acct and _rb_mv > 0) else _MODE_NEW
-    with st.container(key="rb_mode_switch"):
-        _rb_mode = st.segmented_control(
-            "模式", _modes, default=_default_mode if _default_mode in _modes else _MODE_NEW,
-            key="rb_mode", label_visibility="collapsed",
-            help="按账户调仓：拿「我的持仓」里的真实份额和总资产（持仓 + 现金）来算。\n\n"
-                 "从零建仓：假设还没买入，按你填的金额和目标权重给出每只该买多少。",
-        ) or (_default_mode if _default_mode in _modes else _MODE_NEW)
-
-    _rb_amt = 0.0
-    if _rb_mode == _MODE_NEW:
-        _rc1, _rc2 = st.columns([1, 2.6], vertical_alignment="bottom")
-        with _rc1:
-            _rb_amt = float(st.number_input("计划投入金额（元）", min_value=1000, value=500000,
-                                            step=10000, format="%d", key="rb_amount"))
-        with _rc2:
-            st.caption("按最新净值估算：场外按金额申购（受最低金额限制），场内按 100 股取整。"
-                       "登记后这笔钱就记成各基金的买入份额。")
-        _rb_asset, _rb_cash, _rb_mv = _rb_amt, 0.0, 0.0
-        _rb_shares = {}
+    if not _plan["has_acct"]:
+        st.info("还没有账户：先在页底补录一笔「入金」，之后这里就会按你的真实持仓算买卖。")
+    elif _plan["asset"] <= 0:
+        st.info("账户里还没有钱和持仓：先在页底补录一笔「入金」，或在支付宝买好后补录买入。")
+    elif not _plan["rows"]:
+        st.warning("还没有挂任何基金：先到「我的持仓」给位置加一只，或点右上角「更新数据」拉取净值。")
     else:
-        _rb_shares = {c: float(_acct_pos.get(c, 0) or 0) for c in HG.all_codes(holdings)}
-        if _rb_asset <= 0:
-            st.info("账户里还没有钱和持仓：先登记一笔入金，或切到「从零建仓」。")
+        # ---- 结论：这一轮动不动、买多少卖多少 ----
+        if _plan["orders"]:
+            st.markdown(
+                '<div class="pf-summary">'
+                f'<span class="lead">这一轮要动 {len(_plan["orders"])} 笔</span>'
+                f'<span class="item">买入<b class="buy">¥{_plan["buy"]:,.0f}</b></span>'
+                f'<span class="item">卖出<b class="sell">¥{_plan["sell"]:,.0f}</b></span>'
+                f'<span class="item">调仓基数 ¥{_plan["asset"]:,.0f}</span>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                '<div class="pf-summary quiet"><span class="lead">这一轮不用动</span>'
+                '<span class="item">所有位置偏离都在 0.5% 以内</span></div>',
+                unsafe_allow_html=True,
+            )
 
-    # ---- 差额清单：当前权重 vs 目标权重 → 该买卖多少 ----
-    _rb_rows, _rb_orders = [], []
-    _sum_cur = _sum_buy = _sum_sell = 0.0
-    for _s in HG.active(holdings):
-        _slot_tgt_w = float(_hg_w.get(_s, 0) or 0)
-        _slot_tgt = _slot_tgt_w * _rb_asset
-        _items = []
-        _slot_cur = 0.0
-        for _f, _x in zip(HG.funds(holdings[_s]), HG.share_of(holdings[_s])):
-            _code = _f["code"]
-            _col = _hg_panel[_code].dropna() if _code in _hg_panel.columns else pd.Series(dtype=float)
-            _px = float(_col.iloc[-1]) if len(_col) else 0.0
-            _sh = float(_rb_shares.get(_code, 0) or 0)
-            _cur = _sh * _px
-            _slot_cur += _cur
-            _items.append([_f, _x, _px, _sh, _cur])
-        _sum_cur += _slot_cur
-        _cur_w = _slot_cur / _rb_asset if _rb_asset else 0.0
-        _dev = _cur_w - _slot_tgt_w
-        # 位置该不该动按位置整体判断；要动才按占比拆到这一位置的各只基金
-        _move_slot = abs(_slot_tgt - _slot_cur) >= max(1.0, _rb_asset * 0.005)
-        for _i, (_f, _x, _px, _sh, _cur) in enumerate(_items):
-            _code = _f["code"]
-            _otc = HG.is_otc(_f)
-            _diff = (_slot_tgt * _x - _cur) if _move_slot else 0.0
-            _qty = 0.0
-            if _px <= 0:
-                _act = '<span class="muted">缺净值，先更新数据</span>'
-            elif not _move_slot or abs(_diff) < 1.0:
-                _act = '<span class="muted">不变</span>'
-            else:
-                _qty, _amt = HG.order_quantity(_f, abs(_diff), _px)
-                if _qty <= 0:
-                    _act = '<span class="muted">不足一手</span>'
-                elif _diff > 0:
-                    _act = (f'<span class="up">买入 ¥{_amt:,.0f}</span>' if _otc
-                            else f'<span class="up">买入 {_qty:,.0f} 股</span>')
-                    _sum_buy += _amt
-                else:
-                    _act = (f'<span class="down">卖出 ¥{_amt:,.0f}</span>' if _otc
-                            else f'<span class="down">卖出 {_qty:,.0f} 股</span>')
-                    _sum_sell += _amt
-            if _qty > 0 and _px > 0:
-                _rb_orders.append({"date": _hg_last.strftime("%Y-%m-%d"), "slot": _s, "code": _code,
-                                   "side": "买入" if _diff > 0 else "卖出",
-                                   "shares": round(float(_qty), 4), "nav": round(_px, 4), "fee": 0.0})
-            # 位置级的当前/目标/偏离只在该位置首行显示，同位置其余行留空，避免重复
+        # ---- 差额清单：当前权重 vs 目标权重 → 该买卖多少 ----
+        _rb_rows = []
+        for _it in _plan["rows"]:
             _rb_rows.append([
-                (HG.SLOT_LABEL[_s] if _i == 0 else '<span class="muted">↳</span>'),
-                f'{_f.get("name") or _code}<br><span class="muted">{_code} · {"场外" if _otc else "场内"}'
-                + (f' · 位置内 {_x*100:.0f}%' if len(_items) > 1 else "") + '</span>',
-                f"{_cur:,.0f}",
-                (f"{_cur_w*100:.1f}%" if _i == 0 else ""),
-                (f"{_slot_tgt_w*100:.1f}%" if _i == 0 else ""),
-                (('<span class="muted">—</span>' if abs(_dev) < 0.03
-                  else f'<span class="{"up" if _dev > 0 else "down"}">{_dev*100:+.1f}pp</span>')
-                 if _i == 0 else ""),
-                _act,
+                (HG.SLOT_LABEL[_it["slot"]] if _it["slot_first"] else '<span class="muted">↳</span>'),
+                f'{_it["f"].get("name") or _it["code"]}<br><span class="muted">{_it["code"]} · '
+                + ("场外" if _it["otc"] else "场内")
+                + (f' · 位置内 {_it["x"]*100:.0f}%' if _it["slot_n"] > 1 else "") + '</span>',
+                f'{_it["mv"]:,.0f}',
+                (f'{_it["slot_w"]*100:.1f}%' if _it["slot_first"] else ""),
+                (f'{_it["slot_tgt_w"]*100:.1f}%' if _it["slot_first"] else ""),
+                (('<span class="muted">—</span>' if abs(_it["dev"]) < 0.03
+                  else f'<span class="{_pf_sign(_it["dev"])}">{_it["dev"]*100:+.1f}pp</span>')
+                 if _it["slot_first"] else ""),
+                _pf_badge(_it),
             ])
-    # 配置里已经没有、但账上还留着份额的代码：占着总资产却不在目标权重里，单独列出来
-    for _oc, _ov in ((_hg_other_mv or {}).items() if _rb_mode == _MODE_REB else []):
-        if _ov <= 0:
-            continue
-        _rb_rows.append([
-            "其他",
-            f'{FL.fund_name(_oc) or _oc}<br><span class="muted">{_oc} · 不在配置里</span>',
-            f"{_ov:,.0f}",
-            f"{(_ov / _rb_asset * 100) if _rb_asset else 0:.1f}%", "0.0%",
-            '<span class="muted">—</span>',
-            '<span class="muted">不在配置里，自行处理</span>',
-        ])
-    _empty_slots = [s for s in HG.SLOTS
-                    if holdings.get(s, {}).get("on", True) and not HG.funds(holdings.get(s, {}))]
-    if _empty_slots:
-        st.caption("这些位置没有挂基金（不持有，目标权重已按同桶比例让给其它位置）："
-                   + "、".join(HG.SLOT_LABEL[s] for s in _empty_slots)
-                   + "。要买就在「我的持仓」底部给它加一只。")
-
-    if not _rb_rows:
-        st.warning("没有可算的位置：请先到「我的持仓」设置基金，或点右上角「更新数据」拉取净值。")
-    else:
-        _tot_mv = _rb_mv if _rb_mode == _MODE_REB else _sum_cur
+        # 配置里已经没有、但账上还留着份额的代码：占着总资产却不在目标权重里，单独列出来
+        for _o in _plan["other"]:
+            _rb_rows.append([
+                "其他",
+                f'{FL.fund_name(_o["code"]) or _o["code"]}<br><span class="muted">{_o["code"]} · 不在配置里</span>',
+                f'{_o["mv"]:,.0f}',
+                f'{(_o["mv"] / _plan["asset"] * 100) if _plan["asset"] else 0:.1f}%',
+                "0.0%", '<span class="muted">—</span>',
+                '<span class="muted">不在配置里，自行处理</span>',
+            ])
         _render_table(
             [("位置", "left"), ("我的基金", "left"), ("当前市值(¥)", "right"),
              ("当前权重", "right"), ("目标权重(位置)", "right"), ("偏离", "right"), ("操作", "left")],
             _rb_rows,
-            totals=["合计", "—", f"{_tot_mv:,.0f}",
-                    f"{(_tot_mv / _rb_asset * 100) if _rb_asset else 0:.1f}%", "100.0%", "—",
-                    f"买 ¥{_sum_buy:,.0f} / 卖 ¥{_sum_sell:,.0f}" if (_sum_buy or _sum_sell) else "—"],
+            totals=["合计", "—", f'{_plan["mv"]:,.0f}',
+                    f'{(_plan["mv"] / _plan["asset"] * 100) if _plan["asset"] else 0:.1f}%',
+                    "100.0%", "—",
+                    (f'买 ¥{_plan["buy"]:,.0f} / 卖 ¥{_plan["sell"]:,.0f}'
+                     if (_plan["buy"] or _plan["sell"]) else "—")],
             min_width=900,
         )
-        st.caption(f"调仓基数（总资产）¥{_rb_asset:,.0f} = 持仓市值 ¥{_tot_mv:,.0f} + 现金 ¥{_rb_cash:,.0f}。"
-                   "偏离 < 0.5% 视为不用动，省手续费。")
+        st.caption(f"调仓基数 ¥{_plan['asset']:,.0f} = 持仓 ¥{_plan['mv']:,.0f} + 现金 ¥{_plan['cash']:,.0f}。"
+                   "位置整体偏离 < 0.5% 不用动，省手续费；场内按每手取整，场外按最低申购金额。")
 
-        # ---- 登记：把这份清单落成成交 ----
-        st.divider()
-        if not _rb_orders:
-            st.success("所有位置偏离都在 0.5% 以内，不用动。" if _rb_asset > 0 else "没有需要下单的位置。")
-        else:
-            st.markdown("**登记这份清单**")
-            _btn_label = (f"创建账户并按此清单建仓（{len(_rb_orders)} 笔）"
-                          if not _has_acct else f"按此清单登记成交（{len(_rb_orders)} 笔）")
-            if st.button(_btn_label, type="primary", key="rb_write",
-                         help="按最新净值日记成买入/卖出成交，可在下面的台账里核对"):
-                if not _has_acct:
-                    save_acct({"strategy": strat_key, "capital": float(_rb_amt),
-                               "created": str(pd.Timestamp(_hg_last).date()),
-                               "trades": list(_rb_orders)}, ACCT_FILE)
-                else:
-                    acct.setdefault("trades", []).extend(_rb_orders)
-                    save_acct(acct, ACCT_FILE)
-                st.toast(f"已登记 {len(_rb_orders)} 笔成交", icon=":material/check_circle:")
+        # ---- 一键登记：把这份清单落成成交（相当于批量补录）----
+        if _plan["orders"]:
+            if st.button(f"把这份清单登记成 {len(_plan['orders'])} 笔成交", type="primary", key="rb_write",
+                         help="按最新净值记成买入/卖出成交，登记后可在下面的台账里核对"):
+                acct.setdefault("trades", []).extend(_plan["orders"])
+                save_acct(acct, ACCT_FILE)
+                st.toast(f"已登记 {len(_plan['orders'])} 笔成交", icon=":material/check_circle:")
                 st.rerun()
-            st.caption("成交价以当天实际净值为准，这里按最新净值估算；"
-                       "场外申赎按当日收盘净值，和场内实时价不同。")
+            st.caption("这里按最新净值估算；实际以你在支付宝成交的价格为准，差得多可以在下面逐笔修正。")
 
-        with st.expander("调仓规则说明"):
-            st.markdown("""
-            1. 每月最后一个交易日执行一次
-            2. 先卖后买 — 场外卖出到账后再买入（一般 T+1~T+3）
-            3. 非农/黄金/标普 跌破 SMA → 策略已把权重转到城投债位置，照上面清单执行即可
-            4. 偏离 < 0.5% 不用动，省手续费
-            5. 场内按 100 股取整；场外按金额申购，最低金额见「我的持仓」
-            6. 场外当天申赎按当日收盘净值成交，和场内实时价不同
-            """)
-
-    # ---- 手工补录 + 台账：支付宝上真实发生的成交，可以绕过清单直接记 ----
+    # ---- 补录：支付宝上真实发生的每一笔 ----
     st.divider()
     _slot_opts = _hg_slot_options()
     if acct is None:
-        st.info("还没有账户。上面的清单可以直接建仓；如果是先有账户再买入，"
-                "先登记一笔「入金」创建账户。")
-        with st.expander("先创建一个空账户", expanded=True):
-            with st.form("acct_init"):
-                c1, c2, c3 = st.columns(3)
-                with c1:
-                    s_init = st.selectbox("跟随策略", list(STRATEGIES), format_func=lambda k: STRATEGIES[k]["name"])
-                with c2:
-                    cap0 = st.number_input("初始资金（元）", min_value=1000.0, value=500000.0,
-                                           step=10000.0, format="%.0f")
-                with c3:
-                    start0 = st.date_input("起始日期", value=prices.index[-1].date())
-                if st.form_submit_button("创建账户", type="primary"):
-                    save_acct({"strategy": s_init, "capital": float(cap0),
-                               "created": str(start0), "trades": []}, ACCT_FILE)
-                    st.rerun()
+        st.markdown("**先建一个账户**")
+        st.caption("建完账户再逐笔补录；也可以先在支付宝买，买完回来补录买入和入金。")
+        with st.form("acct_init"):
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                s_init = st.selectbox("跟随策略", list(STRATEGIES),
+                                      format_func=lambda k: STRATEGIES[k]["name"])
+            with c2:
+                cap0 = st.number_input("初始资金（元）", min_value=1000.0, value=500000.0,
+                                       step=10000.0, format="%.0f")
+            with c3:
+                start0 = st.date_input("起始日期", value=prices.index[-1].date())
+            if st.form_submit_button("创建账户", type="primary"):
+                save_acct({"strategy": s_init, "capital": float(cap0),
+                           "created": str(start0), "trades": []}, ACCT_FILE)
+                st.rerun()
     elif not _slot_opts:
         st.warning("还没有挂任何基金：先到「我的持仓」给位置加至少一只基金，才能记账。")
     else:
+        st.markdown("**补录一笔操作**")
+        st.caption("入金 / 出金 / 买入 / 卖出都在这里记；清单之外的操作（比如临时加了一笔）也记这里。")
         _fund_map = {(s, f["code"]): f
                      for s in HG.SLOTS for f in HG.funds(holdings.get(s, {}))}
-        with st.expander("手工补录一笔（入金 / 出金 / 买入 / 卖出）", expanded=not len(acct.get("trades", []))):
-            st.caption("清单之外的真实操作在这里记：比如支付宝上先转了钱进来，或者临时手动买了一笔。")
-            with st.form("acct_trade", clear_on_submit=True):
-                r1 = st.columns([1.1, 0.9, 2.2], gap="small")
-                tr_date = r1[0].date_input("日期", value=pd.Timestamp(_hg_last).date(), format="YYYY/MM/DD")
-                tr_side = r1[1].selectbox("类型", ["买入", "卖出", "入金", "出金"])
-                tr_slot = r1[2].selectbox("基金", _slot_opts, format_func=lambda x: x[2])
-                _is_money = tr_side in ("入金", "出金")
-                _f_now = _fund_map.get((tr_slot[0], tr_slot[1]), {})
-                _unit_otc = HG.is_otc(_f_now) if _f_now else True
-                r2 = st.columns([1, 1, 1], gap="small")
-                tr_shares = r2[0].number_input(
-                    "金额（元）" if _is_money else ("份额（场外）" if _unit_otc else "股数（场内）"),
-                    min_value=0.0, step=100.0, format="%.2f")
-                _nav_hint = _hg_nav_on(None, tr_date, tr_slot[1])
-                tr_nav = r2[1].number_input(
-                    "成交净值（元/份）", min_value=0.0,
-                    value=round(float(_nav_hint or 0), 4) if (not _is_money and _nav_hint) else 0.0,
-                    step=0.0001, format="%.4f",
-                    help="场外按当天收盘净值成交；留 0 会自动取该日净值。入金/出金不用填。")
-                tr_fee = r2[2].number_input("手续费（元）", min_value=0.0, step=1.0, format="%.2f")
-                if st.form_submit_button("记一笔", type="primary"):
-                    _t = {"date": str(tr_date), "side": tr_side, "slot": tr_slot[0],
-                          "code": tr_slot[1],
-                          "shares": float(tr_shares), "nav": float(tr_nav), "fee": float(tr_fee)}
-                    if _is_money and tr_shares <= 0:
-                        st.warning("金额要大于 0")
-                    elif not _is_money and (tr_shares <= 0 or not _t["code"]):
-                        st.warning("数量要大于 0，且该基金要先在「我的持仓」里挂上")
-                    else:
-                        acct.setdefault("trades", []).append(_t)
-                        save_acct(acct, ACCT_FILE)
-                        st.toast("已记录", icon=":material/check_circle:")
-                        st.rerun()
+        with st.form("acct_trade", clear_on_submit=True):
+            r1 = st.columns([1.1, 0.9, 2.2], gap="small")
+            tr_date = r1[0].date_input("日期", value=pd.Timestamp(_hg_last).date(), format="YYYY/MM/DD")
+            tr_side = r1[1].selectbox("类型", ["买入", "卖出", "入金", "出金"])
+            tr_slot = r1[2].selectbox("基金", _slot_opts, format_func=lambda x: x[2])
+            _is_money = tr_side in ("入金", "出金")
+            _f_now = _fund_map.get((tr_slot[0], tr_slot[1]), {})
+            _unit_otc = HG.is_otc(_f_now) if _f_now else True
+            r2 = st.columns([1, 1, 1], gap="small")
+            tr_shares = r2[0].number_input(
+                "金额（元）" if _is_money else ("份额（场外）" if _unit_otc else "股数（场内）"),
+                min_value=0.0, step=100.0, format="%.2f")
+            _nav_hint = _hg_nav_on(None, tr_date, tr_slot[1])
+            tr_nav = r2[1].number_input(
+                "成交净值（元/份）", min_value=0.0,
+                value=round(float(_nav_hint or 0), 4) if (not _is_money and _nav_hint) else 0.0,
+                step=0.0001, format="%.4f",
+                help="场外按当天收盘净值成交；留 0 会自动取该日净值。入金/出金不用填。")
+            tr_fee = r2[2].number_input("手续费（元）", min_value=0.0, step=1.0, format="%.2f")
+            if st.form_submit_button("记一笔", type="primary"):
+                _t = {"date": str(tr_date), "side": tr_side, "slot": tr_slot[0],
+                      "code": tr_slot[1],
+                      "shares": float(tr_shares), "nav": float(tr_nav), "fee": float(tr_fee)}
+                if _is_money and tr_shares <= 0:
+                    st.warning("金额要大于 0")
+                elif not _is_money and (tr_shares <= 0 or not _t["code"]):
+                    st.warning("数量要大于 0，且该基金要先在「我的持仓」里挂上")
+                else:
+                    acct.setdefault("trades", []).append(_t)
+                    save_acct(acct, ACCT_FILE)
+                    st.toast("已记录", icon=":material/check_circle:")
+                    st.rerun()
 
         with st.expander(f"台账 · 成交流水（{len(acct.get('trades', []))} 笔）", expanded=False):
             _tr_rows = []
