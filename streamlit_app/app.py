@@ -23,7 +23,7 @@ from allweather.rebalance import (
     STRATEGIES,
     ETF_META,
 )
-from allweather.sim_account import load_acct, save_acct, stats as acct_stats
+from allweather.sim_account import load_acct, save_acct, stats as acct_stats, MONEY_SIDES as _MONEY_SIDES
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fund_lookup as FL
 import fund_search as FS
@@ -1851,7 +1851,7 @@ def _replay_holdings(trades, capital, created):
     与 allweather.sim_account.replay 的差别：
     - 持仓以**基金代码**为键（原来以策略资产 key 为键，换基金就记不进去）；
     - 买入/卖出按份额 × 单位净值成交（场外基金的口径）；
-    - 净值 = (持仓市值 + 现金) / units，入金出金按当时净值折算份额，不虚增收益。
+    - 净值 = (持仓市值 + 现金) / units，转入转出按当时净值折算份额，不虚增收益。
     """
     idx = _hg_panel.index[_hg_panel.index >= pd.Timestamp(created)] if len(_hg_panel) else pd.DatetimeIndex([])
     if len(idx) == 0:
@@ -1907,11 +1907,11 @@ def _replay_holdings(trades, capital, created):
                 if pos[code] <= 1e-9:
                     pos.pop(code, None)
                     cost.pop(code, None)
-            elif side == "入金":
+            elif side in ("转入", "入金"):
                 base = last_nav if last_nav > 0 else 1.0
                 units += sh / base
                 cash += sh
-            elif side == "出金":
+            elif side in ("转出", "出金"):
                 base = last_nav if last_nav > 0 else 1.0
                 units = max(1e-9, units - sh / base)
                 cash -= sh
@@ -1943,7 +1943,7 @@ def _migrate_trades(a: dict) -> bool:
         return False
     changed = False
     for t in a.get("trades", []):
-        if t.get("code") or t.get("side") in ("入金", "出金"):
+        if t.get("code") or t.get("side") in _MONEY_SIDES:
             continue
         key = t.get("asset") or t.get("slot")
         if not key:
@@ -2326,7 +2326,7 @@ def _pf_detail(it: dict) -> None:
         for t in _mine_tr:
             _side = t.get("side") or "—"
             _cls = "buy" if _side == "买入" else ("sell" if _side == "卖出" else "")
-            _q = (f"¥{float(t.get('shares', 0)):,.0f}" if _side in ("入金", "出金")
+            _q = (f"¥{float(t.get('shares', 0)):,.0f}" if _side in _MONEY_SIDES
                   else (f"{float(t.get('shares', 0)):,.2f} 份" if it["otc"]
                         else f"{float(t.get('shares', 0)):,.0f} 股"))
             _rows.append([
@@ -2871,9 +2871,9 @@ with tab4:
     )
 
     if not _plan["has_acct"]:
-        st.info("还没有账户：先到「交易记录」建一个账户（或直接补录一笔入金），之后这里就会按你的真实持仓算买卖。")
+        st.info("还没有账户：先到「交易记录」建一个账户（或直接补录一笔转入），之后这里就会按你的真实持仓算买卖。")
     elif _plan["asset"] <= 0:
-        st.info("账户里还没有钱和持仓：先到「交易记录」补录一笔「入金」，或在支付宝买好后补录买入。")
+        st.info("账户里还没有钱和持仓：先到「交易记录」补录一笔「转入」，或在支付宝买好后补录买入。")
     elif not _plan["rows"]:
         st.warning("还没有挂任何基金：先到「我的持仓」给位置加一只，或点右上角「更新数据」拉取净值。")
     else:
@@ -2952,14 +2952,14 @@ with tab4:
 with tab5:
     st.subheader("交易记录 · 支付宝上真实发生的每一笔")
     st.caption(
-        "这一页只记账：入金、出金、买入、卖出各记一笔，台账按录入顺序列出全部成交（最后一笔在最后）。"
+        "这一页只记账：买入、卖出、转入、转出各记一笔，台账按录入顺序列出全部成交（最后一笔在最后）。"
         "「买卖提醒」是按策略算出来的计划，这里是**实际做了什么**；两边都落进同一份账户文件，改任何一边都会重算持仓和收益。"
     )
 
     _slot_opts = _hg_slot_options()
     if acct is None:
         st.markdown("**先建一个账户**")
-        st.caption("建完账户再逐笔补录；也可以先在支付宝买，买完回来补录买入和入金。")
+        st.caption("建完账户再逐笔补录；也可以先在支付宝买，买完回来补录买入和转入。")
         with st.form("acct_init"):
             c1, c2, c3 = st.columns(3)
             with c1:
@@ -2978,36 +2978,47 @@ with tab5:
         st.warning("还没有挂任何基金：先到「我的持仓」给位置加至少一只基金，才能记账。")
     else:
         st.markdown("**补录一笔操作**")
-        st.caption("入金 / 出金 / 买入 / 卖出都在这里记；计划之外的操作（比如临时加了一笔）也记这里。")
+        st.caption("买入 / 卖出 = 在账户里买卖基金；转入 = 从银行卡或支付宝再放钱进来（记入本金，不算收益）；转出 = 把钱取出去。**卖出基金后钱自动回到现金，不用再记转入。**")
         _fund_map = {(s, f["code"]): f
                      for s in HG.SLOTS for f in HG.funds(holdings.get(s, {}))}
+        # 「类型」放在 form 外：改成转入/转出时，下面的字段要立刻换成「只填金额」，而 form 内的控件改动不会触发 rerun
+        r0 = st.columns([1.1, 0.9, 2.2], gap="small")
+        tr_date = r0[0].date_input("日期", value=pd.Timestamp(_hg_last).date(), format="YYYY/MM/DD")
+        tr_side = r0[1].selectbox(
+            "类型", ["买入", "卖出", "转入", "转出"],
+            help="买入 / 卖出 = 在账户里买卖基金。转入 = 从银行卡或支付宝再放钱进来（记入本金，不算收益）；"
+                 "转出 = 把钱取出去。转入 / 转出和具体哪只基金无关。")
+        _is_money = tr_side in _MONEY_SIDES
         with st.form("acct_trade", clear_on_submit=True):
-            r1 = st.columns([1.1, 0.9, 2.2], gap="small")
-            tr_date = r1[0].date_input("日期", value=pd.Timestamp(_hg_last).date(), format="YYYY/MM/DD")
-            tr_side = r1[1].selectbox("类型", ["买入", "卖出", "入金", "出金"])
-            tr_slot = r1[2].selectbox("基金", _slot_opts, format_func=lambda x: x[2])
-            _is_money = tr_side in ("入金", "出金")
-            _f_now = _fund_map.get((tr_slot[0], tr_slot[1]), {})
-            _unit_otc = HG.is_otc(_f_now) if _f_now else True
-            r2 = st.columns([1, 1, 1], gap="small")
-            tr_shares = r2[0].number_input(
-                "金额（元）" if _is_money else ("份额（场外）" if _unit_otc else "股数（场内）"),
-                min_value=0.0, step=100.0, format="%.2f")
-            _nav_hint = _hg_nav_on(None, tr_date, tr_slot[1])
-            tr_nav = r2[1].number_input(
-                "成交净值（元/份）", min_value=0.0,
-                value=round(float(_nav_hint or 0), 4) if (not _is_money and _nav_hint) else 0.0,
-                step=0.0001, format="%.4f",
-                help="场外按当天收盘净值成交；留 0 会自动取该日净值。入金/出金不用填。")
-            tr_fee = r2[2].number_input("手续费（元）", min_value=0.0, step=1.0, format="%.2f")
+            if _is_money:
+                r0[2].markdown("")          # 占位，保持和下面一行的横向对齐
+                tr_amount = st.number_input("金额（元）", min_value=0.0, step=1000.0,
+                                            format="%.2f", key="tr_amount")
+                tr_slot, tr_shares, tr_nav, tr_fee = ("", ""), float(tr_amount), 0.0, 0.0
+            else:
+                tr_slot = r0[2].selectbox("基金", _slot_opts, format_func=lambda x: x[2])
+                _f_now = _fund_map.get((tr_slot[0], tr_slot[1]), {})
+                _unit_otc = HG.is_otc(_f_now) if _f_now else True
+                r2 = st.columns([1, 1, 1], gap="small")
+                tr_shares = r2[0].number_input(
+                    "份额（场外）" if _unit_otc else "股数（场内）",
+                    min_value=0.0, step=100.0, format="%.2f", key="tr_shares")
+                _nav_hint = _hg_nav_on(None, tr_date, tr_slot[1])
+                tr_nav = r2[1].number_input(
+                    "成交净值（元/份）", min_value=0.0,
+                    value=round(float(_nav_hint or 0), 4) if _nav_hint else 0.0,
+                    step=0.0001, format="%.4f",
+                    help="场外按当天收盘净值成交；留 0 会自动取该日净值。")
+                tr_fee = r2[2].number_input("手续费（元）", min_value=0.0, step=1.0, format="%.2f")
             if st.form_submit_button("记一笔", type="primary"):
-                _t = {"date": str(tr_date), "side": tr_side, "slot": tr_slot[0],
-                      "code": tr_slot[1],
+                _t = {"date": str(tr_date), "side": tr_side,
+                      "slot": (tr_slot[0] if tr_slot else ""),
+                      "code": (tr_slot[1] if tr_slot else ""),
                       "shares": float(tr_shares), "nav": float(tr_nav), "fee": float(tr_fee)}
-                if _is_money and tr_shares <= 0:
-                    st.warning("金额要大于 0")
-                elif not _is_money and (tr_shares <= 0 or not _t["code"]):
-                    st.warning("数量要大于 0，且该基金要先在「我的持仓」里挂上")
+                if float(tr_shares) <= 0:
+                    st.warning("金额要大于 0" if _is_money else "数量要大于 0")
+                elif not _is_money and not _t["code"]:
+                    st.warning("该基金要先在「我的持仓」里挂上")
                 else:
                     acct.setdefault("trades", []).append(_t)
                     save_acct(acct, ACCT_FILE)
@@ -3021,7 +3032,7 @@ with tab5:
             _nm = (_f_meta.get("name") if _f_meta else "") or FL.fund_name(t.get("code", "")) \
                 or t.get("code", "") or "—"
             _u = (_f_meta.get("unit") if _f_meta else None) or "份额"
-            _qty = (f"¥{float(t.get('shares', 0)):,.0f}" if t.get("side") in ("入金", "出金")
+            _qty = (f"¥{float(t.get('shares', 0)):,.0f}" if t.get("side") in _MONEY_SIDES
                     else (f'{float(t.get("shares", 0)):,.2f} 份' if _u == "份额"
                           else f'{float(t.get("shares", 0)):,.0f} 股'))
             _cls = "buy" if t.get("side") == "买入" else ("sell" if t.get("side") == "卖出" else "")

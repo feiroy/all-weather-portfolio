@@ -1,8 +1,9 @@
 """模拟实操账户：按成交记录重放，得到日度净值、持仓与现金。
 
 设计要点
-- 采用"份额记账"：账户创建即视为入金，``units`` = 初始资金；后续入金/出金按当时净值折算份额，
-  因此外部资金进出不会让收益率虚增。
+- 采用"份额记账"：账户创建即视为转入一笔起始资金，``units`` = 初始资金；后续转入/转出按当时
+  净值折算份额，因此外部资金进出不会让收益率虚增。
+- 「转入/转出」= 账户外部资金进出（加钱进来、取钱出去）；旧数据里的「入金/出金」含义相同，读取时兼容。
 - 净值 = (持仓市值 + 现金) / units，费用直接计入成本，会压低净值。
 - 成交日若为非交易日，自动顺延到下一个交易日生效。
 """
@@ -13,7 +14,8 @@ from pathlib import Path
 
 import pandas as pd
 
-SIDES = ("买入", "卖出", "入金", "出金")
+SIDES = ("买入", "卖出", "转入", "转出")
+MONEY_SIDES = ("转入", "转出", "入金", "出金")   # 外部资金进出（后两个是旧数据里的写法）
 
 
 def load_acct(path: Path):
@@ -88,11 +90,11 @@ def replay(trades, prices: pd.DataFrame, capital: float, created: str):
             elif side == "卖出":
                 cash += sh * px - fee
                 pos[a] = pos.get(a, 0.0) - sh
-            elif side == "入金":
+            elif side in ("转入", "入金"):
                 base = last_nav if last_nav > 0 else 1.0
                 units += sh / base
                 cash += sh
-            elif side == "出金":
+            elif side in ("转出", "出金"):
                 base = last_nav if last_nav > 0 else 1.0
                 units = max(1e-9, units - sh / base)
                 cash -= sh
