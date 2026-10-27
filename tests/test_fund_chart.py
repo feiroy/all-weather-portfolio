@@ -42,7 +42,7 @@ PERIODS = ("日", "月", "年")
 # 三个文案参数（持仓页详情图要独立记忆区间与标题）。用 headless Chrome + CDP 实跑 10 项验证：
 # 三角形数量与颜色、统计条笔数、悬停提示列出该笔成交、区间切换只画区间内成交点且不残留、
 # 月线按周期聚合仍标点、区间/周期写入各自 localStorage 键并还原。
-CHART_SOURCE_SHA256 = "b1834f4582e0dfcb4cd5dcba870e98ac96eaf1763e46ebf7da85ceed42e756ff"
+CHART_SOURCE_SHA256 = "789d2fc5aba4429bc46ba09c61bdb39033f3fdf8c8ff6dab93527de099b1458f"
 NAMES = {"_scroll_chart_html", "_trend_aggregate", "_trend_window_start",
          "_stage_rows", "_stage_summary_html", "_trend_chart_data",
          "_period_label", "_range_buttons"}

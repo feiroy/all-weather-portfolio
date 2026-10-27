@@ -1349,8 +1349,8 @@ __RANGE_BTNS__
       const cx = clamp(x(ti), L + 6, W - R - 6), cy = y(P.prices[ti]);
       const nb = e.list.filter(t => t.side === '买入').length;
       nBuy += nb; nSell += e.list.length - nb;
-      if (nb) tmarks += `<path d="M${cx-5.5},${cy+10.5} L${cx+5.5},${cy+10.5} L${cx},${cy+2.5} Z" fill="#C52828" stroke="#fff" stroke-width="1.3"/>`;
-      if (e.list.length - nb) tmarks += `<path d="M${cx-5.5},${cy-10.5} L${cx+5.5},${cy-10.5} L${cx},${cy-2.5} Z" fill="#16703B" stroke="#fff" stroke-width="1.3"/>`;
+      if (nb) tmarks += `<path d="M${cx-6.5},${cy+12} L${cx+6.5},${cy+12} L${cx},${cy+2.5} Z" fill="#C52828" stroke="#fff" stroke-width="1.4"/>`;
+      if (e.list.length - nb) tmarks += `<path d="M${cx-6.5},${cy-12} L${cx+6.5},${cy-12} L${cx},${cy-2.5} Z" fill="#16703B" stroke="#fff" stroke-width="1.4"/>`;
     }
     svg.innerHTML = `<defs><clipPath id="plot-clip"><rect x="${L}" y="${T-5}" width="${PW}" height="${H-T-B+10}"/></clipPath></defs>${grid}<g clip-path="url(#plot-clip)">${marks}<line id="guide" y1="${T}" y2="${H-B}" stroke="#94A3B8" stroke-dasharray="4 4" visibility="hidden"/></g>${ticks}${annotations}${tmarks ? `<g clip-path="url(#plot-clip)" data-trades="${nBuy + nSell}">${tmarks}</g>` : ''}`;
     wrap.dataset.bars = String(cntRel); wrap.dataset.stepBars = String(cntStep);
