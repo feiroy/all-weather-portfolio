@@ -457,7 +457,11 @@ div[data-testid="stAlert"] p{ color:var(--brand-strong); }
 .fh-price .fh-date{margin-left:0}
 .sec-head{display:flex; align-items:center; flex-wrap:wrap; gap:12px; margin:0 0 16px}
 .sec-head .t{font-size:17px; font-weight:600; color:var(--ink)}
-.sec-head .r{margin-left:auto; font-size:12px; color:var(--sub)}
+.sec-head .r{margin-left:auto; font-size:12px; color:var(--sub); min-width:0; text-align:right}
+/* 手机上标题与右侧统计放一行会互相挤掉，右侧整行下移 */
+@media(max-width:760px){
+  .sec-head .r{margin-left:0; width:100%; text-align:left; line-height:1.7}
+}
 .sec-note{font-size:12px; color:var(--sub); line-height:1.8; margin-top:12px}
 .stage-summary{border-top:1px solid var(--line);margin-top:16px;padding-top:14px}
 .stage-summary-title{font-size:12px;font-weight:400;color:var(--sub);margin-bottom:10px}
@@ -1974,7 +1978,7 @@ _ACCT_ASSETS = [a for a in ["hs300", "us_sp500", "credit", "bond_10y",
 _ASSET_LABEL = {a: f"{ETF_META.get(a, {}).get('name', a)} ({ETF_META.get(a, {}).get('code', '')})"
                 for a in _ACCT_ASSETS}
 
-# 账户重放结果（按份额记账）：tab3 我的持仓、tab4 买卖提醒、tab9 提醒共用
+# 账户重放结果（按份额记账）：我的持仓 / 买卖提醒 / 收益对比 / 持仓详情共用
 _acct_daily, _acct_pos, _acct_cost, _acct_cash, _acct_units = (
     _replay_holdings(acct.get("trades", []), acct.get("capital", 0), acct.get("created"))
     if acct else (pd.DataFrame(), {}, {}, 0.0, 0.0)
@@ -2959,26 +2963,22 @@ def _pf_detail(it: dict) -> None:
     elif _tr:
         st.caption("累计盈亏要等有净值数据才能画：这只基金缺净值，拉取后自动出现。")
 
+    # 逐笔成交流水不在这里重复一遍：只报个数并指路，「交易记录」页可以按基金筛出全部记录就地改
     _mine_tr = [t for t in ((acct or {}).get("trades") or [])
                 if str(t.get("code") or "") == code]
     if _mine_tr:
-        _rows = []
-        for t in _mine_tr:
-            _side = t.get("side") or "—"
-            _cls = "buy" if _side == "买入" else ("sell" if _side == "卖出" else "")
-            _q = (f"¥{float(t.get('shares', 0)):,.0f}" if _side in _MONEY_SIDES
-                  else (f"{float(t.get('shares', 0)):,.2f} 份" if it["otc"]
-                        else f"{float(t.get('shares', 0)):,.0f} 股"))
-            _rows.append([
-                _cn_date(t.get("date")),
-                f'<span class="pf-badge {_cls}">{_side}</span>' if _cls else _side,
-                _q,
-                f'{float(t.get("nav", 0)):.4f}' if float(t.get("nav", 0) or 0) > 0 else "—",
-                f'{float(t.get("fee", 0)):,.2f}' if float(t.get("fee", 0) or 0) else "—",
-            ])
-        st.markdown("**这只基金的成交**")
-        _render_table([("日期", "left"), ("类型", "left"), ("数量", "right"),
-                       ("成交净值", "right"), ("手续费", "right")], _rows)
+        _nb = sum(1 for t in _mine_tr if t.get("side") == "买入")
+        _ns = sum(1 for t in _mine_tr if t.get("side") == "卖出")
+        _amt_b = sum(float(t.get("shares") or 0) * float(t.get("nav") or 0)
+                     + float(t.get("fee") or 0)
+                     for t in _mine_tr if t.get("side") == "买入")
+        _amt_s = sum(float(t.get("shares") or 0) * float(t.get("nav") or 0)
+                     - float(t.get("fee") or 0)
+                     for t in _mine_tr if t.get("side") == "卖出")
+        st.caption(f"这只基金一共 {len(_mine_tr)} 笔成交（买 {_nb} · 卖 {_ns}）："
+                   f"累计买入 ¥{_amt_b:,.0f}、卖出 ¥{_amt_s:,.0f}。"
+                   "要逐笔看或改动，去「交易记录」页顶上选这只基金 —— 那里能把它的记录全筛出来，"
+                   "日期 / 金额 / 单价都可以就地改。")
 
 # ============================================================
 # 已清仓：份额归零的那一轮，赚了多少、拿了多久 —— 从成交记录还原，不依赖基金是否还在配置里
@@ -3257,15 +3257,273 @@ def _hg_slot_options():
             out.append((s, f["code"],
                         f'{HG.SLOT_LABEL[s]} · {f["code"]} {f.get("name") or ""}'.strip()))
     return out
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs(
-    ["信号仪表盘", "目标权重", "我的持仓", "买卖提醒", "交易记录",
-     "收益对比", "基金检索", "回测表现", "提醒", "指数估值"]
+# ============================================================
+# 三类提醒一次算完、分头显示
+# 原来独占一个「提醒」tab，内容和买卖提醒（偏离）、收益对比（体检）、指数估值（估值）三页重复，
+# 用户看不懂它是干嘛的 → 拆开贴到对应页面，不再单独占一个 tab
+# ============================================================
+def _alert_card(level, title, body, tip=""):
+    _cls = {"urgent": "warn", "warn": "warn", "info": "", "ok": "calm"}.get(level, "")
+    _tip = f'<div class="m">{tip}</div>' if tip else ""
+    return (f'<div class="sig {_cls}"><div class="main"><div class="t">{title}</div>'
+            f'<div class="m">{body}</div>{_tip}</div></div>')
+
+
+def _alerts_compute() -> dict:
+    """偏离 / 估值 / 体检三类提醒，一次算完供三个页面各自取用。"""
+    _val_by_code = {}
+    try:
+        from allweather import valuation as _VAL
+        _snap = _VAL.load_snapshot()
+        if not _snap.empty:
+            for _r in _snap.to_dict("records"):
+                _dd = _VAL.drawdown_10y(_r["代码"])
+                _tot, _vs, _ps, _lb = _VAL.score(_r["PE百分位"], _r["PB百分位"], _dd)
+                _val_by_code[str(_r["代码"])] = {
+                    "name": _r["名称"],
+                    "pe_pct": _r["PE百分位"] if pd.notna(_r["PE百分位"]) else None,
+                    "pb_pct": _r["PB百分位"] if pd.notna(_r["PB百分位"]) else None,
+                    "score": _tot, "label": _lb,
+                    "asof": f'{pd.Timestamp(_snap["数据日"].max()):%Y/%m/%d}',
+                }
+    except Exception:  # noqa: BLE001
+        _val_by_code = {}
+
+    _bench = {}
+    if acct is not None and len(_acct_daily) > 1:
+        _bd = BM.replay_target(w, acct.get("created"), nav_getter=HG.nav_series)
+        if len(_bd) > 1:
+            _bench["项目默认基金"] = _bd
+        _bs = BM.strategy_curve(_BENCH_COL.get(acct.get("strategy"), ""), start=acct.get("created"))
+        if _bs is not None and len(_bs) > 1:
+            _bench["策略理论"] = _bs
+
+    _nav_latest = {}
+    for _c in HG.all_codes(holdings):
+        if _c in _hg_panel.columns:
+            _col = _hg_panel[_c].dropna()
+            if len(_col):
+                _nav_latest[_c] = float(_col.iloc[-1])
+
+    return AL.compute(
+        mv=_hg_mv, target_w=_hg_w, holdings=holdings, slot_label=HG.SLOT_LABEL,
+        val_by_code=_val_by_code, daily=_acct_daily if acct is not None else None,
+        cash=float(_acct_cash or 0), pos=_acct_pos if acct is not None else {},
+        cost=_acct_cost if acct is not None else {}, bench=_bench,
+        slot_of_code=lambda c: HG.slot_of(c, holdings),
+        nav_by_code=_nav_latest,
+    )
+
+
+_al = _alerts_compute()
+
+# ============================================================
+# 每个位置挂哪只基金 —— 属于「设置」，跟着目标权重一起看
+# 持仓页只回答「有什么、赚多少」，不再混着配置表
+# ============================================================
+_HG_PRESET = [  # 场外（支付宝可买）同类基金参考，只是建议，买前请自己核对跟踪指数和费率
+    ("hs300",    "110020", "易方达沪深300ETF联接A"),
+    ("us_sp500", "050025", "博时标普500ETF联接A"),
+    ("credit",   "000047", "华夏鼎沛A（信用债）"),
+    ("bond_10y", "000191", "富国信用债A（中久期）"),
+    ("bond_30y", "003376", "广发中债7-10年国开行A"),
+    ("gold",     "000217", "华安易富黄金ETF联接A"),
+    ("nonferr",  "165520", "中信保诚中证800有色"),
+    ("wti",      "501018", "南方原油A（当前暂停申购）"),
+]
+
+
+def _hg_apply(code_map: dict[str, tuple[str, str]]) -> dict:
+    """把 (slot → (code, name)) 写成该位置**唯一**的一只基金（"全部填入参考代码"用）。
+
+    换基金时同步判断买卖单位：场内代码（5xxxxx 沪市 ETF/LOF、1xxxxx 深市、
+    0xxxxx 深市股票型）按股，其余（场外基金，如 110020）按份额申购。
+    """
+    new = {s: HG._norm_slot(holdings.get(s)) for s in HG.SLOTS}
+    for s, (code, name) in code_map.items():
+        _slot = new.get(s) or HG._norm_slot({})
+        _prev = next((f for f in HG.funds(_slot) if f["code"] == code), {})
+        _unit = HG.default_unit(code)                  # 场内「股」/ 场外「份额」
+        new[s] = {"on": _slot.get("on", True), "funds": [HG._fund({
+            "code": code,
+            "name": name or (FL.fund_name(code) or code),
+            "unit": _unit,
+            "lot": int(_prev.get("lot") or (100 if _unit == "股" else 1)),
+            "min_amount": float(_prev.get("min_amount") or 1.0),
+            "share": 1.0,
+        })]}
+    HG.save(new)
+    return new
+
+
+def _slot_config_panel() -> None:
+    """给位置挂基金 / 改买卖单位 / 开关位置：低频设置，收在权重页底部一个展开里。"""
+    st.divider()
+    with st.expander("每个位置挂什么基金（加 / 换 / 移除 · 买卖单位 · 开关位置）",
+                     expanded=not bool(HG.all_codes(holdings))):
+        st.caption(
+            "这里回答的是「某个位置**用哪只基金**去实现」，跟上面的目标权重是两件事："
+            "权重由策略算（项目自带），挂哪只看你自己。"
+            "一个位置可以挂多只同类基金，也可以一只都不挂；挂多只时按「占比」分该位置的目标金额"
+            "（留空或全 0 就是等权），一只都不挂 = 这个位置暂时不投，权重会按同桶比例让给别的位置。"
+        )
+        # 加基金后要让搜索框回到空态：key 里带版本号，换号即重建组件（直接 pop 已渲染的 widget key 会报错）
+        _add_ver = int(st.session_state.get("hg_add_ver", 0))
+        _slot_cols = st.columns(2, gap="medium")
+        _pending_add, _pending_on = {}, {}
+        for _i, _s in enumerate(HG.SLOTS):
+            _h = holdings.get(_s, {})
+            _fs_ = HG.funds(_h)
+            with _slot_cols[_i % 2], st.container(border=True):
+                _c1, _c2 = st.columns([2.4, 1], vertical_alignment="center")
+                _c1.markdown(f"**{HG.SLOT_LABEL[_s]}**")
+                with _c2:
+                    _on_now = bool(_h.get("on", True))
+                    _on_new = st.toggle("参与", value=_on_now, key=f"hg_on_{_s}",
+                                        help="关掉后这个位置不参与建仓/调仓/提醒，权重让给同桶别的位置")
+                    if _on_new != _on_now:
+                        _pending_on[_s] = _on_new
+                if _fs_:
+                    _sh_ = HG.share_of(_h)
+                    st.caption(" · ".join(f'{f["code"]} {f.get("name") or ""} {x*100:.0f}%'
+                                          for f, x in zip(_fs_, _sh_)))
+                else:
+                    st.caption("**未挂基金** — 这个位置不持有")
+                _picked = FS.fund_search(
+                    f"hg_add_{_s}_{_add_ver}", mode="single", default=None,
+                    placeholder="搜索基金，加到这一位置（可多次加不同基金）",
+                )
+                if _picked and str(_picked) not in HG.codes(_h):
+                    _pending_add[_s] = str(_picked)
+
+        if _pending_add or _pending_on:
+            _new = {s: HG._norm_slot(holdings.get(s)) for s in HG.SLOTS}
+            for _s, _c in _pending_add.items():
+                if _c:
+                    _new[_s] = HG.add_fund(_new[_s], _c, FL.fund_name(_c) or _c)
+            for _s, _onv in _pending_on.items():
+                _new[_s]["on"] = _onv
+            HG.save(_new)
+            st.session_state["hg_add_ver"] = _add_ver + 1
+            st.rerun()
+
+        # 一只基金一行：单位/每手/最低金额/占比可改，「移除」勾上保存即删
+        _rows_cfg = []
+        for _s in HG.SLOTS:
+            _h = holdings.get(_s, {})
+            for _f, _x in zip(HG.funds(_h), HG.share_of(_h)):
+                _code = _f["code"]
+                _col = _hg_panel[_code].dropna() if _code in _hg_panel.columns else pd.Series(dtype=float)
+                _rows_cfg.append({
+                    "位置": HG.SLOT_LABEL[_s],
+                    "代码": _code,
+                    "我的基金": _f.get("name") or FL.fund_name(_code) or "—",
+                    "买卖单位": _f.get("unit", "股"),
+                    "每手": int(_f.get("lot") or 1),
+                    "最低申购金额": float(_f.get("min_amount") or 1.0),
+                    "占比%": round(_x * 100, 2),
+                    "净值": round(float(_col.iloc[-1]), 4) if len(_col) else None,
+                    "移除": False,
+                    "_slot": _s,
+                })
+
+        if not _rows_cfg:
+            st.info("还没有挂任何基金 —— 用上面的搜索框加一只，或点下面的「恢复项目默认代码」。")
+            _edited = None
+        else:
+            _edited = st.data_editor(
+                pd.DataFrame(_rows_cfg),
+                column_config={
+                    "位置": st.column_config.TextColumn("位置", disabled=True),
+                    "代码": st.column_config.TextColumn("代码", disabled=True,
+                                                       help="用上方搜索框加，勾「移除」再保存即删"),
+                    "我的基金": st.column_config.TextColumn("我的基金", disabled=True),
+                    "买卖单位": st.column_config.SelectboxColumn("买卖单位", options=["股", "份额"],
+                                                             help="场内按股（100 股一手），场外按份额（按金额申购）"),
+                    "每手": st.column_config.NumberColumn("每手/最小", min_value=1, step=1),
+                    "最低申购金额": st.column_config.NumberColumn("最低申购(元)", min_value=1.0, step=1.0),
+                    "占比%": st.column_config.NumberColumn("占该位置", min_value=0.0, max_value=100.0,
+                                                          step=5.0, format="%.1f%%",
+                                                          help="该位置内这只基金分到多少比例；同位置全部为 0 时按等权"),
+                    "净值": st.column_config.NumberColumn(f"净值({_cn_date(_hg_last)})", format="%.4f",
+                                                         disabled=True),
+                    "移除": st.column_config.CheckboxColumn("移除", help="勾上→保存，这只基金就从该位置删掉"),
+                    "_slot": None,
+                },
+                hide_index=True, width="stretch", key="hg_editor",
+            )
+
+        _miss = [f'{_c} {FL.fund_name(_c) or ""}'.strip()
+                 for _c in HG.all_codes(holdings)
+                 if _c not in _hg_panel.columns or not len(_hg_panel[_c].dropna())]
+        if _miss:
+            st.warning("这些基金还没有净值数据，拉取后建仓/调仓/提醒才能算：" + "；".join(_miss))
+            if st.button("拉取缺的净值", key="hg_fetch_missing", type="primary"):
+                st.toast("正在拉取净值…", icon=":material/sync:", duration="long")
+                for _c in HG.all_codes(holdings):
+                    if _c not in _hg_panel.columns or not len(_hg_panel[_c].dropna()):
+                        try:
+                            FL.ensure_fresh(_c)
+                        except Exception:  # noqa: BLE001
+                            pass
+                st.cache_data.clear()
+                st.rerun()
+
+        with st.container(horizontal=True, horizontal_alignment="right", gap="small"):
+            if _edited is not None and st.button("保存修改", type="primary", key="hg_save"):
+                _new = {s: HG._norm_slot(holdings.get(s)) for s in HG.SLOTS}
+                _drop = []
+                for r in _edited.to_dict("records"):
+                    _s, _c = r.get("_slot"), r.get("代码")
+                    if not _s or not _c:
+                        continue
+                    if r.get("移除"):
+                        _drop.append((_s, _c))
+                        continue
+                    for _f in _new[_s]["funds"]:
+                        if _f["code"] == _c:
+                            _f["unit"] = r.get("买卖单位") or "股"
+                            _f["lot"] = max(1, int(r.get("每手") or 1))
+                            _f["min_amount"] = max(1.0, float(r.get("最低申购金额") or 1.0))
+                            _f["share"] = max(0.0, float(r.get("占比%") or 0.0)) / 100
+                for _s, _c in _drop:
+                    _new[_s] = HG.remove_fund(_new[_s], _c)
+                HG.save(_new)
+                st.toast("持仓设置已保存", icon=":material/check_circle:")
+                st.rerun()
+            if st.button("恢复项目默认代码", key="hg_reset"):
+                HG.save(HG._default_holdings())
+                st.toast("已恢复为项目默认的 8 个代码", icon=":material/check_circle:")
+                st.rerun()
+
+        st.markdown("**换成场外（支付宝可买）同类基金 — 一键填入参考代码**")
+        st.caption("下面是同类基金的参考代码，跟踪指数和费率不一定和原版一致，填入后请自己核对；"
+                   "收益差异会在「收益对比」页的「vs 项目默认基金」里体现出来。"
+                   "填入会把该位置**替换**成这一只（原来挂的多只会被清掉）。")
+        _preset_rows = [[HG.SLOT_LABEL[s], ETF_META.get(s, {}).get("code", ""),
+                         ETF_META.get(s, {}).get("name", ""), c, n] for s, c, n in _HG_PRESET]
+        _render_table([("位置", "left"), ("原版代码", "left"), ("原版基金", "left"),
+                       ("参考代码", "left"), ("参考基金", "left")], _preset_rows)
+        if st.button("全部填入参考代码", key="hg_preset_all"):
+            _hg_apply({s: (c, n) for s, c, n in _HG_PRESET})
+            st.toast("已填入场外参考代码，请核对跟踪指数", icon=":material/check_circle:")
+            st.rerun()
+
+
+# ============================================================
+# Main Tabs —— 前三页是「我的账户」（每天用），后三页是项目自带的策略模型（偶尔看）
+# ============================================================
+tab3, tab5, tab4, tab6, tab7, tab2, tab1, tab8, tab10 = st.tabs(
+    ["我的持仓", "交易记录", "买卖提醒", "收益对比", "基金检索",
+     "权重与选基", "模型 · 信号", "模型 · 回测", "指数估值"]
 )
 
 # ============================================================
 # Tab 1: 信号仪表盘
 # ============================================================
 with tab1:
+    st.caption("这一页是**项目自带策略模型**算出来的信号（估值分位、宏观季节、趋势过滤），"
+               "跟你自己买了什么无关；你的钱这一轮该不该动，看「买卖提醒」页。")
     # 策略净值迷你走势归入仪表盘内，不再占据首页顶部
     _bench_full = _bench_curve(strat_key)
     if _bench_full is not None and len(_bench_full) > 30:
@@ -3412,10 +3670,16 @@ with tab1:
     st.markdown(html, unsafe_allow_html=True)
 
 # ============================================================
-# Tab 2: 目标权重
+# Tab 2: 权重与选基 —— 上半是策略给的目标权重，下半是我的基金配置
 # ============================================================
 with tab2:
-    st.subheader(f"{cfg['name']}  —  {tier}% RP")
+    st.subheader("权重与选基 · 每个位置该占多少、我拿哪只基金去实现")
+    st.caption(
+        "上一半是**策略算的目标权重**（项目自带模型，跟你的账户无关）；"
+        "下一半是**我实际挂的基金**——这就是你在支付宝里买的那几只。"
+        "平时只看不动；换基金、加基金、开关位置都在页底展开里。"
+    )
+    st.markdown(f"**目标权重 · {cfg['name']} — {tier}% RP**")
 
     rows = []
     for a in cfg["assets"]:
@@ -3454,50 +3718,17 @@ with tab2:
     if any(signals.get(k, False) for k in ["nonferr_below_sma75", "gold_below_sma75", "sp500_below_sma75"]):
         st.info("趋势过滤触发 → 对应资产已清仓，权重转入城投债ETF (511220)")
 
+    # ---- 下半：我的基金配置（原来挂在「我的持仓」页底，用户看不出它是干嘛的）----
+    _slot_config_panel()
+
 # ============================================================
-# Tab 3: 我的持仓（策略位置 → 我实际买的基金）
+# Tab 3: 我的持仓（只看有什么、赚多少；配置在「权重与选基」）
 # ============================================================
-_HG_PRESET = [  # 场外（支付宝可买）同类基金参考，只是建议，买前请自己核对跟踪指数和费率
-    ("hs300",    "110020", "易方达沪深300ETF联接A"),
-    ("us_sp500", "050025", "博时标普500ETF联接A"),
-    ("credit",   "000047", "华夏鼎沛A（信用债）"),
-    ("bond_10y", "000191", "富国信用债A（中久期）"),
-    ("bond_30y", "003376", "广发中债7-10年国开行A"),
-    ("gold",     "000217", "华安易富黄金ETF联接A"),
-    ("nonferr",  "165520", "中信保诚中证800有色"),
-    ("wti",      "501018", "南方原油A（当前暂停申购）"),
-]
-
-
-def _hg_apply(code_map: dict[str, tuple[str, str]]) -> dict:
-    """把 (slot → (code, name)) 写成该位置**唯一**的一只基金（"全部填入参考代码"用）。
-
-    换基金时同步判断买卖单位：场内代码（5xxxxx 沪市 ETF/LOF、1xxxxx 深市、
-    0xxxxx 深市股票型）按股，其余（场外基金，如 110020）按份额申购。
-    """
-    new = {s: HG._norm_slot(holdings.get(s)) for s in HG.SLOTS}
-    for s, (code, name) in code_map.items():
-        _slot = new.get(s) or HG._norm_slot({})
-        _prev = next((f for f in HG.funds(_slot) if f["code"] == code), {})
-        _unit = HG.default_unit(code)                  # 场内「股」/ 场外「份额」
-        new[s] = {"on": _slot.get("on", True), "funds": [HG._fund({
-            "code": code,
-            "name": name or (FL.fund_name(code) or code),
-            "unit": _unit,
-            "lot": int(_prev.get("lot") or (100 if _unit == "股" else 1)),
-            "min_amount": float(_prev.get("min_amount") or 1.0),
-            "share": 1.0,
-        })]}
-    HG.save(new)
-    return new
-
-
 with tab3:
     st.subheader("我的持仓 · 有什么，跑得怎么样")
     st.caption(
-        "一只基金一行，**点一行**看它自己的走势和历史买卖点（图上红三角＝买入、绿三角＝卖出）。"
-        "最右列是这一轮该买还是该卖，逐笔金额在「买卖提醒」页；账户净值与两条基准的对比在「收益对比」页；"
-        "换基金、改买卖单位、开关位置都在页底展开。"
+        "一只基金一行，**点一行**看它自己的走势和历史买卖点（图上红三角＝买入、绿三角＝卖出）、累计盈亏和这一轮该不该动。"
+        "逐笔成交在「交易记录」页；账户与两条基准的对比在「收益对比」页。"
     )
 
     # ---- 头卡：全站唯一一处「总金额 / 今日 / 持有收益」----
@@ -3542,8 +3773,7 @@ with tab3:
 
     # ---- 持仓列表：一只基金一行（原来的卡片流平铺在电脑上太占地方）----
     if not _plan["rows"] and not _plan["other"]:
-        st.info("还没有挂任何基金 —— 展开页底的「换基金 / 加基金」给位置加一只，"
-                "或点「恢复项目默认代码」。")
+        st.info("还没有挂任何基金 —— 到「权重与选基」页底部给位置加一只，或点「恢复项目默认代码」。")
         _sel, _sel_it = None, None
     else:
         _pf_rows = [_pf_row(it) for it in _plan["rows"]]
@@ -3573,160 +3803,10 @@ with tab3:
         if _empty_slots:
             st.caption("这些位置没有挂基金（不持有，目标权重已按同桶比例让给其它位置）："
                        + "、".join(HG.SLOT_LABEL[s] for s in _empty_slots)
-                       + "。要买就展开页底给它加一只。")
+                       + "。要给位置加基金，去「权重与选基」页底部。")
 
     # ---- 已清仓：从成交记录还原的历史轮次（清仓时赚了多少、拿了多久）----
     _closed_section()
-
-    # ---- 配置区：加删基金、买卖单位、位置开关（低频操作，收在展开里）----
-    st.divider()
-    with st.expander("换基金 / 加基金 / 买卖单位 / 位置开关",
-                     expanded=not bool(HG.all_codes(holdings))):
-        st.caption(
-            "一个位置可以挂多只同类基金，也可以一只都不挂。同位置挂多只时按「占比」分该位置的目标金额"
-            "（留空或全 0 就是等权）；一只都不挂 = 这个位置暂时不投，它的权重会按同桶比例让给别的位置。"
-        )
-        # 加基金后要让搜索框回到空态：key 里带版本号，换号即重建组件（直接 pop 已渲染的 widget key 会报错）
-        _add_ver = int(st.session_state.get("hg_add_ver", 0))
-        _slot_cols = st.columns(2, gap="medium")
-        _pending_add, _pending_on = {}, {}
-        for _i, _s in enumerate(HG.SLOTS):
-            _h = holdings.get(_s, {})
-            _fs_ = HG.funds(_h)
-            with _slot_cols[_i % 2], st.container(border=True):
-                _c1, _c2 = st.columns([2.4, 1], vertical_alignment="center")
-                _c1.markdown(f"**{HG.SLOT_LABEL[_s]}**")
-                with _c2:
-                    _on_now = bool(_h.get("on", True))
-                    _on_new = st.toggle("参与", value=_on_now, key=f"hg_on_{_s}",
-                                        help="关掉后这个位置不参与建仓/调仓/提醒，权重让给同桶别的位置")
-                    if _on_new != _on_now:
-                        _pending_on[_s] = _on_new
-                if _fs_:
-                    _sh_ = HG.share_of(_h)
-                    st.caption(" · ".join(f'{f["code"]} {f.get("name") or ""} {x*100:.0f}%'
-                                          for f, x in zip(_fs_, _sh_)))
-                else:
-                    st.caption("**未挂基金** — 这个位置不持有")
-                _picked = FS.fund_search(
-                    f"hg_add_{_s}_{_add_ver}", mode="single", default=None,
-                    placeholder="搜索基金，加到这一位置（可多次加不同基金）",
-                )
-                if _picked and str(_picked) not in HG.codes(_h):
-                    _pending_add[_s] = str(_picked)
-
-        if _pending_add or _pending_on:
-            _new = {s: HG._norm_slot(holdings.get(s)) for s in HG.SLOTS}
-            for _s, _c in _pending_add.items():
-                if _c:
-                    _new[_s] = HG.add_fund(_new[_s], _c, FL.fund_name(_c) or _c)
-            for _s, _onv in _pending_on.items():
-                _new[_s]["on"] = _onv
-            HG.save(_new)
-            st.session_state["hg_add_ver"] = _add_ver + 1
-            st.rerun()
-
-        # 一只基金一行：单位/每手/最低金额/占比可改，「移除」勾上保存即删
-        _rows_cfg = []
-        for _s in HG.SLOTS:
-            _h = holdings.get(_s, {})
-            for _f, _x in zip(HG.funds(_h), HG.share_of(_h)):
-                _code = _f["code"]
-                _col = _hg_panel[_code].dropna() if _code in _hg_panel.columns else pd.Series(dtype=float)
-                _rows_cfg.append({
-                    "位置": HG.SLOT_LABEL[_s],
-                    "代码": _code,
-                    "我的基金": _f.get("name") or FL.fund_name(_code) or "—",
-                    "买卖单位": _f.get("unit", "股"),
-                    "每手": int(_f.get("lot") or 1),
-                    "最低申购金额": float(_f.get("min_amount") or 1.0),
-                    "占比%": round(_x * 100, 2),
-                    "净值": round(float(_col.iloc[-1]), 4) if len(_col) else None,
-                    "移除": False,
-                    "_slot": _s,
-                })
-
-        if not _rows_cfg:
-            st.info("还没有挂任何基金 —— 用上面的搜索框加一只，或点下面的「恢复项目默认代码」。")
-            _edited = None
-        else:
-            _edited = st.data_editor(
-                pd.DataFrame(_rows_cfg),
-                column_config={
-                    "位置": st.column_config.TextColumn("位置", disabled=True),
-                    "代码": st.column_config.TextColumn("代码", disabled=True,
-                                                       help="用上方搜索框加，勾「移除」再保存即删"),
-                    "我的基金": st.column_config.TextColumn("我的基金", disabled=True),
-                    "买卖单位": st.column_config.SelectboxColumn("买卖单位", options=["股", "份额"],
-                                                             help="场内按股（100 股一手），场外按份额（按金额申购）"),
-                    "每手": st.column_config.NumberColumn("每手/最小", min_value=1, step=1),
-                    "最低申购金额": st.column_config.NumberColumn("最低申购(元)", min_value=1.0, step=1.0),
-                    "占比%": st.column_config.NumberColumn("占该位置", min_value=0.0, max_value=100.0,
-                                                          step=5.0, format="%.1f%%",
-                                                          help="该位置内这只基金分到多少比例；同位置全部为 0 时按等权"),
-                    "净值": st.column_config.NumberColumn(f"净值({_cn_date(_hg_last)})", format="%.4f",
-                                                         disabled=True),
-                    "移除": st.column_config.CheckboxColumn("移除", help="勾上→保存，这只基金就从该位置删掉"),
-                    "_slot": None,
-                },
-                hide_index=True, width="stretch", key="hg_editor",
-            )
-
-        _miss = [f'{_c} {FL.fund_name(_c) or ""}'.strip()
-                 for _c in HG.all_codes(holdings)
-                 if _c not in _hg_panel.columns or not len(_hg_panel[_c].dropna())]
-        if _miss:
-            st.warning("这些基金还没有净值数据，拉取后建仓/调仓/提醒才能算：" + "；".join(_miss))
-            if st.button("拉取缺的净值", key="hg_fetch_missing", type="primary"):
-                st.toast("正在拉取净值…", icon=":material/sync:", duration="long")
-                for _c in HG.all_codes(holdings):
-                    if _c not in _hg_panel.columns or not len(_hg_panel[_c].dropna()):
-                        try:
-                            FL.ensure_fresh(_c)
-                        except Exception:  # noqa: BLE001
-                            pass
-                st.cache_data.clear()
-                st.rerun()
-
-        with st.container(horizontal=True, horizontal_alignment="right", gap="small"):
-            if _edited is not None and st.button("保存修改", type="primary", key="hg_save"):
-                _new = {s: HG._norm_slot(holdings.get(s)) for s in HG.SLOTS}
-                _drop = []
-                for r in _edited.to_dict("records"):
-                    _s, _c = r.get("_slot"), r.get("代码")
-                    if not _s or not _c:
-                        continue
-                    if r.get("移除"):
-                        _drop.append((_s, _c))
-                        continue
-                    for _f in _new[_s]["funds"]:
-                        if _f["code"] == _c:
-                            _f["unit"] = r.get("买卖单位") or "股"
-                            _f["lot"] = max(1, int(r.get("每手") or 1))
-                            _f["min_amount"] = max(1.0, float(r.get("最低申购金额") or 1.0))
-                            _f["share"] = max(0.0, float(r.get("占比%") or 0.0)) / 100
-                for _s, _c in _drop:
-                    _new[_s] = HG.remove_fund(_new[_s], _c)
-                HG.save(_new)
-                st.toast("持仓设置已保存", icon=":material/check_circle:")
-                st.rerun()
-            if st.button("恢复项目默认代码", key="hg_reset"):
-                HG.save(HG._default_holdings())
-                st.toast("已恢复为项目默认的 8 个代码", icon=":material/check_circle:")
-                st.rerun()
-
-        st.markdown("**换成场外（支付宝可买）同类基金 — 一键填入参考代码**")
-        st.caption("下面是同类基金的参考代码，跟踪指数和费率不一定和原版一致，填入后请自己核对；"
-                   "收益差异会在「收益对比」页的「vs 项目默认基金」里体现出来。"
-                   "填入会把该位置**替换**成这一只（原来挂的多只会被清掉）。")
-        _preset_rows = [[HG.SLOT_LABEL[s], ETF_META.get(s, {}).get("code", ""),
-                         ETF_META.get(s, {}).get("name", ""), c, n] for s, c, n in _HG_PRESET]
-        _render_table([("位置", "left"), ("原版代码", "left"), ("原版基金", "left"),
-                       ("参考代码", "left"), ("参考基金", "left")], _preset_rows)
-        if st.button("全部填入参考代码", key="hg_preset_all"):
-            _hg_apply({s: (c, n) for s, c, n in _HG_PRESET})
-            st.toast("已填入场外参考代码，请核对跟踪指数", icon=":material/check_circle:")
-            st.rerun()
 
 # ============================================================
 # Tab 4: 买卖提醒（按策略算买卖 → 一键登记）—— 计划在这页，补录与流水在「交易记录」
@@ -3936,19 +4016,67 @@ with tab5:
                     st.toast("已记录", icon=":material/check_circle:")
                     st.rerun()
 
+        # ---------------- 按基金查历史：一只基金的买卖全在这里，不用回持仓页翻 ----------------
+        _ledger_codes = []
+        for _t0 in _trades:
+            _c0 = str(_t0.get("code") or "")
+            if _c0 and _c0 not in _ledger_codes:
+                _ledger_codes.append(_c0)
+        _pick_map = {"全部基金": ""}
+        for _c0 in _ledger_codes:
+            _pick_map[f'{_c0} {FL.fund_name(_c0) or ""}'.strip()] = _c0
+        _fc1, _fc2 = st.columns([1, 2.4], gap="medium", vertical_alignment="center")
+        _fcode = _pick_map[_fc1.selectbox("看哪只基金的历史", list(_pick_map),
+                                          key="tr_fund_filter")]
+        _f_tr = ([t for t in _trades if str(t.get("code") or "") == _fcode]
+                 if _fcode else list(_trades))
+        if _fcode:
+            _fb = sum(float(t.get("shares") or 0) * float(t.get("nav") or 0)
+                      + float(t.get("fee") or 0) for t in _f_tr if t.get("side") == "买入")
+            _fs = sum(float(t.get("shares") or 0) * float(t.get("nav") or 0)
+                      - float(t.get("fee") or 0) for t in _f_tr if t.get("side") == "卖出")
+            _ff = sum(float(t.get("fee") or 0) for t in _f_tr)
+            _fsh = float((_acct_pos or {}).get(_fcode, 0) or 0)
+            _funit = "股" if HG.default_unit(_fcode) == "股" else "份"
+            _fqty = f"{_fsh:,.0f} 股" if _funit == "股" else f"{_fsh:,.2f} 份"
+            _fpnl = _code_pnl_curve(_fcode)
+            _fpnl_v = float(_fpnl.iloc[-1]) if len(_fpnl) else None
+            _fpnl_s = ("" if _fpnl_v is None else
+                       "0" if abs(_fpnl_v) < 0.5 else f"{_fpnl_v:+,.0f}")
+            _fpnl_cls = "buy" if (_fpnl_v or 0) > 0.5 else ("sell" if (_fpnl_v or 0) < -0.5 else "")
+            _fc2.markdown(
+                f'<div class="pf-summary quiet"><span class="lead">'
+                f'{FL.fund_name(_fcode) or _fcode}</span>'
+                f'<span class="item">{len(_f_tr)} 笔</span>'
+                f'<span class="item">买入 <b class="buy">¥{_fb:,.0f}</b></span>'
+                f'<span class="item">卖出 <b class="sell">¥{_fs:,.0f}</b></span>'
+                f'<span class="item">手续费 ¥{_ff:,.2f}</span>'
+                f'<span class="item">持有 {_fqty}</span>'
+                + (f'<span class="item">累计盈亏 <b class="{_fpnl_cls}">¥{_fpnl_s}</b></span>'
+                   if _fpnl_v is not None else "")
+                + '</div>', unsafe_allow_html=True)
+        else:
+            _fc2.caption("想只看一只基金的全部买卖，就在左边选它 —— 上方会给出它的买入/卖出总额、"
+                         "手续费、当前份额和累计盈亏。")
+
         # ---------------- 全部成交：行内改 / 行内删 ----------------
         st.markdown(
-            '<div class="sec-head"><span class="t">全部成交</span>'
-            f'<span class="r">{len(_trades)} 笔 · 最近的在上 · 点铅笔就地改，垃圾桶就地删</span></div>',
+            '<div class="sec-head"><span class="t">成交台账</span>'
+            f'<span class="r">{len(_f_tr)} 笔'
+            + (f"（共 {len(_trades)} 笔）" if _fcode else "")
+            + ' · 最近的在上 · 点铅笔就地改，垃圾桶就地删</span></div>',
             unsafe_allow_html=True,
         )
         if not _trades:
             st.caption("还没有成交。上面记一笔，或者在「买卖提醒」把那份清单一次登记进来。")
+        elif not _f_tr:
+            st.caption("这只基金还没有成交记录。")
         else:
             # 最近的排最上面（按成交日期，再按录入顺序倒序）：刚记错的那笔就在第一行
             _rows = [_trade_row(i, t) for i, t in
                      sorted(enumerate(_trades),
-                            key=lambda kv: (str(kv[1].get("date") or ""), kv[0]), reverse=True)]
+                            key=lambda kv: (str(kv[1].get("date") or ""), kv[0]), reverse=True)
+                     if not _fcode or str(t.get("code") or "") == _fcode]
             _saved, _dsig = _trade_list(_rows, _funds)
             if _saved and _saved != st.session_state.get("_tr_save_sig"):
                 st.session_state["_tr_save_sig"] = _saved
@@ -4038,6 +4166,38 @@ with tab6:
                    help="1.0000 = 建仓起点。也可以用「份额 × 最新单位净值 + 现金 = 总资产」跟支付宝对一遍。")
         st.caption("两条差距都是「我的账户 ÷ 基准 − 1」的累计值，区间不同会看到不同数字；"
                    "图上可以拖动缩放、切日/月/年线，和「基金检索」页的用法一致。")
+
+        # ---- 账户体检（原来在独立的「提醒」tab，跟这页说的都是账户本身，搬过来）----
+        st.divider()
+        st.markdown('<div class="sec-head"><span class="t">账户体检</span>'
+                    '<span class="r">回撤 / 现金占比 / 单只浮亏，口径全是账户层面</span></div>',
+                    unsafe_allow_html=True)
+        # 累计收益在下面的关键指标表里已经有一行，这里不再重复一张卡片
+        _issues = [x for x in _al["体检"] if not str(x.get("text") or "").startswith("累计收益")]
+        if not _issues:
+            st.markdown('<div class="sig calm"><div class="main"><div class="t">账户状态正常</div>'
+                        '<div class="m">没有回撤超 12%、没有现金占比异常、没有单只浮亏超 15%</div>'
+                        '</div></div>', unsafe_allow_html=True)
+        for _x in _issues:
+            st.markdown(_alert_card(_x["level"], _x["text"], _x.get("tip", "")),
+                        unsafe_allow_html=True)
+        _m = _al["指标"]
+        if _m:
+            _kv = []
+            for _k, _v in _m.items():
+                if isinstance(_v, dict):
+                    continue
+                if _k == "现金占比":
+                    _kv.append([_k, f"{_v*100:.1f}%"])
+                elif _k in ("累计收益", "最大回撤"):
+                    _kv.append([_k, f'<span class="{"up" if _v >= 0 else "down"}">{_v*100:+.2f}%</span>'])
+                elif _k.startswith("对比"):
+                    _kv.append([_k, f'<span class="{"up" if _v >= 0 else "down"}">{_v*100:+.2f}pp</span>'])
+                else:
+                    _kv.append([_k, str(_v)])
+            if _kv:
+                _render_table([("关键指标", "left"), ("数值", "right")], _kv)
+
 # ============================================================
 # Tab 7: 基金检索（搜全市场基金 / 8 个回测资产，看日 / 月 / 年 的涨跌幅与价格）
 # ============================================================
@@ -4818,115 +4978,6 @@ with tab8:
     render_performance(PROJECT_ROOT)
 
 
-
-# ============================================================
-# Tab 9: 提醒（偏离 / 估值 / 体检）—— 全部按我持仓的基金算
-# ============================================================
-def _alert_card(level, title, body, tip=""):
-    _cls = {"urgent": "warn", "warn": "warn", "info": "", "ok": "calm"}.get(level, "")
-    _tip = f'<div class="m">{tip}</div>' if tip else ""
-    return (f'<div class="sig {_cls}"><div class="main"><div class="t">{title}</div>'
-            f'<div class="m">{body}</div>{_tip}</div></div>')
-
-
-with tab9:
-    st.subheader("提醒 · 按我持仓的基金算")
-    st.caption("三类提醒分开看：偏离是「该不该调仓」，估值是「贵不贵」，体检是「账户本身怎么样」。")
-
-    # 估值数据（蛋卷快照）按代码索引
-    _val_by_code = {}
-    try:
-        from allweather import valuation as _VAL
-        _snap = _VAL.load_snapshot()
-        if not _snap.empty:
-            for _r in _snap.to_dict("records"):
-                _dd = _VAL.drawdown_10y(_r["代码"])
-                _tot, _vs, _ps, _lb = _VAL.score(_r["PE百分位"], _r["PB百分位"], _dd)
-                _val_by_code[str(_r["代码"])] = {
-                    "name": _r["名称"], "pe_pct": _r["PE百分位"] if pd.notna(_r["PE百分位"]) else None,
-                    "pb_pct": _r["PB百分位"] if pd.notna(_r["PB百分位"]) else None,
-                    "score": _tot, "label": _lb,
-                    "asof": f'{pd.Timestamp(_snap["数据日"].max()):%Y/%m/%d}',
-                }
-    except Exception:  # noqa: BLE001
-        _val_by_code = {}
-
-    _bench_for_alert = {}
-    if acct is not None and len(_acct_daily) > 1:
-        _bd = BM.replay_target(w, acct.get("created"), nav_getter=HG.nav_series)
-        if len(_bd) > 1:
-            _bench_for_alert["项目默认基金"] = _bd
-        _bs = BM.strategy_curve(_BENCH_COL.get(acct.get("strategy"), ""), start=acct.get("created"))
-        if _bs is not None and len(_bs) > 1:
-            _bench_for_alert["策略理论"] = _bs
-
-    _nav_latest = {}
-    for _c in HG.all_codes(holdings):
-        if _c in _hg_panel.columns:
-            _col = _hg_panel[_c].dropna()
-            if len(_col):
-                _nav_latest[_c] = float(_col.iloc[-1])
-
-    _al = AL.compute(
-        mv=_hg_mv, target_w=_hg_w, holdings=holdings, slot_label=HG.SLOT_LABEL,
-        val_by_code=_val_by_code, daily=_acct_daily if acct is not None else None,
-        cash=float(_acct_cash or 0),         pos=_acct_pos if acct is not None else {},
-        cost=_acct_cost if acct is not None else {}, bench=_bench_for_alert,
-        slot_of_code=lambda c: HG.slot_of(c, holdings),
-        nav_by_code=_nav_latest,
-    )
-
-    _A, _B = st.columns([1.15, 1], gap="large")
-    with _A:
-        st.markdown("**偏离提醒**")
-        if not _al["偏离"]:
-            st.markdown('<div class="sig calm"><div class="main">'
-                        '<div class="t">所有位置都在目标附近</div>'
-                        '<div class="m">偏离都小于 3 个百分点，月末再看即可</div></div></div>',
-                        unsafe_allow_html=True)
-        else:
-            for x in _al["偏离"]:
-                st.markdown(_alert_card(
-                    x["level"], x["label"], x["text"],
-                    "偏离 ≥12pp 建议尽快调；3~12pp 可以等月末一起调"), unsafe_allow_html=True)
-        st.markdown("**账户体检**")
-        if not _al["体检"]:
-            st.caption("录入成交后这里会给出收益、回撤、现金占比等提醒。")
-        for x in _al["体检"]:
-            st.markdown(_alert_card(x["level"], x["text"], x.get("tip", "")), unsafe_allow_html=True)
-    with _B:
-        st.markdown("**估值提醒**")
-        if not _al["估值"]:
-            st.caption("持仓的基金暂时没有对应的指数估值数据（蛋卷快照按指数代码收录，"
-                       "单只场外基金可能匹配不上）。")
-        else:
-            for x in _al["估值"]:
-                st.markdown(_alert_card(
-                    x["level"], f'{x["name"]}（{x["code"]}）',
-                    f'评分 {x["score"]} · {x["label"]}：{x["action"]}'
-                    + (f' · PE/PB 百分位较高者 {x["pct"]:.0f}%' if x.get("pct") is not None else ""),
-                    "估值只作加减仓参考，不进策略信号；评分 ≥18 猎杀区、≤6 泡沫区"),
-                    unsafe_allow_html=True)
-        _m = _al["指标"]
-        if _m:
-            st.divider()
-            st.markdown("**关键指标**")
-            _kv = []
-            for k, v in _m.items():
-                if isinstance(v, dict):
-                    continue
-                if k == "现金占比":
-                    _kv.append([k, f"{v*100:.1f}%"])
-                elif k in ("累计收益", "最大回撤"):
-                    _kv.append([k, f'<span class="{"up" if v >= 0 else "down"}">{v*100:+.2f}%</span>'])
-                elif k.startswith("对比"):
-                    _kv.append([k, f'<span class="{"up" if v >= 0 else "down"}">{v*100:+.2f}pp</span>'])
-                else:
-                    _kv.append([k, str(v)])
-            if _kv:
-                _render_table([("指标", "left"), ("数值", "right")], _kv)
-
-
 # ============================================================
 # Tab 10: 指数估值 —— 蛋卷估值快照 + 近10年 PE/PB 走势（仅展示，不进入策略计算）
 # ============================================================
@@ -4955,3 +5006,19 @@ with tab10:
                 '仅作参考展示，不参与策略计算。' + (f'<br>{_sig}' if _sig else '') + '</div>',
                 unsafe_allow_html=True,
             )
+
+    # ---- 落到我持仓上的估值提醒（原来在独立的「提醒」tab）----
+    st.divider()
+    st.markdown('<div class="sec-head"><span class="t">我的持仓 · 贵不贵</span>'
+                '<span class="r">按持仓基金匹配到的指数估值</span></div>',
+                unsafe_allow_html=True)
+    if not _al["估值"]:
+        st.caption("持仓的基金暂时匹配不上指数估值 —— 蛋卷按指数代码收录，单只场外基金（如某某ETF联接A）"
+                   "往往对不上，属于正常情况；看上面的指数表做参考即可。")
+    for _x in _al["估值"]:
+        st.markdown(_alert_card(
+            _x["level"], f'{_x["name"]}（{_x["code"]}）',
+            f'评分 {_x["score"]} · {_x["label"]}：{_x["action"]}'
+            + (f' · PE/PB 百分位较高者 {_x["pct"]:.0f}%' if _x.get("pct") is not None else ""),
+            "估值只作加减仓参考，不进策略信号；评分 ≥18 猎杀区、≤6 泡沫区"),
+            unsafe_allow_html=True)
