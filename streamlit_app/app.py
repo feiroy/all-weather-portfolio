@@ -2377,6 +2377,29 @@ def _trend_chart_data(series):
     return histories
 
 
+@st.cache_data(show_spinner=False, max_entries=200)
+def _nav_last_cached(code: str, ver: float) -> str:
+    """本地缓存净值的最后日期（只读盘、不联网）。ver 传文件 mtime，数据更新后缓存自动失效。"""
+    d = FL.load_cached(code)
+    return f"{d.index[-1]:%Y/%m/%d}" if d is not None and len(d) else ""
+
+
+def _cmp_cached_last(codes) -> str:
+    """已选基金里最新的「数据截至」日期；拿不到就返回空串，避免头卡高度在两帧之间变化。"""
+    out = []
+    for c in codes or []:
+        c = str(c)
+        if not (c.isdigit() and len(c) == 6):
+            continue
+        p = FL.NAV_DIR / f"{c}.csv"
+        if not p.exists():
+            continue
+        d = _nav_last_cached(c, p.stat().st_mtime)
+        if d:
+            out.append(d)
+    return max(out) if out else ""
+
+
 def _stage_rows(series):
     """四个固定阶段数字，基准与图表视窗同一口径（_trend_window_start），不受图表拖动影响。"""
     clean = _trend_aggregate(series, "日")
@@ -3336,7 +3359,21 @@ with tab7:
                    f"可拖动缩放、切日/月/年线；下方按基金列出各阶段涨跌幅。最多同时 {len(_CMP_COLORS)} 只。")
         # ---- 多只对比：与单只共用同一套 iframe 组件（净值 / 相对起点 / 单期涨跌），只是叠加多条线 ----
         with st.container(key="trend_head"):
-            _head_slot = st.empty()          # 占位：选了几只要等搜索框返回后才知道
+            # 头卡必须在搜索框之前、且只用「已选了哪几只」就渲染出来：
+            # 之前用 st.empty() 占位、等净值全拉完才填，重跑时占位先是空的（矮 28px），
+            # 页面整体上移、等回填再落下 —— 看起来就是「加一只基金页面跳一下」。
+            _prev_sel = [c for c in ((st.session_state.get("cmp_pick") or {}).get("value") or []) if c]
+            _prev_last = _cmp_cached_last(_prev_sel)     # 只读本地缓存，不联网
+            _head_right = (f'数据截至 {_prev_last}' if _prev_last
+                           else ('' if _prev_sel else f'最多同时对比 {len(_CMP_COLORS)} 只'))
+            st.markdown(
+                f'<div class="fund-head flat"><div class="fh-top">'
+                f'<span class="fh-name">多只基金对比</span>'
+                f'<span class="fh-tag">{"已选 %d 只" % len(_prev_sel) if _prev_sel else "未选择"}</span>'
+                f'<span class="fh-date">{_head_right}</span>'
+                f'</div></div>',
+                unsafe_allow_html=True,
+            )
             _sel = FS.fund_search("cmp_pick", mode="multi", fixed=_BT_FIXED, default=[],
                                   placeholder="搜索并添加基金，可多选对比", max_sel=len(_CMP_COLORS))
             _bt_label = {f["code"]: f["label"] for f in _BT_FIXED}
@@ -3353,8 +3390,8 @@ with tab7:
                     if not _c:
                         continue
                     if FL.is_stale(_c):
-                        with st.spinner(f"正在拉取 {_c} 最新净值…"):
-                            _fok, _fmsg = FL.fetch_fund(_c)
+                        st.toast(f"正在拉取 {_c} 最新净值…")   # 用 toast 不用 spinner：spinner 会在页面里插一行，又跳一下
+                        _fok, _fmsg = FL.fetch_fund(_c)
                         if not _fok and FL.load_cached(_c) is None:
                             _cmp_fail.append(_fmsg)
                             continue
@@ -3362,17 +3399,6 @@ with tab7:
                     _nm = f"{_c} {FL.fund_name(_c)}".strip()
                 if _ss is not None and len(_ss) >= 2:
                     _series_map[_nm] = _ss
-            _nm_list = list(_series_map)
-            _lasts = [_series_map[k].index[-1] for k in _nm_list if len(_series_map[k])]
-            _cmp_last = f"{max(_lasts):%Y/%m/%d}" if _lasts else ""
-            _head_slot.markdown(
-                f'<div class="fund-head flat"><div class="fh-top">'
-                f'<span class="fh-name">多只基金对比</span>'
-                f'<span class="fh-tag">{"已选 %d 只" % len(_nm_list) if _nm_list else "未选择"}</span>'
-                f'<span class="fh-date">{"数据截至 " + _cmp_last if _cmp_last else "最多同时对比 %d 只" % len(_CMP_COLORS)}</span>'
-                f'</div></div>',
-                unsafe_allow_html=True,
-            )
             if _cmp_fail:
                 st.warning("以下基金没有画进图里：" + "；".join(_cmp_fail), icon=":material/info:")
 

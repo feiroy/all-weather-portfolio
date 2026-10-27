@@ -78,6 +78,7 @@ This file provides guidance to Claude Code when working with code in this reposi
 - **页面宽度**：内容区 `max-width:1480px`，左右内边距 `clamp(1rem,3vw,3rem)`；页头右侧操作区用 `st.container(key="hero_actions", horizontal=True, horizontal_alignment="right")`，状态胶囊与按钮同一行、同高 40px。
 - **头部**：左侧 `.fund-head`（名称 + 代码 + 标签 + 最新值 + 单日涨跌 + 截至日期），下方 `.stage-summary` 阶段表现；右侧放选择器。
 - **一个 tab 内的视图切换**用 `st.segmented_control`，外层必须包 `st.container(key=...)` 才能挂样式：`.st-key-trend_mode_switch [role="radiogroup"]`（tab 按钮组：3px 内衬、12px 圆角、34px 高、选中白底 + `--brand` 字）。**不要为了两种视图再开一个 tab**——单只走势和多只对比已合并进「基金走势」（见下）。
+- **不许让重跑把页面「跳一下」**：每次交互 Streamlit 整页重跑，任何「要等数据回来才知道写什么」的头部/统计条，必须先用 `st.session_state` 里已有的值渲染出等高内容，**禁止 `st.empty()` 占位、等算完再回填**——占位先是 0 高、回填后撑开，用户看到的就是上下抖一下（实测 28.8px）。耗时提示用 `st.toast`，不用 `st.spinner`（spinner 会在版面里插一行，同样跳）。
 
 ### 交互图表（统一组件体系，禁止用 Altair/st.dataframe 替代）
 - 时间序列图一律用 `app.py` 里的 iframe 组件，共用 `_COMP_BASE_CSS`：
