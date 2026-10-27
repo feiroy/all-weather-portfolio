@@ -2132,12 +2132,20 @@ def _pf_num(v: float, digits: int = 0) -> str:
     return f"{v:+,.{digits}f}"
 
 
-def _pf_badge_parts(it: dict) -> tuple[str, str]:
-    """买卖标记的（文字, 样式类）—— 列表、提醒清单、成交登记共用一套措辞，不改口径。"""
+def _pf_badge_parts(it: dict, with_qty: bool = False) -> tuple[str, str]:
+    """买卖标记的（文字, 样式类）—— 列表、提醒清单、成交登记共用一套措辞，不改口径。
+
+    with_qty：调仓清单里要直接下单，金额后面跟上「多少份 / 多少股」；
+    持仓列表空间小，只留金额。
+    """
+    _qty_txt = ""
+    if with_qty and it.get("qty", 0) > 0:
+        _u, _d = ("份", 2) if it.get("otc") else ("股", 0)
+        _qty_txt = f' · {it["qty"]:,.{_d}f} {_u}'
     if it.get("side") == "买入":
-        return (f'买入 ¥{it["amount"]:,.0f}', "buy")
+        return (f'买入 ¥{it["amount"]:,.0f}{_qty_txt}', "buy")
     if it.get("side") == "卖出":
-        return (f'卖出 ¥{it["amount"]:,.0f}', "sell")
+        return (f'卖出 ¥{it["amount"]:,.0f}{_qty_txt}', "sell")
     if it.get("note") == "缺净值":
         return ("缺净值", "warn")
     if it.get("note") == "不足一手":
@@ -2147,9 +2155,9 @@ def _pf_badge_parts(it: dict) -> tuple[str, str]:
     return ("持有不动", "hold")
 
 
-def _pf_badge(it: dict) -> str:
+def _pf_badge(it: dict, with_qty: bool = False) -> str:
     """买卖标记 —— 一行只看最右就知道这一轮该买还是该卖。"""
-    text, cls = _pf_badge_parts(it)
+    text, cls = _pf_badge_parts(it, with_qty)
     return f'<span class="pf-badge {cls}">{text}</span>'
 
 
@@ -3812,11 +3820,22 @@ with tab3:
 # Tab 4: 买卖提醒（按策略算买卖 → 一键登记）—— 计划在这页，补录与流水在「交易记录」
 # ============================================================
 with tab4:
-    st.subheader("买卖提醒 · 按策略算，这一轮买什么、卖什么")
+    st.subheader("买卖提醒 · 这一轮买什么、卖什么")
     st.caption(
-        "只做一件事：按目标权重算出差额，告诉你**该买多少、该卖多少**，确认后一键落成成交。"
-        "手工补录和成交流水在「交易记录」页，持仓与收益在「我的持仓」页 —— 登记完两边立刻跟着变。"
+        "两种场景：「再平衡」= 钱已经在账户里，把仓位调回目标比例（可能一边买一边卖）；"
+        "「定投一笔」= 新投一笔钱，只买不卖，直接给出每只基金买多少份。"
+        "确认后一键落成成交，手工补录和流水在「交易记录」页。"
     )
+
+    _RB_REBAL, _RB_DCA = "再平衡", "定投一笔"
+    with st.container(key="rb_mode_switch"):
+        _rb_mode = st.segmented_control(
+            "模式", [_RB_REBAL, _RB_DCA], default=_RB_REBAL, key="rb_mode",
+            label_visibility="collapsed",
+            help="再平衡：钱已经在账户里，把现有仓位调回目标比例 —— 可能一边买一边卖。\n\n"
+                 "定投一笔：往账户里新投一笔钱（先进现金），只买不卖，"
+                 "按目标权重算出每只基金买多少份。",
+        ) or _RB_REBAL
 
     if not _plan["has_acct"]:
         st.info("还没有账户：先到「交易记录」建一个账户（或直接补录一笔转入），之后这里就会按你的真实持仓算买卖。")
@@ -3824,7 +3843,7 @@ with tab4:
         st.info("账户里还没有钱和持仓：先到「交易记录」补录一笔「转入」，或在支付宝买好后补录买入。")
     elif not _plan["rows"]:
         st.warning("还没有挂任何基金：先到「我的持仓」给位置加一只，或点右上角「更新数据」拉取净值。")
-    else:
+    elif _rb_mode == _RB_REBAL:
         # ---- 结论：这一轮动不动、买多少卖多少 ----
         if _plan["orders"]:
             st.markdown(
@@ -3857,7 +3876,7 @@ with tab4:
                 (('<span class="muted">—</span>' if abs(_it["dev"]) < 0.03
                   else f'<span class="{_pf_sign(_it["dev"])}">{_it["dev"]*100:+.1f}pp</span>')
                  if _it["slot_first"] else ""),
-                _pf_badge(_it),
+                _pf_badge(_it, with_qty=True),
             ])
         # 不在启用位置里、但账上还留着份额的代码：占着总资产却不在目标权重里，单独列出来
         for _o in _plan["other"]:
@@ -3895,6 +3914,169 @@ with tab4:
                 st.rerun()
             st.caption("这里按最新净值估算；实际以你在支付宝成交的价格为准，"
                        "差得多可以到「交易记录」逐笔修正，或直接手工补录真实那一笔。")
+
+    else:
+        # ---------------- 定投一笔：新钱按目标权重分，直接给出每只买多少份 ----------------
+        with st.container(key="dca_card"):
+            st.markdown(
+                '<div class="sec-head"><span class="t">这次投多少</span>'
+                '<span class="r">按目标权重分，只买不卖</span></div>',
+                unsafe_allow_html=True,
+            )
+            _dc1, _dc2, _dc3 = st.columns([1.0, 1.0, 2.0], gap="small", vertical_alignment="bottom")
+            _dc_amt = _dc1.number_input("投入金额（元）", min_value=0.0, step=1000.0,
+                                        value=5000.0, format="%.0f", key="dc_amount")
+            _dc_date = _dc2.date_input("买入日期", value=pd.Timestamp(_hg_last).date(),
+                                       format="YYYY/MM/DD", key="dc_date")
+            _dc_in = _dc3.checkbox("同时记一笔「转入」：这笔钱从银行卡新进来", value=True,
+                                   key="dc_cash_in",
+                                   help="勾上 = 先转入再买入：现金不会变负，本金同步增加，不算收益。\n\n"
+                                        "取消 = 钱早就在账户现金里了，只记买入，不动本金。")
+
+        # 位置聚合（含位置内多只基金）→ 按目标权重分配这笔钱
+        _dc_slots: dict[str, dict] = {}
+        _dc_meta: dict[str, dict] = {}
+        _dc_dead: list[dict] = []           # 缺净值、这次分不到的基金
+        for _it in _plan["rows"]:
+            _g = _dc_slots.setdefault(_it["slot"], {
+                "slot": _it["slot"], "w": float(_it["slot_tgt_w"]), "mv": 0.0, "items": []})
+            _g["mv"] += float(_it["mv"])     # 缺净值的市值也算进去，否则目标市值会算小
+            if _it["px"] <= 0:
+                _dc_dead.append(_it)
+                continue
+            _g["items"].append({"code": _it["code"], "x": float(_it["x"])})
+            _dc_meta[_it["code"]] = _it
+        _dc_alloc = HG.plan_invest(list(_dc_slots.values()), float(_dc_amt))
+
+        _dc_slot_alloc: dict[str, float] = {}   # 分到的钱（含买不到的），用来判断「谁超配没分到」
+        _dc_rows, _dc_orders = [], []
+        _dc_buy = _dc_lost_amt = 0.0
+        for _a in _dc_alloc:
+            _m = _dc_meta.get(_a["code"])
+            if not _m:
+                continue
+            _want = float(_a["amount"])
+            _qty, _amt = HG.order_quantity(_m["f"], _want, float(_m["px"]))
+            _dc_slot_alloc[_a["slot"]] = _dc_slot_alloc.get(_a["slot"], 0.0) + _want
+            _note = ""
+            if _qty <= 0:
+                # 钱分到了但下不了单：场外是低于最低申购，场内是一手太贵 —— 必须说出来，不能静默丢掉
+                if HG.is_otc(_m["f"]):
+                    _note = f'低于最低申购 ¥{float(_m["f"].get("min_amount") or 1):,.0f}'
+                else:
+                    _note = f'不足一手，一手 ≈ ¥{int(_m["f"].get("lot") or 100) * float(_m["px"]):,.0f}'
+                _dc_lost_amt += _want
+            else:
+                _dc_buy += _amt
+                _dc_orders.append({"date": str(_dc_date), "slot": _a["slot"], "code": _a["code"],
+                                   "side": "买入", "shares": round(float(_qty), 4),
+                                   "nav": round(float(_m["px"]), 4), "fee": 0.0})
+            _dc_rows.append({"slot": _a["slot"], "m": _m, "want": _want, "amt": _amt,
+                             "qty": float(_qty), "x": _a["x"], "note": _note})
+
+        if not _dc_rows:
+            st.info("这个金额分不出可买的份额：把金额调大一点，或先给位置挂上基金 / 点右上角更新净值。")
+        else:
+            st.markdown(
+                '<div class="pf-summary">'
+                f'<span class="lead">投 ¥{float(_dc_amt):,.0f} → 买到 {len(_dc_orders)} 只基金</span>'
+                f'<span class="item">实际买入 <b class="buy">¥{_dc_buy:,.0f}</b></span>'
+                f'<span class="item">投后总资产 ¥{_plan["asset"] + float(_dc_amt):,.0f}</span>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+            _dc_tbl, _dc_seen = [], set()
+            for _r in _dc_rows:
+                _slot, _m, _qty, _x, _note = (_r["slot"], _r["m"], _r["qty"],
+                                              _r["x"], _r["note"])
+                _first = _slot not in _dc_seen
+                _dc_seen.add(_slot)
+                _unit = "份" if _m["otc"] else "股"
+                _dc_tbl.append([
+                    (HG.SLOT_LABEL.get(_slot, _slot) if _first else '<span class="muted">↳</span>'),
+                    f'{_m["f"].get("name") or _m["code"]}<br><span class="muted">{_m["code"]} · '
+                    + ("场外" if _m["otc"] else "场内")
+                    + (f' · 位置内 {_x * 100:.0f}%' if _m["slot_n"] > 1 else "") + '</span>',
+                    (f'{_m["slot_tgt_w"] * 100:.1f}%' if _first else ""),
+                    f'{_m["mv"]:,.0f}',
+                    f'<b>¥{_r["want"]:,.0f}</b>',
+                    f'{_m["px"]:.4f}',
+                    (f'<span class="muted">{_note}</span>' if _note else
+                     (f'<b>{_qty:,.2f}</b> 份' if _unit == "份" else f'<b>{_qty:,.0f}</b> 股')),
+                ])
+            _render_table(
+                [("位置", "left"), ("我的基金", "left"), ("目标权重", "right"),
+                 ("当前市值(¥)", "right"), ("分配金额(¥)", "right"),
+                 ("净值", "right"), ("能买多少", "right")],
+                _dc_tbl,
+                totals=["合计", "—", "100.0%", f'{_plan["mv"]:,.0f}',
+                        f'{_dc_buy + _dc_lost_amt:,.0f}', "—", f'实买 ¥{_dc_buy:,.0f}'],
+                min_width=920,
+            )
+            if _dc_lost_amt > 0.5:
+                # 每个位置都能买到一手/够最低申购，这次至少要投多少钱
+                _dc_buyable = [_g for _g in _dc_slots.values() if _g["items"]]
+                _dc_wsum = sum(_g["w"] for _g in _dc_buyable) or 1.0
+                _dc_min_need = 0.0
+                for _g in _dc_buyable:
+                    _wi = _g["w"] / _dc_wsum
+                    _xs = sum(it["x"] for it in _g["items"]) or 1.0
+                    if _wi <= 0:
+                        continue
+                    for _it in _g["items"]:
+                        _mm = _dc_meta.get(_it["code"])
+                        if not _mm:
+                            continue
+                        if HG.is_otc(_mm["f"]):
+                            _need = float(_mm["f"].get("min_amount") or 1)
+                        else:
+                            _need = int(_mm["f"].get("lot") or 100) * float(_mm["px"])
+                        _dc_min_need = max(_dc_min_need, _need * _xs / _it["x"] / _wi)
+                st.warning(
+                    f"有 ¥{_dc_lost_amt:,.0f} 分到了但下不了单（见上表「能买多少」），这笔钱先留在现金里。"
+                    + (f"按现在的权重，这次至少要投 ¥{_dc_min_need:,.0f} 才能每个位置都买到一手。"
+                       if _dc_min_need > 0 else "")
+                    + "\n\n如果这只基金你其实是在支付宝按**金额**买的，说明它的「买卖单位」被记成了「股」，"
+                    "到「权重与选基」页底改成「份额」就能算份额；如果确实是场内 ETF，就调大金额。"
+                )
+            _dc_skip = [_s for _s in _dc_slots if _s not in _dc_slot_alloc]
+            st.caption(
+                "分配规则：按目标权重补缺口 —— 市值低于目标的先拿钱，已经超配的一分不给，"
+                "剩下的再按权重摊。"
+                + ("这次没分到钱的位置：" + "、".join(HG.SLOT_LABEL.get(_s, _s) for _s in _dc_skip)
+                   + "（已经超配）。" if _dc_skip else "")
+                + "场外基金按金额申购，份额 = 金额 ÷ 净值 是估算，实际以支付宝确认的份额为准；"
+                "场内按每手取整。"
+            )
+            if _dc_dead:
+                _dead_txt = "、".join(f'{_d["f"].get("name") or _d["code"]}（{_d["code"]}）'
+                                     for _d in _dc_dead[:6])
+                if len(_dc_dead) > 6:
+                    _dead_txt += f" 等 {len(_dc_dead)} 只"
+                _dead_mv = sum(float(_d["mv"]) for _d in _dc_dead)
+                _dead_pct = (_dead_mv / _plan["mv"] * 100) if _plan["mv"] else 0.0
+                st.warning(
+                    f"这些基金没有净值数据，这次分不到钱：{_dead_txt}。"
+                    f"它们占持仓 {_dead_pct:.0f}%，这份钱只能让给别的基金，买完比例会偏。"
+                    "建议先点右上角「更新数据」补齐净值，再回来定投。"
+                )
+            if not _dc_in and _dc_buy > float(_plan["cash"]):
+                st.warning(f"账户现金只有 ¥{_plan['cash']:,.0f}，不记「转入」的话买完会变成负的 "
+                           f"¥{float(_plan['cash']) - _dc_buy:,.0f}。"
+                           "要么勾上「同时记一笔转入」，要么先去「交易记录」补录真实的那笔转入。")
+            if st.button(f"把这份定投登记成 {len(_dc_orders) + (1 if _dc_in else 0)} 笔成交",
+                         type="primary", key="dc_write",
+                         help="勾了「转入」会一并记上；登记后到「交易记录」页逐笔核对"):
+                _dc_batch = []
+                if _dc_in and float(_dc_amt) > 0:
+                    _dc_batch.append({"date": str(_dc_date), "side": "转入", "code": "",
+                                      "shares": round(float(_dc_amt), 2), "nav": 0.0, "fee": 0.0})
+                _dc_batch.extend(_dc_orders)
+                acct.setdefault("trades", []).extend(_dc_batch)
+                save_acct(acct, ACCT_FILE)
+                st.toast(f"已登记 {len(_dc_batch)} 笔成交", icon=":material/check_circle:")
+                st.rerun()
+            st.caption("按最新净值估算；实际成交净值以支付宝确认为准，差得多可以到「交易记录」逐笔修正。")
 
 # ============================================================
 # Tab 5: 交易记录（补录 + 台账）—— 只记录支付宝上实际发生了什么

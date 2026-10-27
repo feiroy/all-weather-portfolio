@@ -342,6 +342,68 @@ def is_otc(h: dict) -> bool:
     return str(h.get("unit", "股")) == "份额"
 
 
+def plan_invest(slots: list[dict], amount: float) -> list[dict]:
+    """定投分配：把一笔新钱按目标权重分下去，**只买不卖**。
+
+    和「再平衡」的区别在钱的总量：
+    - 再平衡：总资产不变，把现有仓位调回目标比例，可能同时有买有卖；
+    - 定投：新增一笔钱（先进现金），目标市值要按**投后总额**重算，
+      谁差得多谁多拿，已经超配的位置一分不给，剩下的再按目标权重摊掉。
+
+    首次定投（还没有持仓）时缺口正好是 ``w × amount``，退化成「按目标权重均分」。
+
+    Args:
+        slots: [{"slot": 位置 key, "w": 位置目标权重(0~1),
+                 "mv": 该位置当前市值, "items": [{"code", "x"(位置内占比), ...}]}]
+        amount: 这次投入的金额（元）
+
+    Returns:
+        [{"slot", "code", "x", "amount"}]，amount 合计 ≈ 传入金额。
+    """
+    amount = float(amount or 0)
+    if amount <= 0 or not slots:
+        return []
+    # 只有挂了基金、且净值齐全的位置才买得动；没挂基金/缺净值的位置仍计入总市值
+    # （它的钱是真实存在的），但它的那份预算要让给能买的位置，否则钱会分不完。
+    buyable = [s for s in slots if s.get("items")]
+    if not buyable:
+        return []
+    wsum = sum(float(s.get("w") or 0) for s in buyable)
+    if wsum <= 0:                       # 权重全 0（策略没给）→ 均分，避免整笔钱没处去
+        wsum = float(len(buyable))
+        w_of = {s["slot"]: 1.0 / len(buyable) for s in buyable}
+    else:
+        w_of = {s["slot"]: float(s.get("w") or 0) / wsum for s in buyable}
+    base = sum(float(s.get("mv") or 0) for s in slots)
+    target_total = base + amount
+
+    need = {s["slot"]: max(0.0, w_of[s["slot"]] * target_total - float(s.get("mv") or 0))
+            for s in buyable}
+    tot_need = sum(need.values())
+    if tot_need <= 0:                   # 全都超配（例如刚大跌后按市值算不再缺）→ 按权重摊
+        alloc = {k: amount * w for k, w in w_of.items()}
+    elif tot_need >= amount:            # 缺口比这笔钱还大 → 按缺口比例分
+        alloc = {k: amount * v / tot_need for k, v in need.items()}
+    else:                               # 缺口都补上还有剩 → 剩下的按目标权重摊
+        left = amount - tot_need
+        alloc = {k: need[k] + left * w_of[k] for k in need}
+
+    out = []
+    for s in buyable:
+        a = float(alloc.get(s["slot"], 0.0))
+        if a <= 0:
+            continue
+        items = [it for it in (s.get("items") or []) if it.get("code")]
+        if not items:
+            continue
+        xs = sum(float(it.get("x") or 0) for it in items) or float(len(items))
+        for it in items:
+            x = float(it.get("x") or 0) or 1.0
+            out.append({"slot": s["slot"], "code": it["code"], "x": x,
+                        "amount": a * x / xs})
+    return out
+
+
 def order_quantity(h: dict, amount: float, nav: float) -> tuple[float, float]:
     """把目标金额换成可下单的数量与实际金额。
 

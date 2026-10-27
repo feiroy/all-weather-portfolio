@@ -176,6 +176,65 @@ class OrderQuantity(unittest.TestCase):
         self.assertFalse(HG.is_otc({"unit": "股"}))
 
 
+class PlanInvest(unittest.TestCase):
+    """定投分配：只买不卖，按目标权重补缺口。"""
+
+    @staticmethod
+    def _slot(key, w, mv, items=None):
+        return {"slot": key, "w": w, "mv": mv,
+                "items": items or [{"code": f"{key}_code", "x": 1.0}]}
+
+    def test_first_invest_splits_by_weight(self):
+        slots = [self._slot("hs300", .5, 0), self._slot("credit", .3, 0),
+                 self._slot("gold", .2, 0)]
+        out = HG.plan_invest(slots, 10000)
+        got = {o["slot"]: o["amount"] for o in out}
+        self.assertAlmostEqual(got["hs300"], 5000, places=2)
+        self.assertAlmostEqual(got["credit"], 3000, places=2)
+        self.assertAlmostEqual(got["gold"], 2000, places=2)
+        self.assertAlmostEqual(sum(got.values()), 10000, places=4)
+
+    def test_underweight_slot_gets_more(self):
+        # 目标 50/50，实际 40/60 → 新钱先补 a 的缺口，投完正好对齐
+        slots = [self._slot("a", .5, 4000), self._slot("b", .5, 6000)]
+        out = {o["slot"]: o["amount"] for o in HG.plan_invest(slots, 10000)}
+        self.assertGreater(out["a"], out["b"])
+        self.assertAlmostEqual(out["a"] + out["b"], 10000, places=4)
+        self.assertAlmostEqual(out["a"], 6000, places=2)   # 缺口 6000，投后 1:1
+        self.assertAlmostEqual(out["b"], 4000, places=2)
+
+    def test_overweight_slot_gets_nothing_and_rest_is_spread(self):
+        # 目标 50/50，实际 80/20：a 已超配（16000 > 目标 15000），钱全给 b
+        slots = [self._slot("a", .5, 16000), self._slot("b", .5, 4000)]
+        out = {o["slot"]: o["amount"] for o in HG.plan_invest(slots, 10000)}
+        self.assertNotIn("a", out)                      # 超配的一分不给
+        self.assertAlmostEqual(out["b"], 10000, places=4)
+
+    def test_fully_balanced_falls_back_to_weight(self):
+        # 已经完全对齐 → 缺口为 0，按权重摊（否则这笔钱无处可去）
+        slots = [self._slot("a", .6, 6000), self._slot("b", .4, 4000)]
+        out = {o["slot"]: o["amount"] for o in HG.plan_invest(slots, 5000)}
+        self.assertAlmostEqual(out["a"], 3000, places=2)
+        self.assertAlmostEqual(out["b"], 2000, places=2)
+
+    def test_split_inside_slot_by_ratio(self):
+        slots = [{"slot": "hs300", "w": 1.0, "mv": 0.0,
+                  "items": [{"code": "110020", "x": .7}, {"code": "000051", "x": .3}]}]
+        out = {o["code"]: o["amount"] for o in HG.plan_invest(slots, 10000)}
+        self.assertAlmostEqual(out["110020"], 7000, places=2)
+        self.assertAlmostEqual(out["000051"], 3000, places=2)
+
+    def test_bad_input_returns_empty(self):
+        self.assertEqual(HG.plan_invest([], 5000), [])
+        self.assertEqual(HG.plan_invest([self._slot("a", 1, 0)], 0), [])
+
+    def test_zero_weights_split_evenly(self):
+        slots = [self._slot("a", 0, 0), self._slot("b", 0, 0)]
+        out = {o["slot"]: o["amount"] for o in HG.plan_invest(slots, 1000)}
+        self.assertAlmostEqual(out["a"], 500, places=2)
+        self.assertAlmostEqual(out["b"], 500, places=2)
+
+
 class Benchmark(unittest.TestCase):
     def test_monthly_rebalance_resets_to_target(self):
         idx = pd.bdate_range("2024-01-01", "2024-06-30")
