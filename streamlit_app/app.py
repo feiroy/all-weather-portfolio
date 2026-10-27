@@ -2022,11 +2022,13 @@ def _hg_plan() -> dict:
     「我的持仓」的买卖标记、「买卖提醒」的清单与一键登记都读这一份，
     两处不再各算一遍，避免数字对不上。
 
-    口径：调仓基数 = 账户真实总资产（含配置里已删、账上还有份额的代码）；
+    口径：**调仓基数 = 配置内持仓市值 + 现金**，不含「其他」（位置已关/已删、账上还有份额的代码）。
+    那些钱我们不能替你卖，算进基数只会把目标金额撑大，最后给出「要买 29 万而现金只有 1 万」
+    这种执行不了的清单（真实踩过）。总资产另用 total，含「其他」。
     位置整体偏离 < 0.5% 视为不用动（省手续费），要动的位置再按位置内占比拆到每只基金。
     """
-    asset = float(_acct_daily["equity"].iloc[-1]) if (acct is not None and len(_acct_daily)) else 0.0
     cash = float(_acct_cash or 0)
+    asset = float(sum(_hg_mv.values())) + cash
     rows, orders, by_code = [], [], {}
     buy_total = sell_total = mv_total = today_pnl = 0.0
     for s in HG.active(holdings):
@@ -2084,15 +2086,27 @@ def _hg_plan() -> dict:
     # 不在启用位置里、但账上还留着份额的代码：占着总资产却不在目标权重里
     other = [{"code": c, "mv": v, "in_cfg": c in _hg_configured_codes}
              for c, v in (_hg_other_mv or {}).items() if v > 0]
-    cap0 = float((acct or {}).get("capital", 0) or 0)
+    # 「其他」的今日涨跌也要算进头卡的「今日收益」：它们不参与调仓，但钱还是我的，
+    # 漏掉的话 28 万持仓一天的波动在页面上完全看不见。
+    for _c, _sh in (_acct_pos or {}).items():
+        if float(_sh or 0) <= 0 or _c in _hg_active_slot_codes:
+            continue
+        _nv = _nav_of_code(_c)
+        if len(_nv) > 1:
+            today_pnl += (float(_nv.iloc[-1]) - float(_nv.iloc[-2])) * float(_sh)
     total = mv_total + sum(o["mv"] for o in other) + cash
+    # 收益按「份额」算，不按「本金金额差」：units 起于初始资金（记作 1 元 1 份），转入/转出按当时
+    # 净值折算份额，所以 equity/units 就是时间加权净值，收益 = 总资产 − 份额本金。
+    # 不能写成 total − capital：那样每次「转入」都会被当成赚到的钱（真踩过：转入 1 万后
+    # 持仓页持有收益从 +184 跳到 +10,184，而「收益对比」页累计收益仍 +0.04%，两页互相打架）。
+    base = float(_acct_units or 0)
     return {"asset": asset, "cash": cash, "mv": mv_total,
             "mv_all": mv_total + sum(o["mv"] for o in other), "total": total,
             "other": other,
             "rows": rows, "orders": orders, "by_code": by_code,
             "buy": buy_total, "sell": sell_total, "today": today_pnl,
-            "pnl": (total - cap0) if cap0 else 0.0,
-            "pnl_pct": ((total - cap0) / cap0) if cap0 else 0.0,
+            "pnl": (total - base) if base > 0 else 0.0,
+            "pnl_pct": ((total / base - 1) if base > 0 else 0.0),
             "has_acct": acct is not None}
 
 
@@ -2115,7 +2129,9 @@ def _hg_other_item(code: str, why: str = "位置已关闭") -> dict:
         "px": px, "px_prev": px_prev, "shares": sh, "cost": cst, "mv": sh * px,
         "pl": ((px / cst - 1) if (cst > 0 and px > 0) else None),
         "otc": HG.is_otc(_meta) if _meta else (HG.default_unit(code) == "份额"),
-        "w_now": ((sh * px / _plan["asset"]) if _plan["asset"] else 0.0), "w_tgt": None,
+        # 权重按「全账户总资产」算：这些钱不进调仓，但占总资产多少要说得对
+        # （用调仓基数当分母会算出 130% 这种数）
+        "w_now": ((sh * px / _plan["total"]) if _plan["total"] else 0.0), "w_tgt": None,
         "side": "", "qty": 0.0, "amount": 0.0, "note": "", "why": why,
         "dev": 0.0, "slot_first": True,
     }
@@ -3258,13 +3274,47 @@ def _hg_slot_options():
     """记账下拉选项：每**只基金**一项，value=(位置, 代码)，显示「位置 · 代码 名称」。
 
     一个位置挂多只时这里就有多行 —— 成交必须记到具体那一只基金上。
+    末尾补上「账上还有份额、但配置里已经删掉」的代码：不然「我的持仓」提示你
+    「想卖就到交易记录记一笔卖出」，而这里根本选不到它（提示指向的操作做不到）。
     """
     out = []
+    off = []
     for s in HG.SLOTS:
+        _on = bool(holdings.get(s, {}).get("on", True))
         for f in HG.funds(holdings.get(s, {})):
-            out.append((s, f["code"],
-                        f'{HG.SLOT_LABEL[s]} · {f["code"]} {f.get("name") or ""}'.strip()))
+            _lb = f'{HG.SLOT_LABEL[s]} · {f["code"]} {f.get("name") or ""}'.strip()
+            if not _on:
+                _lb += "（位置已关闭）"
+            (out if _on else off).append((s, f["code"], _lb))
+    # 参与调仓的排前面：默认选中项不该是「已关闭位置」的基金（第一版就是这样，很容易记错）
+    out += off
+    _cfg_codes = {c for _s, c, _lb in out}
+    for _c, _sh in (_acct_pos or {}).items():
+        if _c in _cfg_codes or float(_sh or 0) <= 0:
+            continue
+        out.append(("", _c, f'已删除的位置 · {_c} {FL.fund_name(_c) or ""}'.strip()))
     return out
+
+
+def _held_on(trades: list, code: str, day, skip: int | None = None) -> float:
+    """按日期重放，算某只基金到 `day`（含当天）为止持有多少份。
+
+    只用于记账前的「别卖超过持有」校验，所以按成交日期字符串排序累加即可，
+    精度要求不高；`skip` 是编辑某笔时要排除的那一行。"""
+    held = 0.0
+    for i, t in enumerate(trades or []):
+        if skip is not None and i == skip:
+            continue
+        if str(t.get("code") or "") != str(code or ""):
+            continue
+        if str(t.get("date") or "") > str(day):
+            continue
+        side = t.get("side")
+        if side == "买入":
+            held += float(t.get("shares") or 0)
+        elif side == "卖出":
+            held -= float(t.get("shares") or 0)
+    return held
 # ============================================================
 # 三类提醒一次算完、分头显示
 # 原来独占一个「提醒」tab，内容和买卖提醒（偏离）、收益对比（体检）、指数估值（估值）三页重复，
@@ -3460,6 +3510,8 @@ def _slot_config_panel() -> None:
                 },
                 hide_index=True, width="stretch", key="hg_editor",
             )
+            # 同一个面板里两套提交方式，不说清楚很容易「改完切页就没了」
+            st.caption("这张表改完要点右下角「保存修改」才生效；上面的「参与」开关和搜索框是**立即生效**的。")
 
         _miss = [f'{_c} {FL.fund_name(_c) or ""}'.strip()
                  for _c in HG.all_codes(holdings)
@@ -3788,9 +3840,19 @@ with tab3:
         for _o in _plan["other"]:          # 位置关掉了、或配置里已删，账上还留着份额的代码
             _why = "位置已关闭" if _o.get("in_cfg") else "不在配置里"
             _r = _pf_row(_hg_other_item(_o["code"], _why))
-            _r.update({"badge": _why, "badge_cls": "warn"})   # 标记换成「为什么不参与调仓」
+            # 占比列留空：这些钱不参与目标权重，跟上面几行的百分比不是同一把尺，混排会看起来「对不上」
+            _r.update({"badge": _why, "badge_cls": "warn", "w": "—"})
             _pf_rows.append(_r)
         _sel = _pf_list(_pf_rows)           # 点一行 → 返回该基金代码（组件里高亮选中行）
+        # 汇总紧跟列表：点开某只基金后详情很长，这句被推到详情下面就等于看不见了
+        _other_sum = sum(float(o["mv"]) for o in _plan["other"])
+        if _other_sum > 0:
+            st.caption(
+                f"另有 **¥{_other_sum:,.0f}**（占 {_other_sum / _plan['total'] * 100 if _plan['total'] else 0:.0f}%）"
+                "落在「位置已关闭 / 不在配置里」的基金上（上表最后几行）：钱是你的、也算进总金额，"
+                "但**不参与目标权重和调仓**。想让它继续干活就到「权重与选基」把那个位置打开，"
+                "不想拿就到「交易记录」记一笔卖出。"
+            )
         _sel_it = next((it for it in _plan["rows"] if it["code"] == _sel), None)
         _sel_other = next((o for o in _plan["other"] if o["code"] == _sel), None)
         if _sel_it:
@@ -3839,8 +3901,15 @@ with tab4:
 
     if not _plan["has_acct"]:
         st.info("还没有账户：先到「交易记录」建一个账户（或直接补录一笔转入），之后这里就会按你的真实持仓算买卖。")
-    elif _plan["asset"] <= 0:
+    elif _plan["total"] <= 0:
         st.info("账户里还没有钱和持仓：先到「交易记录」补录一笔「转入」，或在支付宝买好后补录买入。")
+    elif _plan["asset"] <= 0:
+        # 钱都在「位置已关闭 / 配置里已删」的代码上：能算不能动，先告诉人怎么把钱挪出来
+        st.warning(
+            f"账户里有 ¥{_plan['total']:,.0f}，但都落在**已关闭或已删掉的位置**里，没有可调仓的钱。"
+            "这些份额不参与调仓（见「我的持仓」里标「位置已关闭 / 不在配置里」的行）："
+            "想继续拿就把它所在的位置重新打开，想换掉就到「交易记录」逐笔记卖出。"
+        )
     elif not _plan["rows"]:
         st.warning("还没有挂任何基金：先到「我的持仓」给位置加一只，或点右上角「更新数据」拉取净值。")
     elif _rb_mode == _RB_REBAL:
@@ -3885,7 +3954,9 @@ with tab4:
                 "其他",
                 f'{FL.fund_name(_o["code"]) or _o["code"]}<br><span class="muted">{_o["code"]} · {_why}</span>',
                 f'{_o["mv"]:,.0f}',
-                f'{(_o["mv"] / _plan["asset"] * 100) if _plan["asset"] else 0:.1f}%',
+                # 这些钱不进调仓基数，所以权重只能按「全账户」算，不能跟上面配置内的百分比混着比
+                f'<span class="muted">占全账户 '
+                f'{(_o["mv"] / _plan["total"] * 100) if _plan["total"] else 0:.1f}%</span>',
                 "0.0%", '<span class="muted">—</span>',
                 f'<span class="muted">{_why}，不参与调仓</span>',
             ])
@@ -3894,18 +3965,31 @@ with tab4:
              ("当前权重", "right"), ("目标权重(位置)", "right"), ("偏离", "right"), ("操作", "left")],
             _rb_rows,
             totals=["合计", "—", f'{_plan["mv_all"]:,.0f}',
-                    f'{(_plan["mv_all"] / _plan["asset"] * 100) if _plan["asset"] else 0:.1f}%',
+                    f'{(_plan["mv_all"] / _plan["total"] * 100) if _plan["total"] else 0:.1f}%',
                     "100.0%", "—",
                     (f'买 ¥{_plan["buy"]:,.0f} / 卖 ¥{_plan["sell"]:,.0f}'
                      if (_plan["buy"] or _plan["sell"]) else "—")],
             min_width=900,
         )
-        st.caption(f"调仓基数 ¥{_plan['asset']:,.0f} = 持仓 ¥{_plan['mv_all']:,.0f} + 现金 ¥{_plan['cash']:,.0f}。"
-                   "「其他」是位置关掉或已删、账上还留着份额的基金，钱在里面但不算进目标权重；"
+        _other_mv = sum(float(o["mv"]) for o in _plan["other"])
+        st.caption(f"调仓基数 ¥{_plan['asset']:,.0f} = 持仓 ¥{_plan['mv']:,.0f} + 现金 ¥{_plan['cash']:,.0f}。"
+                   + (f"另有 ¥{_other_mv:,.0f} 落在「其他」（位置已关闭或已删）里，**不进基数**——"
+                      "那部分钱不替你买卖，想让它参与就把位置重新打开。"
+                      if _other_mv > 0 else "")
+                   + "配置内各行的「当前权重」和「目标权重」是同一把尺（分母都是调仓基数），"
+                   "「其他」行和合计按全账户算。"
                    "位置整体偏离 < 0.5% 不用动，省手续费；场内按每手取整，场外按最低申购金额。")
 
         # ---- 一键登记：把这份清单落成成交（相当于批量补录）----
         if _plan["orders"]:
+            _net_out = float(_plan["buy"]) - float(_plan["sell"])
+            if _net_out > float(_plan["cash"]) + 100:
+                st.warning(
+                    f"这份清单要买入 ¥{_plan['buy']:,.0f}、卖出 ¥{_plan['sell']:,.0f}，"
+                    f"净流出 ¥{_net_out:,.0f}，超过账户现金 ¥{_plan['cash']:,.0f}。"
+                    "支付宝里卖出的钱 T+1 才到账 —— 先卖、等钱到了再买；"
+                    "或者把买入的那几笔按比例调小，差额留到下次。"
+                )
             if st.button(f"把这份清单登记成 {len(_plan['orders'])} 笔成交", type="primary", key="rb_write",
                          help="按最新净值记成买入/卖出成交，登记后可在「交易记录」页逐笔核对"):
                 acct.setdefault("trades", []).extend(_plan["orders"])
@@ -3927,6 +4011,7 @@ with tab4:
             _dc_amt = _dc1.number_input("投入金额（元）", min_value=0.0, step=1000.0,
                                         value=5000.0, format="%.0f", key="dc_amount")
             _dc_date = _dc2.date_input("买入日期", value=pd.Timestamp(_hg_last).date(),
+                                       max_value=date.today(),
                                        format="YYYY/MM/DD", key="dc_date")
             _dc_in = _dc3.checkbox("同时记一笔「转入」：这笔钱从银行卡新进来", value=True,
                                    key="dc_cash_in",
@@ -3981,7 +4066,9 @@ with tab4:
                 '<div class="pf-summary">'
                 f'<span class="lead">投 ¥{float(_dc_amt):,.0f} → 买到 {len(_dc_orders)} 只基金</span>'
                 f'<span class="item">实际买入 <b class="buy">¥{_dc_buy:,.0f}</b></span>'
-                f'<span class="item">投后总资产 ¥{_plan["asset"] + float(_dc_amt):,.0f}</span>'
+                # 不勾「转入」= 用账户现有现金买，总资产不变；勾了才是真正加了钱
+                f'<span class="item">投后总资产 '
+                f'¥{_plan["total"] + (float(_dc_amt) if _dc_in else 0.0):,.0f}</span>'
                 '</div>',
                 unsafe_allow_html=True,
             )
@@ -4123,6 +4210,7 @@ with tab5:
                         unsafe_allow_html=True)
             rA = st.columns([1, 1.15, 1.6], gap="small", vertical_alignment="bottom")
             tr_date = rA[0].date_input("日期", value=pd.Timestamp(_hg_last).date(),
+                                       max_value=date.today(),
                                        format="YYYY/MM/DD", key="tr_date")
             with rA[1]:
                 with st.container(key="tr_mode_switch"):
@@ -4159,7 +4247,8 @@ with tab5:
                     help="默认取这天的净值（场外按当日收盘净值成交）；支付宝里成交价不一样时改这里。")
                 tr_fee = rB[3].number_input("手续费（元）", min_value=0.0, step=1.0,
                                             format="%.2f", key="tr_fee")
-                _side_note = ("买入：现金 → 基金。金额按单价折成份额，现金减少。"
+                _unit_word = "股" if HG.default_unit(tr_slot[1]) == "股" else "份"
+                _side_note = (f"买入：现金 → 基金。金额按单价折成{_unit_word}数，现金减少。"
                               if tr_side == "买入" else
                               "卖出：基金 → 现金。钱自动回到账户现金里，**不用再记一笔转入**。")
                 _act = rB[4]
@@ -4181,6 +4270,13 @@ with tab5:
                           + ("股" if HG.default_unit(tr_slot[1]) == "股" else "份")
                           + f"，现金 ¥{_cash:,.0f} → ¥{_cash_after:,.0f}")
             st.caption(_hint)
+            if _cash_after < -1:
+                # 最常见的一笔记错：钱其实是从银行卡新进来的，只记了「买入」没记「转入」
+                st.warning(
+                    f"记完现金会变成 ¥{_cash_after:,.0f}（负的）。这笔钱如果是从银行卡新买进来的，"
+                    "说明少记了一笔「转入」：先把类型切到「转入」记一笔，再回来记买入；"
+                    "或者在「买卖提醒 → 定投一笔」里勾上「同时记一笔转入」，一次就记全。"
+                )
 
             if _act.button("记一笔", type="primary", key="tr_add"):
                 _t = {"date": str(tr_date), "side": tr_side,
@@ -4192,6 +4288,15 @@ with tab5:
                     st.warning("金额要大于 0")
                 elif not _is_money and float(tr_nav) <= 0:
                     st.warning("单价要大于 0 —— 换一天或手工填那天的成交净值")
+                elif (not _is_money and tr_side == "卖出"
+                      and _sh_new > _held_on(_trades, tr_slot[1], tr_date) + 1e-6):
+                    # 卖出超过当时持有 = 凭空多出现金，账目直接错；先拦住并说清楚能卖多少
+                    _held = _held_on(_trades, tr_slot[1], tr_date)
+                    st.warning(
+                        f"卖不了这么多：{FL.fund_name(tr_slot[1]) or tr_slot[1]} 到 {_cn_date(tr_date)} "
+                        f"只持有 {_held:,.2f} 份（约 ¥{_held * float(tr_nav):,.0f}），"
+                        f"这次要卖 {_sh_new:,.2f} 份。改小金额，或先补录这笔之前漏记的买入。"
+                    )
                 else:
                     _trades.append(_t)
                     save_acct(acct, ACCT_FILE)
@@ -4254,6 +4359,10 @@ with tab5:
         elif not _f_tr:
             st.caption("这只基金还没有成交记录。")
         else:
+            # 出错提示要先存起来：这条分支末尾会 st.rerun()，直接 st.warning 会一闪而过看不到
+            _S_err = st.session_state.pop("_tr_err", "")
+            if _S_err:
+                st.warning(_S_err)
             # 最近的排最上面（按成交日期，再按录入顺序倒序）：刚记错的那笔就在第一行
             _rows = [_trade_row(i, t) for i, t in
                      sorted(enumerate(_trades),
@@ -4277,11 +4386,18 @@ with tab5:
                                 "nav": float(_p.get("nav") or 0),
                                 "fee": float(_p.get("fee") or 0)}
                         if _new["shares"] > 0 and _new["date"]:
-                            _trades[_i] = {**_trades[_i], **_new}
-                            save_acct(acct, ACCT_FILE)
-                            st.toast("已保存这一笔", icon=":material/check_circle:")
+                            _held_edit = _held_on(_trades, _new["code"], _new["date"], skip=_i)
+                            if _new["side"] == "卖出" and _new["shares"] > _held_edit + 1e-6:
+                                st.session_state["_tr_err"] = (
+                                    f"这一笔没保存：{FL.fund_name(_new['code']) or _new['code']} "
+                                    f"到 {_cn_date(_new['date'])} 只持有 {_held_edit:,.2f} 份，"
+                                    f"改完却要卖 {_new['shares']:,.2f} 份 —— 卖出超过持有会让账上多出现金。")
+                            else:
+                                _trades[_i] = {**_trades[_i], **_new}
+                                save_acct(acct, ACCT_FILE)
+                                st.toast("已保存这一笔", icon=":material/check_circle:")
                         else:
-                            st.warning("这一笔没保存：日期或金额不对")
+                            st.session_state["_tr_err"] = "这一笔没保存：日期或金额不对"
                 st.rerun()
             if _dsig and _dsig != st.session_state.get("_tr_del_sig"):
                 st.session_state["_tr_del_sig"] = _dsig
@@ -4299,10 +4415,12 @@ with tab5:
 # ============================================================
 with tab6:
     st.subheader("收益对比 · 我的账户 vs 项目默认基金 vs 策略理论")
+    _acct_strat = _strat_display.get(acct.get("strategy"), acct.get("strategy") or "—") if acct else "—"
     st.caption(
-        "三条线同一起点（都归一到 1.0）、同样目标权重、同样每月再平衡，所以**差多少就是差在哪**："
-        "**项目默认基金**＝用项目自带那 8 个代码按你现在的权重重放一遍，和它的差就是「换基金」带来的；"
-        "**策略理论**＝回测曲线，和它的差还含调仓时点、申赎费用，以及回测按累计净值、实盘按单位净值的口径差。"
+        "三条线都归一到 1.0。**项目默认基金**＝拿项目自带那 8 个代码、按你**此刻侧边栏选的策略**"
+        "和同样的再平衡节奏重放一遍，和它的差基本就是「换基金」带来的；"
+        f"**策略理论**＝账户**建仓时选的策略**（{_acct_strat}）的回测曲线，切侧边栏不会改它 —— "
+        "和它的差还含调仓时点、申赎费用，以及回测按累计净值、实盘按单位净值的口径差。"
     )
 
     _mine = _acct_daily["nav"].dropna() if (acct is not None and len(_acct_daily)) else pd.Series(dtype=float)
