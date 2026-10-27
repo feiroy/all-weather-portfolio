@@ -15,26 +15,37 @@ from allweather import benchmark as BM  # noqa: E402
 from allweather import holdings as HG   # noqa: E402
 
 
+def _fund(code: str, unit: str | None = None, **kw) -> dict:
+    """造一只基金配置（测试不联网，单位直接指定，不走 default_unit 的申购状态查询）。"""
+    if unit is None:
+        unit = "份额" if (str(code).startswith("0") or code == "110020") else "股"
+    return HG._fund({"code": code, "unit": unit,
+                     "lot": 100 if unit == "股" else 1, **kw})
+
+
 def make_holdings(codes: dict[str, str] | None = None) -> dict:
     h = HG._default_holdings()
     for s, c in (codes or {}).items():
-        h[s]["code"] = c
-        # 测试不联网，直接指定单位，不依赖 default_unit 的申购状态查询
-        h[s]["unit"] = "份额" if str(c).startswith("0") or c == "110020" else "股"
-        h[s]["lot"] = 100 if h[s]["unit"] == "股" else 1
+        h[s] = {"on": True, "funds": [_fund(c)]}
     return h
+
+
+def one(slot: str, h: dict | None = None) -> dict:
+    """取某个位置的第一只基金配置（下单/单位判断都按基金，不按位置）。"""
+    return HG.funds((h or make_holdings())[slot])[0]
 
 
 class HoldingsConfig(unittest.TestCase):
     def test_default_matches_backtest_codes(self):
         h = HG._default_holdings()
-        self.assertEqual([h[s]["code"] for s in HG.SLOTS],
-                         ["510300", "513500", "511220", "511260", "511130", "518850", "159980", "501018"])
+        self.assertEqual([HG.codes(h[s]) for s in HG.SLOTS],
+                         [["510300"], ["513500"], ["511220"], ["511260"], ["511130"],
+                          ["518850"], ["159980"], ["501018"]])
 
     def test_active_skips_disabled_and_empty(self):
         h = make_holdings()
         h["wti"]["on"] = False
-        h["gold"]["code"] = ""
+        h["gold"] = {"on": True, "funds": []}        # 一只都不挂 = 不持有
         self.assertNotIn("wti", HG.active(h))
         self.assertNotIn("gold", HG.active(h))
 
@@ -42,6 +53,11 @@ class HoldingsConfig(unittest.TestCase):
         h = make_holdings({"hs300": "110020"})
         self.assertEqual(HG.slot_of("110020", h), "hs300")
         self.assertIsNone(HG.slot_of("999999", h))
+
+    def test_slot_of_finds_second_fund_in_slot(self):
+        h = make_holdings()
+        h["hs300"] = {"on": True, "funds": [_fund("110020"), _fund("000961")]}
+        self.assertEqual(HG.slot_of("000961", h), "hs300")
 
     def test_slot_weights_renormalizes_over_active(self):
         h = make_holdings()
@@ -64,27 +80,96 @@ class HoldingsConfig(unittest.TestCase):
             self.assertIn(s, HG.SLOT_BUCKET)
 
 
+class MultiFundPerSlot(unittest.TestCase):
+    """一个位置可以挂多只基金，也可以一只都不挂。"""
+
+    def test_equal_share_when_unspecified(self):
+        h = {"on": True, "funds": [_fund("110020"), _fund("000961")]}
+        self.assertEqual([round(x, 3) for x in HG.share_of(h)], [0.5, 0.5])
+        self.assertEqual(HG.codes(h), ["110020", "000961"])
+
+    def test_explicit_share_is_normalized(self):
+        h = {"on": True, "funds": [_fund("110020", share=3.0), _fund("000961", share=1.0)]}
+        self.assertEqual([round(x, 3) for x in HG.share_of(h)], [0.75, 0.25])
+
+    def test_add_fund_dedupes_and_rebalances(self):
+        h = {"on": True, "funds": [_fund("110020")]}
+        h = HG.add_fund(h, "110020", unit="份额")            # 重复加不生效
+        self.assertEqual(HG.codes(h), ["110020"])
+        h = HG.add_fund(h, "000961", unit="份额")            # 第二只 → 等权
+        self.assertEqual(HG.codes(h), ["110020", "000961"])
+        self.assertEqual([round(x, 3) for x in HG.share_of(h)], [0.5, 0.5])
+
+    def test_remove_last_fund_makes_slot_inactive(self):
+        h = make_holdings()
+        h["wti"] = HG.remove_fund(h["wti"], "501018")
+        self.assertEqual(HG.funds(h["wti"]), [])
+        self.assertNotIn("wti", HG.active(h))
+        self.assertIsNone(HG.slot_of("501018", h))
+
+    def test_remove_one_keeps_other_shares(self):
+        h = {"on": True, "funds": [_fund("110020", share=0.6), _fund("000961", share=0.4)]}
+        h = HG.remove_fund(h, "000961")
+        self.assertEqual(HG.codes(h), ["110020"])
+        self.assertEqual([round(x, 3) for x in HG.share_of(h)], [1.0])
+
+    def test_all_codes_and_fund_meta(self):
+        h = make_holdings()
+        h["hs300"] = {"on": True, "funds": [_fund("110020", name="易方达沪深300"),
+                                            _fund("000961", name="天弘沪深300")]}
+        self.assertIn("000961", HG.all_codes(h))
+        s, f = HG.fund_meta(h, "000961")
+        self.assertEqual((s, f["name"]), ("hs300", "天弘沪深300"))
+        self.assertEqual(HG.fund_meta(h, "999999"), (None, {}))
+
+    def test_legacy_single_fund_structure_still_readable(self):
+        """老的 {"code": ...} 配置必须还能读，否则升级一次配置全丢。"""
+        old = {"hs300": {"code": "110020", "name": "沪深300联接", "unit": "份额",
+                         "lot": 1, "on": True}}
+        self.assertEqual(HG.codes(old["hs300"]), ["110020"])
+        self.assertEqual(HG.active(old), ["hs300"])
+        self.assertEqual(HG.slot_of("110020", old), "hs300")
+        norm = HG._norm_slot(old["hs300"])
+        self.assertEqual(norm["funds"][0]["code"], "110020")
+        self.assertEqual(norm["funds"][0]["share"], 1.0)
+
+    def test_load_migrates_and_save_roundtrips(self):
+        import tempfile
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as d:
+            fp = Path(d) / "holdings.json"
+            fp.write_text(json.dumps({"holdings": {"hs300": {"code": "110020", "unit": "份额"}},
+                                      "updated": ""}, ensure_ascii=False), encoding="utf-8")
+            with patch.object(HG, "HOLDINGS_FILE", fp):
+                loaded = HG.load()
+                self.assertEqual(HG.codes(loaded["holdings"]["hs300"]), ["110020"])
+                HG.save(loaded["holdings"])
+                again = HG.load()
+                self.assertEqual(HG.codes(again["holdings"]["hs300"]), ["110020"])
+                self.assertIn("funds", json.loads(fp.read_text(encoding="utf-8"))["holdings"]["hs300"])
+
+
 class OrderQuantity(unittest.TestCase):
     def test_exchange_traded_rounds_to_lot(self):
-        h = make_holdings()["hs300"]          # 场内，100 股一手
+        h = one("hs300")                              # 场内，100 股一手
         qty, amt = HG.order_quantity(h, 41519, 4.18)
         self.assertEqual(qty % 100, 0)
         self.assertAlmostEqual(amt, qty * 4.18)
 
     def test_off_exchange_buys_by_amount(self):
-        h = make_holdings({"hs300": "110020"})["hs300"]
+        h = one("hs300", make_holdings({"hs300": "110020"}))
         qty, amt = HG.order_quantity(h, 41519, 1.6987)
         self.assertAlmostEqual(amt, 41519.0)
         self.assertAlmostEqual(qty * 1.6987, amt, places=4)
 
     def test_off_exchange_respects_min_amount(self):
-        h = make_holdings({"hs300": "110020"})["hs300"]
+        h = one("hs300", make_holdings({"hs300": "110020"}))
         h["min_amount"] = 100.0
         qty, amt = HG.order_quantity(h, 20, 1.6987)
         self.assertEqual(amt, 100.0)
 
     def test_zero_nav_gives_no_order(self):
-        self.assertEqual(HG.order_quantity(make_holdings()["hs300"], 1000, 0), (0.0, 0.0))
+        self.assertEqual(HG.order_quantity(one("hs300"), 1000, 0), (0.0, 0.0))
 
     def test_is_otc_by_unit(self):
         self.assertTrue(HG.is_otc({"unit": "份额"}))
@@ -166,6 +251,26 @@ class Alerts(unittest.TestCase):
                          pos={"110020": 100.}, cost={"110020": 1.0},
                          slot_of_code=lambda c: HG.slot_of(c, self.h))
         self.assertTrue(any("浮亏" in x["text"] for x in out["体检"]))
+
+    def test_valuation_lists_every_fund_in_one_slot(self):
+        """一个位置挂两只 → 估值提醒要各出一条，不能只报第一只。"""
+        h = make_holdings()
+        h["hs300"] = {"on": True, "funds": [_fund("110020"), _fund("000961")]}
+        val = {"110020": {"score": 5}, "000961": {"score": 20}}
+        out = AL.compute({"hs300": 100.}, {"hs300": 1.0}, h, self.label, val)
+        self.assertEqual({x["code"] for x in out["估值"]}, {"110020", "000961"})
+
+    def test_unrealized_loss_uses_each_fund_nav(self):
+        """位置市值 ÷ 份额 在挂多只时会算错净值，必须按代码各自的净值判断浮亏。"""
+        h = make_holdings()
+        h["hs300"] = {"on": True, "funds": [_fund("110020"), _fund("000961")]}
+        out = AL.compute({"hs300": 200.}, {"hs300": 1.0}, h, self.label, {},
+                         pos={"110020": 100., "000961": 100.},
+                         cost={"110020": 1.0, "000961": 1.0},
+                         slot_of_code=lambda c: HG.slot_of(c, h),
+                         nav_by_code={"110020": 0.5, "000961": 1.5})
+        self.assertTrue(any("110020" in x["text"] and "浮亏" in x["text"] for x in out["体检"]))
+        self.assertFalse(any("000961" in x["text"] for x in out["体检"]))
 
 
 if __name__ == "__main__":

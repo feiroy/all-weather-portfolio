@@ -34,6 +34,14 @@ def bucket_of_score(score) -> tuple[str, str]:
     return "—", "无数据"
 
 
+def _slot_funds(h: dict) -> list[dict]:
+    """某位置挂的基金（兼容旧的单只 {"code": ...}；不 import holdings 以免循环依赖）。"""
+    raw = (h or {}).get("funds")
+    if isinstance(raw, list):
+        return [f for f in raw if isinstance(f, dict) and f.get("code")]
+    return [{"code": (h or {}).get("code", "")}] if (h or {}).get("code") else []
+
+
 def compute(
     mv: dict[str, float],            # 位置 → 当前市值
     target_w: dict[str, float],      # 位置 → 目标权重（已按启用位置归一化）
@@ -46,6 +54,7 @@ def compute(
     cost: dict[str, float] | None = None,    # 基金代码 → 成本单价
     bench: dict[str, pd.Series] | None = None,
     slot_of_code=None,                       # 代码 → 位置 的反查函数
+    nav_by_code: dict[str, float] | None = None,   # 基金代码 → 最新净值（位置挂多只时必需）
 ) -> dict:
     """算出三类提醒。返回 {"偏离": [...], "估值": [...], "体检": [...], "指标": {...}}。"""
     total = float(sum(mv.values())) + float(cash or 0)
@@ -71,22 +80,23 @@ def compute(
 
     # ---- 估值 ----
     for s, h in holdings.items():
-        code = h.get("code", "")
-        v = val_by_code.get(code)
-        if not v:
-            continue
-        score = v.get("score")
-        label, action = bucket_of_score(score)
-        cands = [p for p in (v.get("pe_pct"), v.get("pb_pct")) if p is not None]
-        pct = max(cands) if cands else None
-        level = "info"
-        if score is not None:
-            level = "urgent" if score >= 18 or score <= 6 else "warn"
-        out["估值"].append({
-            "slot": s, "code": code, "name": h.get("name") or v.get("name") or code,
-            "score": score, "label": label, "action": action, "pct": pct, "level": level,
-            "text": f"{h.get('name') or code}（{code}）估值评分 {score if score is not None else '—'}，{label}：{action}",
-        })
+        for f in _slot_funds(h):
+            code = f.get("code", "")
+            v = val_by_code.get(code)
+            if not v:
+                continue
+            score = v.get("score")
+            label, action = bucket_of_score(score)
+            cands = [p for p in (v.get("pe_pct"), v.get("pb_pct")) if p is not None]
+            pct = max(cands) if cands else None
+            level = "info"
+            if score is not None:
+                level = "urgent" if score >= 18 or score <= 6 else "warn"
+            out["估值"].append({
+                "slot": s, "code": code, "name": f.get("name") or v.get("name") or code,
+                "score": score, "label": label, "action": action, "pct": pct, "level": level,
+                "text": f"{f.get('name') or code}（{code}）估值评分 {score if score is not None else '—'}，{label}：{action}",
+            })
     out["估值"].sort(key=lambda x: -(x["score"] if x["score"] is not None else 99))
 
     # ---- 体检 ----
@@ -115,13 +125,19 @@ def compute(
         shares = float((pos or {}).get(code, 0) or 0)
         if shares <= 0 or not c or s is None:
             continue
-        cur_nav = mv.get(s, 0) / shares if shares else 0
-        if cur_nav <= 0:
+        # 最新净值优先用调用方给的（一个位置挂多只时，位置市值 ÷ 份额会算错）
+        cur_nav = (nav_by_code or {}).get(code)
+        if not cur_nav:
+            fs = _slot_funds(holdings.get(s, {}))
+            cur_nav = mv.get(s, 0) / shares if (shares and len(fs) <= 1) else 0
+        if not cur_nav or cur_nav <= 0:
             continue
         pl = cur_nav / float(c) - 1
         out["指标"].setdefault("浮盈亏", {})[code] = pl
         if pl <= LOSS_WARN:
-            add("warn", f"{slot_label.get(s, s)}（{holdings.get(s, {}).get('code', '')}）"
+            _fname = next((f.get("name") or "" for f in _slot_funds(holdings.get(s, {}))
+                           if f.get("code") == code), "")
+            add("warn", f"{slot_label.get(s, s)}（{code} {_fname}）"
                         f"浮亏 {pl*100:.1f}%，超过 {abs(LOSS_WARN)*100:.0f}% 提醒线",
                 "单只浮亏不等于该卖，先看是整体下跌还是这只基金本身的问题")
     if bench:

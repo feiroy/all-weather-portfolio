@@ -1321,30 +1321,31 @@ holdings = _hg_state["holdings"]
 HG_SLOT_LABEL = HG.SLOT_LABEL
 
 
-# 缓存版本号：净值口径或持仓配置结构变了就 +1，避免拿到旧结构的缓存
-_NAV_CACHE_V = 2
-
-
 @st.cache_data(ttl=600, show_spinner=False)
-def _nav_of_code(code: str, _v: int = _NAV_CACHE_V) -> pd.Series:
+def _nav_series_cached(code: str) -> pd.Series:
+    """兜底取净值（配置里已经没有、但账上还留着份额的旧代码）。"""
+    return HG.nav_series(code)
+
+
+def _nav_of_code(code: str) -> pd.Series:
     """按**基金代码**取净值序列。
 
     持仓换过基金时，账上可能还留着旧代码的份额（比如把沪深300 从 510300 换成 110020，
     之前买的 510300 还在）。这时候必须用旧代码自己的净值估值，不能拿新基金的净值去乘。
+
+    面板 `_hg_panel` 的列就是基金代码（一个位置可以挂多只），命中就直接返回，
+    没命中（配置里已删掉的旧代码）才走联网/缓存兜底。
     """
-    for s in HG.SLOTS:
-        if holdings.get(s, {}).get("code") == code:
-            col = _hg_panel[s].dropna() if s in _hg_panel.columns else pd.Series(dtype=float)
+    if code in _hg_panel.columns:
+        col = _hg_panel[code].dropna()
+        if len(col):
             return col
-    return HG.nav_series(code)
+    return _nav_series_cached(code)
 
 
 def _hg_nav_on(slot, day, code=None):
-    """某个位置（或某只代码）在 day 当天的净值（day 非交易日时取前一个交易日）。"""
-    if code:
-        col = _nav_of_code(code)
-    else:
-        col = _hg_panel[slot].dropna() if slot in _hg_panel.columns else pd.Series(dtype=float)
+    """某只代码在 day 当天的净值（day 非交易日时取前一个交易日）。"""
+    col = _nav_of_code(code) if code else pd.Series(dtype=float)
     if not len(col):
         return None
     sub = col.loc[:pd.Timestamp(day)]
@@ -1379,6 +1380,18 @@ def _replay_holdings(trades, capital, created):
     pos: dict[str, float] = {}
     cost: dict[str, float] = {}
     rows, last_nav = [], 1.0
+    _navmap: dict[str, pd.Series] = {}
+
+    def _nav_at(code: str, day):
+        """重放里被调用上万次，每个代码只取一次净值序列（别在循环里反复 dropna）。"""
+        if code not in _navmap:
+            _navmap[code] = _nav_of_code(code)
+        col = _navmap[code]
+        if not len(col):
+            return None
+        sub = col.loc[:pd.Timestamp(day)]
+        return float(sub.iloc[-1]) if len(sub) else None
+
     for d in idx:
         for t in buckets.get(d, []):
             code = str(t.get("code", "") or "")
@@ -1388,14 +1401,14 @@ def _replay_holdings(trades, capital, created):
             side = t.get("side")
             if side == "买入" and code and sh > 0:
                 if px <= 0:
-                    px = _hg_nav_on(t.get("slot"), d, code) or 0
+                    px = _nav_at(code, d) or 0
                 cash -= sh * px + fee
                 prev = pos.get(code, 0.0)
                 cost[code] = ((prev * cost.get(code, 0.0) + sh * px + fee) / (prev + sh)) if (prev + sh) > 0 else px
                 pos[code] = prev + sh
             elif side == "卖出" and code and sh > 0:
                 if px <= 0:
-                    px = _hg_nav_on(t.get("slot"), d, code) or 0
+                    px = _nav_at(code, d) or 0
                 cash += sh * px - fee
                 pos[code] = pos.get(code, 0.0) - sh
                 if pos[code] <= 1e-9:
@@ -1411,7 +1424,7 @@ def _replay_holdings(trades, capital, created):
                 cash -= sh
         mv = 0.0
         for code, sh in pos.items():
-            v = _hg_nav_on(None, d, code)
+            v = _nav_at(code, d)
             if v:
                 mv += sh * v
         eq = cash + mv
@@ -1443,7 +1456,8 @@ def _migrate_trades(a: dict) -> bool:
         if not key:
             continue
         t["slot"] = key
-        t["code"] = holdings.get(key, {}).get("code") or ETF_META.get(key, {}).get("code", "")
+        _first = (HG.codes(holdings.get(key, {})) or [None])[0]
+        t["code"] = _first or ETF_META.get(key, {}).get("code", "")
         t["nav"] = float(t.get("price", 0) or 0)
         changed = bool(t["code"])
     if changed:
@@ -1469,22 +1483,28 @@ _hg_last = _hg_panel.index[-1] if len(_hg_panel) else prices.index[-1]
 
 
 def _hg_mv_by_slot():
-    """位置 → 当前市值（按我持仓基金的净值算）。"""
+    """位置 → 当前市值（按该位置下**每只**持仓基金的净值分别估值后相加）。"""
     out = {}
     for s in HG.active(holdings):
-        code = holdings[s]["code"]
-        sh = float(_acct_pos.get(code, 0) or 0)
-        if sh > 0 and s in _hg_panel.columns:
-            v = _hg_panel[s].dropna()
-            out[s] = sh * float(v.iloc[-1]) if len(v) else 0.0
+        v = 0.0
+        for code in HG.codes(holdings[s]):
+            sh = float(_acct_pos.get(code, 0) or 0)
+            if sh <= 0 or code not in _hg_panel.columns:
+                continue
+            col = _hg_panel[code].dropna()
+            if len(col):
+                v += sh * float(col.iloc[-1])
+        if v > 0:
+            out[s] = v
     return out
 
 
 _hg_mv = _hg_mv_by_slot()
+_hg_configured_codes = set(HG.all_codes(holdings))
 _hg_other_mv = {
     c: sh * float(_hg_nav_on(None, _hg_panel.index[-1], c) or 0) if len(_hg_panel) else 0.0
     for c, sh in _acct_pos.items()
-    if sh > 0 and c not in {holdings.get(s, {}).get("code") for s in HG.SLOTS}
+    if sh > 0 and c not in _hg_configured_codes
 }
 
 # ============================================================
@@ -1742,26 +1762,24 @@ _HG_PRESET = [  # 场外（支付宝可买）同类基金参考，只是建议�
 
 
 def _hg_apply(code_map: dict[str, tuple[str, str]]) -> dict:
-    """把 (slot → (code, name)) 写进持仓配置。
+    """把 (slot → (code, name)) 写成该位置**唯一**的一只基金（"全部填入参考代码"用）。
 
     换基金时同步判断买卖单位：场内代码（5xxxxx 沪市 ETF/LOF、1xxxxx 深市、
     0xxxxx 深市股票型）按股，其余（场外基金，如 110020）按份额申购。
     """
-    new = json.loads(json.dumps(holdings))
+    new = {s: HG._norm_slot(holdings.get(s)) for s in HG.SLOTS}
     for s, (code, name) in code_map.items():
-        old = new.get(s, {})
-        if s not in new:
-            new[s] = {"code": code, "name": name, "unit": "份额", "lot": 1, "on": True}
-        else:
-            new[s]["code"] = code
-            new[s]["name"] = name or (FL.fund_name(code) or code)
-        if HG.default_unit(code) == "股":              # 场内：按股，100 股一手
-            new[s]["unit"] = "股"
-            new[s]["lot"] = int(old.get("lot") or 100)
-        else:                                          # 场外：按金额申购
-            new[s]["unit"] = "份额"
-            new[s]["lot"] = 1
-            new[s].setdefault("min_amount", 1.0)
+        _slot = new.get(s) or HG._norm_slot({})
+        _prev = next((f for f in HG.funds(_slot) if f["code"] == code), {})
+        _unit = HG.default_unit(code)                  # 场内「股」/ 场外「份额」
+        new[s] = {"on": _slot.get("on", True), "funds": [HG._fund({
+            "code": code,
+            "name": name or (FL.fund_name(code) or code),
+            "unit": _unit,
+            "lot": int(_prev.get("lot") or (100 if _unit == "股" else 1)),
+            "min_amount": float(_prev.get("min_amount") or 1.0),
+            "share": 1.0,
+        })]}
     HG.save(new)
     return new
 
@@ -1782,9 +1800,12 @@ with tab3:
         _devs[_s] = _w_now - float(_hg_w.get(_s, 0) or 0)
     _worst = max(_devs, key=lambda k: abs(_devs[k])) if _devs else None
     _d1, _d2, _d3, _d4 = st.columns(4)
+    _n_funds_cfg = len(HG.all_codes(holdings))
+    _n_funds_held = sum(1 for _c, _sh in _acct_pos.items()
+                        if float(_sh or 0) > 0 and _c in _hg_configured_codes)
     _d1.metric("总资产", f"¥{_tot:,.0f}" if _tot else "—")
     _d2.metric("现金", f"¥{float(_acct_cash or 0):,.0f}")
-    _d3.metric("持仓只数", f"{sum(1 for v in _hg_mv.values() if v > 0)} / {len(HG.active(holdings))}")
+    _d3.metric("持仓只数", f"{_n_funds_held} / {_n_funds_cfg}")
     _d4.metric("最大偏离",
                (f"{_devs[_worst]*100:+.1f}pp" if _worst and abs(_devs[_worst]) >= 0.03 else "都在 3pp 内"),
                delta=(HG.SLOT_LABEL[_worst] if _worst and abs(_devs[_worst]) >= 0.03 else None),
@@ -1796,70 +1817,104 @@ with tab3:
                    + (f" · 配置更新于 {_hg_state.get('updated', '—')}" if _hg_state.get("updated") else ""))
 
     st.divider()
-    st.markdown("**换基金** — 每个位置一只；既能搜全市场基金，也能直接选项目那 8 个回测资产")
+    st.markdown("**换基金 / 加基金** — 一个位置可以挂多只同类基金，也可以一只都不挂")
+    st.caption("同位置挂多只时按下面表里的「占比」分该位置的目标金额（留空或全 0 就是等权）；"
+               "一只都不挂 = 这个位置暂时不投，它的权重会按同桶比例让给别的位置。")
+    # 加基金后要让搜索框回到空态：key 里带版本号，换号即重建组件（直接 pop 已渲染的 widget key 会报错）
+    _add_ver = int(st.session_state.get("hg_add_ver", 0))
     _slot_cols = st.columns(2, gap="medium")
-    _pending = {}
+    _pending_add, _pending_on = {}, {}
     for _i, _s in enumerate(HG.SLOTS):
         _h = holdings.get(_s, {})
-        _cur_code = _h.get("code", "")
-        with _slot_cols[_i % 2]:
-            st.caption(HG.SLOT_LABEL[_s])
+        _fs_ = HG.funds(_h)
+        with _slot_cols[_i % 2], st.container(border=True):
+            _c1, _c2 = st.columns([2.4, 1], vertical_alignment="center")
+            _c1.markdown(f"**{HG.SLOT_LABEL[_s]}**")
+            with _c2:
+                _on_now = bool(_h.get("on", True))
+                _on_new = st.toggle("参与", value=_on_now, key=f"hg_on_{_s}",
+                                    help="关掉后这个位置不参与建仓/调仓/提醒，权重让给同桶别的位置")
+                if _on_new != _on_now:
+                    _pending_on[_s] = _on_new
+            if _fs_:
+                _sh_ = HG.share_of(_h)
+                st.caption(" · ".join(f'{f["code"]} {f.get("name") or ""} {x*100:.0f}%'
+                                      for f, x in zip(_fs_, _sh_)))
+            else:
+                st.caption("**未挂基金** — 这个位置不持有")
             _picked = FS.fund_search(
-                f"hg_{_s}", mode="single",
-                placeholder=f"搜索基金，当前 {_cur_code or '未设置'}",
-                default=_cur_code or None,
+                f"hg_add_{_s}_{_add_ver}", mode="single", default=None,
+                placeholder="搜索基金，加到这一位置（可多次加不同基金）",
             )
-        if _picked and _picked != _cur_code:
-            _pending[_s] = _picked
-    if _pending:
-        _hg_apply({s: (c, FL.fund_name(c) or c) for s, c in _pending.items()})
+            if _picked and str(_picked) not in HG.codes(_h):
+                _pending_add[_s] = str(_picked)
+
+    if _pending_add or _pending_on:
+        _new = {s: HG._norm_slot(holdings.get(s)) for s in HG.SLOTS}
+        for _s, _c in _pending_add.items():
+            if _c:
+                _new[_s] = HG.add_fund(_new[_s], _c, FL.fund_name(_c) or _c)
+        for _s, _onv in _pending_on.items():
+            _new[_s]["on"] = _onv
+        HG.save(_new)
+        st.session_state["hg_add_ver"] = _add_ver + 1
         st.rerun()
 
-    # 表格：可编辑单位/每手/最低金额/启用
+    # ---- 一只基金一行：单位/每手/最低金额/占比可改，「移除」勾上保存即删 ----
     _rows = []
     for _s in HG.SLOTS:
         _h = holdings.get(_s, {})
-        _code = _h.get("code", "")
-        _nav = _hg_panel[_s].dropna() if _s in _hg_panel.columns else pd.Series(dtype=float)
-        _rows.append({
-            "位置": HG.SLOT_LABEL[_s],
-            "代码": _code,
-            "基金": _h.get("name") or (FL.fund_name(_code) if _code else "") or "—",
-            "单位": _h.get("unit", "股"),
-            "每手": int(_h.get("lot") or (100 if _h.get("unit", "股") == "股" else 1)),
-            "最低金额": float(_h.get("min_amount") or 1.0),
-            "最新净值": round(float(_nav.iloc[-1]), 4) if len(_nav) else None,
-            "启用": bool(_h.get("on", True)),
-            "_slot": _s,
-        })
-    _edited = st.data_editor(
-        pd.DataFrame(_rows),
-        column_config={
-            "位置": st.column_config.TextColumn("位置", disabled=True),
-            "代码": st.column_config.TextColumn("代码", disabled=True,
-                                               help="用上方搜索框换基金"),
-            "基金": st.column_config.TextColumn("我的基金", disabled=True),
-            "单位": st.column_config.SelectboxColumn("买卖单位", options=["股", "份额"],
-                                                    help="场内按股（100 股一手），场外按份额（按金额申购）"),
-            "每手": st.column_config.NumberColumn("每手/最小", min_value=1, step=1),
-            "最低金额": st.column_config.NumberColumn("最低申购金额(元)", min_value=1.0, step=1.0),
-            "最新净值": st.column_config.NumberColumn(f"净值({_cn_date(_hg_last)})", format="%.4f",
+        for _f, _x in zip(HG.funds(_h), HG.share_of(_h)):
+            _code = _f["code"]
+            _col = _hg_panel[_code].dropna() if _code in _hg_panel.columns else pd.Series(dtype=float)
+            _rows.append({
+                "位置": HG.SLOT_LABEL[_s],
+                "代码": _code,
+                "我的基金": _f.get("name") or FL.fund_name(_code) or "—",
+                "买卖单位": _f.get("unit", "股"),
+                "每手": int(_f.get("lot") or 1),
+                "最低申购金额": float(_f.get("min_amount") or 1.0),
+                "占比%": round(_x * 100, 2),
+                "净值": round(float(_col.iloc[-1]), 4) if len(_col) else None,
+                "移除": False,
+                "_slot": _s,
+            })
+
+    if not _rows:
+        st.info("还没有挂任何基金 —— 用上面的搜索框加一只，或点下面的「恢复项目默认代码」。")
+        _edited = None
+    else:
+        _edited = st.data_editor(
+            pd.DataFrame(_rows),
+            column_config={
+                "位置": st.column_config.TextColumn("位置", disabled=True),
+                "代码": st.column_config.TextColumn("代码", disabled=True,
+                                                   help="用上方搜索框加，勾「移除」再保存即删"),
+                "我的基金": st.column_config.TextColumn("我的基金", disabled=True),
+                "买卖单位": st.column_config.SelectboxColumn("买卖单位", options=["股", "份额"],
+                                                         help="场内按股（100 股一手），场外按份额（按金额申购）"),
+                "每手": st.column_config.NumberColumn("每手/最小", min_value=1, step=1),
+                "最低申购金额": st.column_config.NumberColumn("最低申购(元)", min_value=1.0, step=1.0),
+                "占比%": st.column_config.NumberColumn("占该位置", min_value=0.0, max_value=100.0,
+                                                      step=5.0, format="%.1f%%",
+                                                      help="该位置内这只基金分到多少比例；同位置全部为 0 时按等权"),
+                "净值": st.column_config.NumberColumn(f"净值({_cn_date(_hg_last)})", format="%.4f",
                                                      disabled=True),
-            "启用": st.column_config.CheckboxColumn("启用", help="关掉的位置不参与建仓/调仓/提醒"),
-            "_slot": None,
-        },
-        hide_index=True, width="stretch", key="hg_editor",
-    )
-    _miss = [f'{holdings.get(s, {}).get("code", "")} {holdings.get(s, {}).get("name", "")}'
-             for s in HG.active(holdings)
-             if not len(_hg_panel.get(s, pd.Series(dtype=float)).dropna())]
+                "移除": st.column_config.CheckboxColumn("移除", help="勾上→保存，这只基金就从该位置删掉"),
+                "_slot": None,
+            },
+            hide_index=True, width="stretch", key="hg_editor",
+        )
+
+    _miss = [f'{_c} {FL.fund_name(_c) or ""}'.strip()
+             for _c in HG.all_codes(holdings)
+             if _c not in _hg_panel.columns or not len(_hg_panel[_c].dropna())]
     if _miss:
         st.warning("这些基金还没有净值数据，拉取后建仓/调仓/提醒才能算：" + "；".join(_miss))
         if st.button("拉取缺的净值", key="hg_fetch_missing", type="primary"):
             st.toast("正在拉取净值…", icon=":material/sync:", duration="long")
-            for _s in HG.active(holdings):
-                _c = holdings.get(_s, {}).get("code", "")
-                if _c and not len(_hg_panel.get(_s, pd.Series(dtype=float)).dropna()):
+            for _c in HG.all_codes(holdings):
+                if _c not in _hg_panel.columns or not len(_hg_panel[_c].dropna()):
                     try:
                         FL.ensure_fresh(_c)
                     except Exception:  # noqa: BLE001
@@ -1868,16 +1923,24 @@ with tab3:
             st.rerun()
 
     with st.container(horizontal=True, horizontal_alignment="right", gap="small"):
-        if st.button("保存修改", type="primary", key="hg_save"):
-            _new = json.loads(json.dumps(holdings))
+        if _edited is not None and st.button("保存修改", type="primary", key="hg_save"):
+            _new = {s: HG._norm_slot(holdings.get(s)) for s in HG.SLOTS}
+            _drop = []
             for r in _edited.to_dict("records"):
-                s = r.get("_slot")
-                if not s:
+                _s, _c = r.get("_slot"), r.get("代码")
+                if not _s or not _c:
                     continue
-                _new[s]["unit"] = r.get("单位") or "股"
-                _new[s]["lot"] = int(r.get("每手") or 1)
-                _new[s]["min_amount"] = float(r.get("最低金额") or 1.0)
-                _new[s]["on"] = bool(r.get("启用"))
+                if r.get("移除"):
+                    _drop.append((_s, _c))
+                    continue
+                for _f in _new[_s]["funds"]:
+                    if _f["code"] == _c:
+                        _f["unit"] = r.get("买卖单位") or "股"
+                        _f["lot"] = max(1, int(r.get("每手") or 1))
+                        _f["min_amount"] = max(1.0, float(r.get("最低申购金额") or 1.0))
+                        _f["share"] = max(0.0, float(r.get("占比%") or 0.0)) / 100
+            for _s, _c in _drop:
+                _new[_s] = HG.remove_fund(_new[_s], _c)
             HG.save(_new)
             st.toast("持仓设置已保存", icon=":material/check_circle:")
             st.rerun()
@@ -1888,7 +1951,8 @@ with tab3:
 
     with st.expander("换成场外（支付宝可买）同类基金 — 一键填入参考代码"):
         st.caption("下面是同类基金的参考代码，跟踪指数和费率不一定和原版一致，填入后请自己核对；"
-                   "收益差异会在「提醒」页用「项目默认基金」那列体现出来。")
+                   "收益差异会在「提醒」页用「项目默认基金」那列体现出来。"
+                   "填入会把该位置**替换**成这一只（原来挂的多只会被清掉）。")
         _preset_rows = [[HG.SLOT_LABEL[s], ETF_META.get(s, {}).get("code", ""),
                          ETF_META.get(s, {}).get("name", ""), c, n] for s, c, n in _HG_PRESET]
         _render_table([("位置", "left"), ("原版代码", "left"), ("原版基金", "left"),
@@ -1930,65 +1994,77 @@ with tab4:
             st.caption("按最新净值估算：场外按金额申购（受最低金额限制），场内按 100 股取整。"
                        "生成成交后这笔钱就记成各基金的买入份额。")
         _rb_asset, _rb_cash, _rb_mv = _rb_amt, 0.0, 0.0
-        _rb_shares = {s: 0.0 for s in HG.SLOTS}
+        _rb_shares = {}
     else:
-        _rb_shares = {s: float(_acct_pos.get(holdings.get(s, {}).get("code", ""), 0) or 0)
-                      for s in HG.SLOTS}
+        _rb_shares = {c: float(_acct_pos.get(c, 0) or 0) for c in HG.all_codes(holdings)}
         if _rb_asset <= 0:
             st.info("账户里还没有钱和持仓：先在「实操账户」创建账户，或切到「从零建仓」。")
 
     _rb_rows, _rb_orders = [], []
     _sum_cur = _sum_buy = _sum_sell = 0.0
     for _s in HG.active(holdings):
-        _h = holdings[_s]
-        _code = _h.get("code", "")
-        _nav = _hg_panel[_s].dropna() if _s in _hg_panel.columns else pd.Series(dtype=float)
-        _px = float(_nav.iloc[-1]) if len(_nav) else 0.0
-        _sh = float(_rb_shares.get(_s, 0) or 0)
-        _cur = _sh * _px
-        _tgt_w = float(_hg_w.get(_s, 0) or 0)
-        _diff = _tgt_w * _rb_asset - _cur
-        _cur_w = _cur / _rb_asset if _rb_asset else 0.0
-        _dev = _cur_w - _tgt_w
-        _otc = HG.is_otc(_h)
-        _sum_cur += _cur
-        _qty = 0.0
-        if _px <= 0:
-            _act = '<span class="muted">缺净值，先更新数据</span>'
-        elif abs(_diff) < max(1.0, _rb_asset * 0.005):      # 偏离 < 0.5% 不动，省手续费
-            _act = '<span class="muted">不变</span>'
-        else:
-            _qty, _amt = HG.order_quantity(_h, abs(_diff), _px)
-            if _qty <= 0:
-                _act = '<span class="muted">不足一手</span>'
-            elif _diff > 0:
-                _act = (f'<span class="up">买入 ¥{_amt:,.0f}</span>' if _otc
-                        else f'<span class="up">买入 {_qty:,.0f} 股</span>')
-                _sum_buy += _amt
+        _slot_tgt_w = float(_hg_w.get(_s, 0) or 0)
+        _slot_tgt = _slot_tgt_w * _rb_asset
+        _items = []
+        _slot_cur = 0.0
+        for _f, _x in zip(HG.funds(holdings[_s]), HG.share_of(holdings[_s])):
+            _code = _f["code"]
+            _col = _hg_panel[_code].dropna() if _code in _hg_panel.columns else pd.Series(dtype=float)
+            _px = float(_col.iloc[-1]) if len(_col) else 0.0
+            _sh = float(_rb_shares.get(_code, 0) or 0)
+            _cur = _sh * _px
+            _slot_cur += _cur
+            _items.append([_f, _x, _px, _sh, _cur])
+        _sum_cur += _slot_cur
+        _cur_w = _slot_cur / _rb_asset if _rb_asset else 0.0
+        _dev = _cur_w - _slot_tgt_w
+        # 位置该不该动，按位置整体判断（和原来同一口径）；要动才按占比拆到这一位置的各只基金
+        _move_slot = abs(_slot_tgt - _slot_cur) >= max(1.0, _rb_asset * 0.005)
+        for _i, (_f, _x, _px, _sh, _cur) in enumerate(_items):
+            _code = _f["code"]
+            _otc = HG.is_otc(_f)
+            _diff = (_slot_tgt * _x - _cur) if _move_slot else 0.0
+            _qty = 0.0
+            if _px <= 0:
+                _act = '<span class="muted">缺净值，先更新数据</span>'
+            elif not _move_slot or abs(_diff) < 1.0:
+                _act = '<span class="muted">不变</span>'
             else:
-                _act = (f'<span class="down">卖出 ¥{_amt:,.0f}</span>' if _otc
-                        else f'<span class="down">卖出 {_qty:,.0f} 股</span>')
-                _sum_sell += _amt
-        if _qty > 0 and _px > 0:
-            _rb_orders.append({"date": _hg_last.strftime("%Y-%m-%d"), "slot": _s, "code": _code,
-                               "side": "买入" if _diff > 0 else "卖出",
-                               "shares": round(float(_qty), 4), "nav": round(_px, 4), "fee": 0.0})
-        _cost = float(_acct_cost.get(_code, 0) or 0)
-        _pl = (_px / _cost - 1) if (_cost > 0 and _px > 0) else None
-        _rb_rows.append([
-            HG.SLOT_LABEL[_s],
-            f'{_h.get("name") or ""}<br><span class="muted">{_code} · {"场外" if _otc else "场内"}</span>',
-            f"{_sh:,.2f}" if _otc else f"{_sh:,.0f}",
-            (f'{_px:.4f}<br><span class="muted">成本 {_cost:.4f}</span>' if (_px > 0 and _cost > 0)
-             else (f"{_px:.4f}" if _px else "—")),
-            f"{_cur:,.0f}",
-            "—" if _pl is None else f'<span class="{"up" if _pl >= 0 else "down"}">{_pl*100:+.2f}%</span>',
-            f"{_cur_w*100:.1f}%",
-            f"{_tgt_w*100:.1f}%",
-            ('<span class="muted">—</span>' if abs(_dev) < 0.03
-             else f'<span class="{"up" if _dev > 0 else "down"}">{_dev*100:+.1f}pp</span>'),
-            _act,
-        ])
+                _qty, _amt = HG.order_quantity(_f, abs(_diff), _px)
+                if _qty <= 0:
+                    _act = '<span class="muted">不足一手</span>'
+                elif _diff > 0:
+                    _act = (f'<span class="up">买入 ¥{_amt:,.0f}</span>' if _otc
+                            else f'<span class="up">买入 {_qty:,.0f} 股</span>')
+                    _sum_buy += _amt
+                else:
+                    _act = (f'<span class="down">卖出 ¥{_amt:,.0f}</span>' if _otc
+                            else f'<span class="down">卖出 {_qty:,.0f} 股</span>')
+                    _sum_sell += _amt
+            if _qty > 0 and _px > 0:
+                _rb_orders.append({"date": _hg_last.strftime("%Y-%m-%d"), "slot": _s, "code": _code,
+                                   "side": "买入" if _diff > 0 else "卖出",
+                                   "shares": round(float(_qty), 4), "nav": round(_px, 4), "fee": 0.0})
+            _cost = float(_acct_cost.get(_code, 0) or 0)
+            _pl = (_px / _cost - 1) if (_cost > 0 and _px > 0) else None
+            # 位置级的当前权重/目标权重/偏离只在这一位置的第一行显示，同位置其余行留空避免重复
+            _multi = len(_items) > 1
+            _rb_rows.append([
+                (HG.SLOT_LABEL[_s] if _i == 0 else '<span class="muted">↳</span>'),
+                f'{_f.get("name") or _code}<br><span class="muted">{_code} · {"场外" if _otc else "场内"}'
+                + (f' · 位置内 {_x*100:.0f}%' if _multi else "") + '</span>',
+                f"{_sh:,.2f}" if _otc else f"{_sh:,.0f}",
+                (f'{_px:.4f}<br><span class="muted">成本 {_cost:.4f}</span>' if (_px > 0 and _cost > 0)
+                 else (f"{_px:.4f}" if _px else "—")),
+                f"{_cur:,.0f}",
+                "—" if _pl is None else f'<span class="{"up" if _pl >= 0 else "down"}">{_pl*100:+.2f}%</span>',
+                (f"{_cur_w*100:.1f}%" if _i == 0 else ""),
+                (f"{_slot_tgt_w*100:.1f}%" if _i == 0 else ""),
+                (('<span class="muted">—</span>' if abs(_dev) < 0.03
+                  else f'<span class="{"up" if _dev > 0 else "down"}">{_dev*100:+.1f}pp</span>')
+                 if _i == 0 else ""),
+                _act,
+            ])
     # 换基金前买的、配置里已经没有的代码：不在目标权重里，只做估值提醒
     for _oc, _ov in (_hg_other_mv or {}).items():
         if _ov <= 0:
@@ -2000,6 +2076,13 @@ with tab4:
             '<span class="muted">—</span>',
             '<span class="muted">不在配置里，自行处理</span>',
         ])
+
+    _empty_slots = [s for s in HG.SLOTS
+                    if holdings.get(s, {}).get("on", True) and not HG.funds(holdings.get(s, {}))]
+    if _empty_slots:
+        st.caption("这些位置没有挂基金（不持有，目标权重已按同桶比例让给其它位置）："
+                   + "、".join(HG.SLOT_LABEL[s] for s in _empty_slots)
+                   + "。要买就在「我的持仓」里给它加基金。")
 
     if not _rb_rows:
         st.warning("没有可算的位置：请先到「我的持仓」设置基金，或点右上角「更新数据」拉取净值。")
@@ -2053,9 +2136,16 @@ def _fmt_money(v):
 
 
 def _hg_slot_options():
-    """位置下拉选项：value=(key, label)，显示「位置 · 代码 名称」。"""
-    return [(s, f'{HG.SLOT_LABEL[s]} · {holdings.get(s, {}).get("code", "")} '
-                 f'{holdings.get(s, {}).get("name", "")}'.strip()) for s in HG.SLOTS]
+    """记账下拉选项：每**只基金**一项，value=(位置, 代码)，显示「位置 · 代码 名称」。
+
+    一个位置挂多只时这里就有多行 —— 成交必须记到具体那一只基金上。
+    """
+    out = []
+    for s in HG.SLOTS:
+        for f in HG.funds(holdings.get(s, {})):
+            out.append((s, f["code"],
+                        f'{HG.SLOT_LABEL[s]} · {f["code"]} {f.get("name") or ""}'.strip()))
+    return out
 
 
 with tab5:
@@ -2162,45 +2252,53 @@ with tab5:
         st.divider()
         st.markdown("**录入成交**")
         _slot_opts = _hg_slot_options()
-        with st.form("acct_trade", clear_on_submit=True):
-            r1 = st.columns([1.1, 0.9, 2.2], gap="small")
-            tr_date = r1[0].date_input("日期", value=pd.Timestamp(_hg_last).date(), format="YYYY/MM/DD")
-            tr_side = r1[1].selectbox("类型", ["买入", "卖出", "入金", "出金"])
-            tr_slot = r1[2].selectbox("基金（位置）", _slot_opts, format_func=lambda x: x[1])
-            _is_money = tr_side in ("入金", "出金")
-            _unit_otc = HG.is_otc(holdings.get(tr_slot[0], {}))
-            r2 = st.columns([1, 1, 1], gap="small")
-            tr_shares = r2[0].number_input(
-                "金额（元）" if _is_money else ("份额（场外）" if _unit_otc else "股数（场内）"),
-                min_value=0.0, step=100.0, format="%.2f")
-            _nav_hint = _hg_nav_on(tr_slot[0], tr_date)
-            tr_nav = r2[1].number_input(
-                "成交净值（元/份）", min_value=0.0,
-                value=round(float(_nav_hint or 0), 4) if (not _is_money and _nav_hint) else 0.0,
-                step=0.0001, format="%.4f",
-                help="场外按当天收盘净值成交；留 0 会自动取该日净值。入金/出金不用填。")
-            tr_fee = r2[2].number_input("手续费（元）", min_value=0.0, step=1.0, format="%.2f")
-            if st.form_submit_button("记一笔", type="primary"):
-                _t = {"date": str(tr_date), "side": tr_side, "slot": tr_slot[0],
-                      "code": holdings.get(tr_slot[0], {}).get("code", ""),
-                      "shares": float(tr_shares), "nav": float(tr_nav), "fee": float(tr_fee)}
-                if _is_money and tr_shares <= 0:
-                    st.warning("金额要大于 0")
-                elif not _is_money and (tr_shares <= 0 or not _t["code"]):
-                    st.warning("数量要大于 0，且该位置要先在「我的持仓」设置基金代码")
-                else:
-                    acct.setdefault("trades", []).append(_t)
-                    save_acct(acct, ACCT_FILE)
-                    st.toast("已记录", icon=":material/check_circle:")
-                    st.rerun()
+        if not _slot_opts:
+            st.warning("还没有挂任何基金：先到「我的持仓」给位置加至少一只基金，才能记账。")
+        else:
+            _fund_map = {(s, f["code"]): f
+                         for s in HG.SLOTS for f in HG.funds(holdings.get(s, {}))}
+            with st.form("acct_trade", clear_on_submit=True):
+                r1 = st.columns([1.1, 0.9, 2.2], gap="small")
+                tr_date = r1[0].date_input("日期", value=pd.Timestamp(_hg_last).date(), format="YYYY/MM/DD")
+                tr_side = r1[1].selectbox("类型", ["买入", "卖出", "入金", "出金"])
+                tr_slot = r1[2].selectbox("基金", _slot_opts, format_func=lambda x: x[2])
+                _is_money = tr_side in ("入金", "出金")
+                _f_now = _fund_map.get((tr_slot[0], tr_slot[1]), {})
+                _unit_otc = HG.is_otc(_f_now) if _f_now else True
+                r2 = st.columns([1, 1, 1], gap="small")
+                tr_shares = r2[0].number_input(
+                    "金额（元）" if _is_money else ("份额（场外）" if _unit_otc else "股数（场内）"),
+                    min_value=0.0, step=100.0, format="%.2f")
+                _nav_hint = _hg_nav_on(None, tr_date, tr_slot[1])
+                tr_nav = r2[1].number_input(
+                    "成交净值（元/份）", min_value=0.0,
+                    value=round(float(_nav_hint or 0), 4) if (not _is_money and _nav_hint) else 0.0,
+                    step=0.0001, format="%.4f",
+                    help="场外按当天收盘净值成交；留 0 会自动取该日净值。入金/出金不用填。")
+                tr_fee = r2[2].number_input("手续费（元）", min_value=0.0, step=1.0, format="%.2f")
+                if st.form_submit_button("记一笔", type="primary"):
+                    _t = {"date": str(tr_date), "side": tr_side, "slot": tr_slot[0],
+                          "code": tr_slot[1],
+                          "shares": float(tr_shares), "nav": float(tr_nav), "fee": float(tr_fee)}
+                    if _is_money and tr_shares <= 0:
+                        st.warning("金额要大于 0")
+                    elif not _is_money and (tr_shares <= 0 or not _t["code"]):
+                        st.warning("数量要大于 0，且该基金要先在「我的持仓」里挂上")
+                    else:
+                        acct.setdefault("trades", []).append(_t)
+                        save_acct(acct, ACCT_FILE)
+                        st.toast("已记录", icon=":material/check_circle:")
+                        st.rerun()
 
         # ---- 成交流水 ----
         with st.expander(f"成交流水（{len(acct.get('trades', []))} 笔）", expanded=False):
             _tr_rows = []
             for i, t in enumerate(acct.get("trades", [])):
                 _sl = t.get("slot", "")
-                _nm = holdings.get(_sl, {}).get("name") or t.get("code", "")
-                _u = holdings.get(_sl, {}).get("unit", "份额")
+                _s_code, _f_meta = HG.fund_meta(holdings, t.get("code", ""))
+                _nm = (_f_meta.get("name") if _f_meta else "") or FL.fund_name(t.get("code", "")) \
+                    or t.get("code", "")
+                _u = (_f_meta.get("unit") if _f_meta else None) or "份额"
                 _qty = (f"¥{float(t.get('shares', 0)):,.0f}" if t.get("side") in ("入金", "出金")
                         else (f'{float(t.get("shares", 0)):,.2f} 份' if _u == "份额"
                               else f'{float(t.get("shares", 0)):,.0f} 股'))
@@ -3432,12 +3530,20 @@ with tab8:
         if _bs is not None and len(_bs) > 1:
             _bench_for_alert["策略理论"] = _bs
 
+    _nav_latest = {}
+    for _c in HG.all_codes(holdings):
+        if _c in _hg_panel.columns:
+            _col = _hg_panel[_c].dropna()
+            if len(_col):
+                _nav_latest[_c] = float(_col.iloc[-1])
+
     _al = AL.compute(
         mv=_hg_mv, target_w=_hg_w, holdings=holdings, slot_label=HG.SLOT_LABEL,
         val_by_code=_val_by_code, daily=_acct_daily if acct is not None else None,
         cash=float(_acct_cash or 0),         pos=_acct_pos if acct is not None else {},
         cost=_acct_cost if acct is not None else {}, bench=_bench_for_alert,
         slot_of_code=lambda c: HG.slot_of(c, holdings),
+        nav_by_code=_nav_latest,
     )
 
     _A, _B = st.columns([1.15, 1], gap="large")

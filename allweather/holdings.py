@@ -8,7 +8,14 @@
 建仓/调仓/记账/指标全都对不上。
 
 这里把「位置 → 基金」变成可编辑的配置，存 data/holdings.json：
-    {"holdings": {"hs300": {"code": "110020", "name": "...", "unit": "份额", ...}}, "updated": "..."}
+    {"holdings": {"hs300": {"on": true, "funds": [
+        {"code": "110020", "name": "...", "unit": "份额", "lot": 1,
+         "min_amount": 10, "share": 0.6},
+        {"code": "000961", "name": "...", "share": 0.4}]}}, "updated": "..."}
+
+一个位置可以挂**多只**同类基金（share = 该位置内资金占比，全为 0 时按等权），
+也可以一只都不挂（funds 为空 = 这个位置暂时不持有，权重让给同桶别的位置）。
+旧的单只写法 {"code": "...", "unit": "..."} 在 load/save 时自动迁移成 funds 单元素。
 
 口径说明（重要）
 ----------------
@@ -44,19 +51,122 @@ SLOT_LABEL = {
 # 桶名（不同策略下桶的粒度不同，统一成这 8 个位置级别的桶来比）
 BUCKET_LABEL = SLOT_LABEL
 
+# 单只基金的可配置字段（位置 dict 里 funds 的元素）
+_FUND_KEYS = ("code", "name", "unit", "lot", "min_amount", "share")
+
+
+def _fund(f: dict) -> dict:
+    """把一只基金补齐成完整字段（缺省：场内按股 100 一手、场外按份额 1 元起）。"""
+    code = str(f.get("code") or "").strip()
+    unit = str(f.get("unit") or "股")
+    return {
+        "code": code,
+        "name": str(f.get("name") or ""),
+        "unit": unit,
+        "lot": int(f.get("lot") or (100 if unit == "股" else 1)),
+        "min_amount": float(f.get("min_amount") or 1.0),
+        "share": float(f.get("share") or 0.0),
+    }
+
+
+def _norm_slot(h: dict | None) -> dict:
+    """位置配置规范化：统一成 {"on": bool, "funds": [...]}；旧的单只结构自动迁移。"""
+    h = h if isinstance(h, dict) else {}
+    raw = h.get("funds")
+    if not isinstance(raw, list):
+        raw = [{k: h[k] for k in _FUND_KEYS if h.get(k) is not None}] if h.get("code") else []
+    out = [_fund(f) for f in raw if isinstance(f, dict) and str(f.get("code") or "").strip()]
+    # 占比全为 0（新加的第二只、或手改过）→ 等权，避免整只基金分不到钱
+    if out and sum(f["share"] for f in out) <= 0:
+        for f in out:
+            f["share"] = round(1.0 / len(out), 6)
+    return {"on": bool(h.get("on", True)), "funds": out}
+
+
+def funds(h: dict | None) -> list[dict]:
+    """某位置挂的所有基金（兼容旧的单只 {"code": ...} 写法，保证老配置能读）。"""
+    if not isinstance(h, dict):
+        return []
+    raw = h.get("funds")
+    if isinstance(raw, list):
+        return [_fund(f) for f in raw if isinstance(f, dict) and str(f.get("code") or "").strip()]
+    if str(h.get("code") or "").strip():
+        return [_fund({k: h[k] for k in _FUND_KEYS if h.get(k) is not None})]
+    return []
+
+
+def codes(h: dict | None) -> list[str]:
+    """某位置挂的基金代码列表（可能 0 只、1 只、多只）。"""
+    return [f["code"] for f in funds(h)]
+
+
+def share_of(h: dict | None) -> list[float]:
+    """位置内各基金的资金占比，按顺序与 funds() 对齐，已归一化到 1。"""
+    fs = funds(h)
+    if not fs:
+        return []
+    raw = [max(0.0, float(f.get("share") or 0.0)) for f in fs]
+    total = sum(raw)
+    if total <= 0:
+        return [1.0 / len(fs)] * len(fs)
+    return [x / total for x in raw]
+
+
+def all_codes(holdings: dict) -> list[str]:
+    """配置里出现过的全部基金代码（去重、保序）。"""
+    out: list[str] = []
+    for s in SLOTS:
+        for c in codes(holdings.get(s, {})):
+            if c not in out:
+                out.append(c)
+    return out
+
+
+def fund_meta(holdings: dict, code: str) -> tuple[str | None, dict]:
+    """代码 → (位置, 该基金配置)；配置里没有时返回 (None, {})。"""
+    for s in SLOTS:
+        for f in funds(holdings.get(s, {})):
+            if f["code"] == code:
+                return s, f
+    return None, {}
+
+
+def add_fund(h: dict | None, code: str, name: str = "", unit: str | None = None) -> dict:
+    """往某个位置加一只基金（已存在则原样返回）；占比按等权重算。
+
+    unit 为空时按代码猜（场外份额 / 场内股），猜错了在「我的持仓」表里改。
+    """
+    slot = _norm_slot(h)
+    if any(f["code"] == code for f in slot["funds"]):
+        return slot
+    slot["funds"].append(_fund({"code": code, "name": name or code,
+                               "unit": unit or default_unit(code)}))
+    for f in slot["funds"]:
+        f["share"] = round(1.0 / len(slot["funds"]), 6)
+    return slot
+
+
+def remove_fund(h: dict | None, code: str) -> dict:
+    """从某个位置删掉一只基金；删空后该位置变成「不持有」，其余占比保持原样。"""
+    slot = _norm_slot(h)
+    slot["funds"] = [f for f in slot["funds"] if f["code"] != code]
+    if slot["funds"] and sum(f["share"] for f in slot["funds"]) <= 0:
+        for f in slot["funds"]:
+            f["share"] = round(1.0 / len(slot["funds"]), 6)
+    return slot
+
 
 def _default_holdings() -> dict:
     """默认持仓 = 项目原来的 8 个场内代码（与回测口径一致）。"""
     out = {}
     for s in SLOTS:
         meta = ETF_META.get(s, {})
-        out[s] = {
+        out[s] = {"on": True, "funds": [_fund({
             "code": meta.get("code", ""),
             "name": meta.get("name", s),
             "unit": "股",       # 场内按股，100 股/手
             "lot": 100,
-            "on": True,
-        }
+        })]}
     return out
 
 
@@ -66,7 +176,8 @@ def load() -> dict:
         try:
             data = json.loads(HOLDINGS_FILE.read_text(encoding="utf-8"))
             if isinstance(data.get("holdings"), dict):
-                return data
+                return {"holdings": {s: _norm_slot(v) for s, v in data["holdings"].items()},
+                        "updated": data.get("updated", "")}
         except Exception:  # noqa: BLE001
             pass
     return {"holdings": _default_holdings(), "updated": ""}
@@ -74,20 +185,21 @@ def load() -> dict:
 
 def save(holdings: dict) -> None:
     HOLDINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    body = {"holdings": holdings, "updated": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M")}
+    body = {"holdings": {s: _norm_slot(v) for s, v in (holdings or {}).items()},
+            "updated": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M")}
     HOLDINGS_FILE.write_text(json.dumps(body, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
 def active(holdings: dict) -> list[str]:
-    """启用的位置（有代码且开关打开）。"""
+    """启用的位置（开关打开且至少挂了一只基金）。"""
     return [s for s in SLOTS
-            if holdings.get(s, {}).get("on", True) and holdings.get(s, {}).get("code")]
+            if holdings.get(s, {}).get("on", True) and codes(holdings.get(s, {}))]
 
 
 def slot_of(code: str, holdings: dict) -> str | None:
     """按基金代码反查位置（用于记账时自动归位）。"""
     for s, h in holdings.items():
-        if h.get("code") == code:
+        if code in codes(h):
             return s
     return None
 
@@ -167,13 +279,15 @@ def nav_series(code: str, ensure=False) -> pd.Series:
 
 
 def nav_panel(holdings: dict, ensure=False) -> pd.DataFrame:
-    """所有持仓基金的单位净值面板（列 = 位置 key）。"""
+    """所有持仓基金的净值面板（列 = **基金代码**，一个位置多只时就有多列）。"""
     cols = {}
     for s in active(holdings):
-        code = holdings[s]["code"]
-        s_ = nav_series(code, ensure=ensure)
-        if len(s_):
-            cols[s] = s_
+        for code in codes(holdings[s]):
+            if code in cols:
+                continue
+            s_ = nav_series(code, ensure=ensure)
+            if len(s_):
+                cols[code] = s_
     if not cols:
         return pd.DataFrame()
     return pd.DataFrame(cols).sort_index().ffill()
