@@ -23,7 +23,8 @@ from allweather.rebalance import (
     STRATEGIES,
     ETF_META,
 )
-from allweather.sim_account import load_acct, save_acct, stats as acct_stats, MONEY_SIDES as _MONEY_SIDES
+from allweather.sim_account import (load_acct, save_acct, stats as acct_stats,
+                                  fund_pnl as _fund_pnl, MONEY_SIDES as _MONEY_SIDES)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fund_lookup as FL
 import fund_search as FS
@@ -2390,6 +2391,247 @@ def _code_trades(code: str) -> list[dict]:
     return sorted(out, key=lambda x: x["date"])
 
 
+def _code_pnl_curve(code: str) -> pd.Series:
+    """这只基金从第一笔成交到今天的**累计盈亏**（元），口径对齐支付宝「累计盈亏」。
+
+    累计盈亏 = 当前持仓市值 + 累计卖出净额 − 累计买入总额（买入含手续费、卖出扣手续费）。
+    也就是「还拿在手里的浮盈 + 已经落袋的实盈」，所以卖出后曲线不会掉下来，
+    而「持有收益」只算手上这一部分。转入/转出是账户层面的钱，与单只基金无关，不进这条曲线。
+    """
+    nav = _nav_of_code(code)
+    if not len(nav):
+        return pd.Series(dtype=float)
+    rows = [t for t in ((acct or {}).get("trades") or [])
+            if str(t.get("code") or "") == code]
+    return _fund_pnl(rows, nav)
+
+
+_PNL_CSS = _COMP_BASE_CSS + r"""
+.pnl-top{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin:12px 0 2px}
+.pnl-val{font-size:26px;font-weight:650;letter-spacing:-.6px;font-variant-numeric:tabular-nums}
+.pnl-val.up{color:#C52828}.pnl-val.down{color:#16703B}.pnl-val.flat{color:#475569}
+.pnl-sub{font-size:12px;color:#475569}
+#chart{display:block;width:100%;touch-action:pan-y;cursor:crosshair}
+#tip{width:auto;min-width:172px;max-width:280px}
+#tip .tip-big{font-size:15px;font-weight:600;font-variant-numeric:tabular-nums;margin-bottom:2px}
+@media(max-width:520px){.pnl-val{font-size:23px}}
+"""
+
+_PNL_TPL = r"""<style>__CSS__</style>
+<div id="wrap" aria-busy="false">
+<div class="heading"><h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l5-6 4 3 5-7 4 4"/></svg>__HEADING__</h3><span id="updating" role="status">正在更新</span></div>
+<div class="pnl-top"><span class="pnl-val" id="last">—</span><span class="pnl-sub" id="lastsub"></span></div>
+<div class="controls"><div id="range-controls" role="group" aria-label="常用区间">__BTNS__</div></div>
+<div class="state-line"><span id="selection"></span><span class="date-line"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2" fill="none"/><path d="M8 3v5m8-5v5M4 10h16"/></svg><span id="range"></span></span></div>
+<svg id="chart" role="img" aria-label="累计盈亏曲线，可悬停查看每天的数" tabindex="0"></svg>
+<div id="tip"></div>
+</div>
+<script>
+(() => {
+  const D = __DATA__;
+  const wrap = document.getElementById('wrap'), svg = document.getElementById('chart');
+  const tip = document.getElementById('tip'), elLast = document.getElementById('last');
+  const elSub = document.getElementById('lastsub'), elSel = document.getElementById('selection');
+  const elRange = document.getElementById('range');
+  const STORE = D.store || 'awPnl.fund';
+  const memo = (() => { try { return JSON.parse(localStorage.getItem(STORE) || '{}'); } catch (e) { return {}; } })();
+  const R = D.ranges, V = D.values, DATES = D.dates, n = V.length;
+  let cur = R[memo.range] ? memo.range : D.defaultRange;
+  if (!R[cur]) cur = '全部';
+  const H = D.height, L = 64, RT = 14, T = 12, B = 26;
+  let start = 0, count = 0, W = 0, PW = 0, hover = -1, frame = 0;
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const fmt = v => {
+    const a = Math.abs(v);
+    const s = a >= 10 ? Math.round(a).toLocaleString('en-US') : (a === 0 ? '0' : a.toFixed(1));
+    return (v < 0 ? '-' : '') + '¥' + s;
+  };
+  const fmtFull = v => (v < 0 ? '-' : '+') + '¥' + Math.abs(v).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const idxOf = new Map(); DATES.forEach((d, i) => { idxOf.set(d, i); });
+  const requestDraw = () => { if (!frame) frame = requestAnimationFrame(() => { frame = 0; draw(); }); };
+
+  function apply(label) {
+    cur = R[label] ? label : cur;
+    start = R[cur].start; count = Math.max(1, R[cur].count);
+    start = clamp(start, 0, Math.max(0, n - count));
+    const last = clamp(start + count - 1, 0, n - 1);
+    const delta = (V[last] - V[start]);
+    elSel.textContent = (cur === '全部' ? '持有以来' : cur) + ' · ' + (Math.abs(delta) < .005 ? '没有变化'
+      : (delta > 0 ? '盈利 ' : '亏损 ') + fmt(Math.abs(delta)));
+    elSel.style.color = delta > .005 ? '#C52828' : (delta < -.005 ? '#16703B' : '#475569');
+    elRange.textContent = DATES[start] + ' ~ ' + DATES[last];
+    document.querySelectorAll('[data-range]').forEach(b =>
+      b.setAttribute('aria-pressed', String(b.dataset.range === cur)));
+    hover = -1; hideTip(); requestDraw();
+    try { localStorage.setItem(STORE, JSON.stringify({ range: cur })); } catch (e) {}
+  }
+  function hideTip() { tip.style.display = 'none'; }
+  // 刻度步长落在 1/2/5×10ⁿ 这种整数上（￥-32 / ￥78 这种刻度看着很脏）；
+  // 只画在数据范围内的刻度，不为了凑整把上下限撑开——否则曲线会缩在中间一小条
+  function niceStep(raw) {
+    const mag = Math.pow(10, Math.floor(Math.log10(raw || 1)));
+    const norm = raw / mag;
+    return (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag;
+  }
+
+  function draw() {
+    const rect = wrap.getBoundingClientRect();
+    W = Math.max(320, Math.round(rect.width || 640));
+    PW = W - L - RT;
+    svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+    svg.setAttribute('height', H);
+    const top = T, bot = H - B, avail = bot - top;
+    // 折线图首尾要贴边（点位在格子中心是给柱状图用的，两点数据会缩在中间一小段）
+    const xs = i => count <= 1 ? L + PW / 2 : L + (i - start) * PW / (count - 1);
+    let lo = 0, hi = 0, seen = 0;
+    for (let i = start; i < start + count && i < n; i++) {
+      const v = V[i];
+      if (!Number.isFinite(v)) continue;
+      if (v < lo) lo = v; if (v > hi) hi = v; seen++;
+    }
+    if (!seen) { svg.innerHTML = ''; return; }
+    const pad = (hi - lo) * .10 || 1;
+    lo -= pad; hi += pad;
+    const step = niceStep((hi - lo) / 4), ticks = [];
+    for (let v = Math.ceil(lo / step) * step; v <= hi + step * 1e-6; v += step) ticks.push(v);
+    const ys = v => top + (hi - v) / (hi - lo) * avail;
+    const y0 = clamp(ys(0), top, bot);
+    let g = '<defs><clipPath id="pu"><rect x="0" y="0" width="' + W + '" height="' + y0.toFixed(1) + '"/></clipPath>'
+          + '<clipPath id="pd"><rect x="0" y="' + y0.toFixed(1) + '" width="' + W + '" height="' + Math.max(0, H - y0).toFixed(1) + '"/></clipPath></defs>';
+    // 横向网格 + 左侧刻度（0 那条单独加深）
+    ticks.forEach(v => {
+      const Y = ys(v);
+      g += '<line x1="' + L + '" x2="' + (W - RT) + '" y1="' + Y.toFixed(1) + '" y2="' + Y.toFixed(1)
+         + '" stroke="#F1F5F9" stroke-width="1"/>';
+      g += '<text x="' + (L - 8) + '" y="' + (Y + 4).toFixed(1) + '" text-anchor="end" font-size="11" fill="#94A3B8">'
+         + esc(fmt(v)) + '</text>';
+    });
+    g += '<line x1="' + L + '" x2="' + (W - RT) + '" y1="' + y0.toFixed(1) + '" y2="' + y0.toFixed(1)
+       + '" stroke="#CBD5E1" stroke-width="1" stroke-dasharray="4 4"/>';
+    // 折线 + 零轴上下分别填红/绿（涨红跌绿）
+    let d = '', firstX = null, lastX = null;
+    for (let i = start; i < start + count && i < n; i++) {
+      const v = V[i];
+      if (!Number.isFinite(v)) continue;
+      const X = xs(i), Y = ys(v);
+      d += (d ? 'L' : 'M') + X.toFixed(1) + ' ' + Y.toFixed(1);
+      if (firstX === null) firstX = X;
+      lastX = X;
+    }
+    if (d) {
+      const area = d + 'L' + lastX.toFixed(1) + ' ' + y0.toFixed(1) + 'L' + firstX.toFixed(1) + ' ' + y0.toFixed(1) + 'Z';
+      g += '<path d="' + area + '" fill="#C52828" opacity=".085" clip-path="url(#pu)"/>';
+      g += '<path d="' + area + '" fill="#16703B" opacity=".10" clip-path="url(#pd)"/>';
+      g += '<path d="' + d + '" fill="none" stroke="#1E40AF" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
+    }
+    // 买卖点：买画红上三角（线以上）、卖画绿下三角（线以下）
+    (D.trades || []).forEach(t => {
+      const i = idxOf.get(t.date);
+      if (i === undefined || i < start || i >= start + count) return;
+      const v = V[i];
+      if (!Number.isFinite(v)) return;
+      const X = clamp(xs(i), L + 6, W - RT - 6), Y = ys(v);
+      g += t.side === '买入'
+        ? '<path d="M' + (X - 6).toFixed(1) + ' ' + (Y - 9).toFixed(1) + 'L' + (X + 6).toFixed(1) + ' ' + (Y - 9).toFixed(1) + 'L' + X.toFixed(1) + ' ' + (Y - 19).toFixed(1) + 'Z" fill="#C52828"/>'
+        : '<path d="M' + (X - 6).toFixed(1) + ' ' + (Y + 9).toFixed(1) + 'L' + (X + 6).toFixed(1) + ' ' + (Y + 9).toFixed(1) + 'L' + X.toFixed(1) + ' ' + (Y + 19).toFixed(1) + 'Z" fill="#16703B"/>';
+    });
+    // 横轴日期（首 / 中 / 尾三档，手机上只留首尾）
+    const rawTicks = W < 460 ? [start, start + count - 1]
+      : [start, Math.round(start + (count - 1) / 2), start + count - 1];
+    const xTicks = [...new Set(rawTicks.map(i => clamp(i, 0, n - 1)))];   // 只有两三天时首中尾会重复
+    xTicks.forEach((i, k) => {
+      if (i < 0 || i >= n) return;
+      const anchor = k === 0 ? 'start' : (k === xTicks.length - 1 ? 'end' : 'middle');
+      const X = k === 0 ? L : (k === xTicks.length - 1 ? W - RT : xs(i));
+      g += '<text x="' + X.toFixed(1) + '" y="' + (H - 7) + '" text-anchor="' + anchor + '" font-size="11" fill="#94A3B8">' + esc(DATES[i]) + '</text>';
+    });
+    if (hover >= start && hover < start + count && Number.isFinite(V[hover])) {
+      const X = xs(hover), Y = ys(V[hover]);
+      g += '<line x1="' + X.toFixed(1) + '" x2="' + X.toFixed(1) + '" y1="' + top + '" y2="' + bot + '" stroke="#CBD5E1" stroke-dasharray="3 3"/>';
+      g += '<circle cx="' + X.toFixed(1) + '" cy="' + Y.toFixed(1) + '" r="3.5" fill="#1E40AF" stroke="#fff" stroke-width="1.5"/>';
+    }
+    svg.innerHTML = g;
+  }
+
+  function showTip(i, clientX, clientY) {
+    if (!Number.isFinite(V[i])) { hideTip(); return; }
+    const prev = i > 0 && Number.isFinite(V[i - 1]) ? V[i - 1] : null;
+    const dChg = prev === null ? null : V[i] - prev;
+    const col = V[i] > 0 ? '#C52828' : (V[i] < 0 ? '#16703B' : '#475569');
+    let html = '<div class="tip-big" style="color:' + col + '">' + esc(fmtFull(V[i])) + '</div>'
+      + '<div class="tip-row"><span class="tip-label">' + esc(DATES[i]) + '</span>'
+      + (dChg === null ? '' : '<span style="color:' + (dChg > 0 ? '#C52828' : dChg < 0 ? '#16703B' : '#475569') + '">'
+         + (dChg >= 0 ? '+' : '-') + '¥' + Math.abs(dChg).toLocaleString('en-US', {maximumFractionDigits: 2}) + '</span>') + '</div>';
+    (D.trades || []).filter(t => t.date === DATES[i]).forEach(t => {
+      html += '<div class="tip-row"><span class="tip-label">' + esc(t.side) + '</span><span>' + esc(t.label) + '</span></div>';
+    });
+    tip.innerHTML = html;
+    tip.style.display = 'block';
+    const wrapRect = wrap.getBoundingClientRect();
+    const x = clientX - wrapRect.left, y = clientY - wrapRect.top;
+    tip.style.left = clamp(x + 14, 4, Math.max(4, W - 250)) + 'px';
+    tip.style.top = clamp(y - 10, 4, Math.max(4, wrapRect.height - 90)) + 'px';
+  }
+
+  svg.addEventListener('mousemove', e => {
+    const r = svg.getBoundingClientRect();
+    const px = (e.clientX - r.left) * (W / r.width);
+    const i = clamp(Math.round(start + (px - L) / (PW || 1) * Math.max(1, count - 1)), start, start + count - 1);
+    if (i !== hover) { hover = i; requestDraw(); }
+    showTip(i, e.clientX, e.clientY);
+  });
+  svg.addEventListener('mouseleave', () => { hover = -1; hideTip(); requestDraw(); });
+  svg.addEventListener('touchstart', e => {
+    const t0 = e.touches[0]; if (!t0) return;
+    const r = svg.getBoundingClientRect();
+    const px = (t0.clientX - r.left) * (W / r.width);
+    const i = clamp(Math.round(start + (px - L) / (PW || 1) * Math.max(1, count - 1)), start, start + count - 1);
+    hover = i; requestDraw(); showTip(i, t0.clientX, t0.clientY);
+  }, { passive: true });
+  svg.addEventListener('touchend', () => { hover = -1; hideTip(); requestDraw(); });
+
+  document.querySelectorAll('[data-range]').forEach(b => { b.onclick = () => apply(b.dataset.range); });
+
+  // 顶部大数字 = 最新一笔的累计盈亏（持有以来），与上面详情卡里的「持有收益」不是一回事
+  const lastV = V[n - 1];
+  if (Number.isFinite(lastV)) {
+    elLast.textContent = fmtFull(lastV);
+    elLast.className = 'pnl-val ' + (lastV > 0 ? 'up' : lastV < 0 ? 'down' : 'flat');
+    elSub.textContent = '持有以来累计（已含卖出落袋的部分）';
+  }
+  apply(cur);
+  new ResizeObserver(() => requestDraw()).observe(wrap);
+})();
+</script>"""
+
+
+def _pnl_chart_html(series, trades=None, height=200, store="awPnl.fund",
+                    default_range="全部", heading="累计盈亏"):
+    """单只基金的累计盈亏曲线（元）：零轴上下分别填红/绿，标出这只基金的买卖点。
+
+    和 `_scroll_chart_html` 那张净值图分开：净值图上读不出「我赚了多少钱」，
+    这张图直接用元为单位，和支付宝「累计盈亏」同口径。
+    """
+    dates = series.index.strftime("%Y/%m/%d").tolist()
+    values = [round(float(v), 2) for v in series.values]
+    labels = [lb for lb in ("近1月", "近3月", "近6月", "近1年", "全部") if lb in _TREND_RANGES]
+    ranges = {}
+    for lb in labels:
+        i = int(_trend_window_start(series, _TREND_RANGES[lb]))
+        ranges[lb] = {"start": i, "count": max(1, len(series) - i)}
+    if default_range not in ranges:
+        default_range = labels[-1]
+    btns = "".join(f'<button data-range="{lb}" aria-pressed="{str(lb == default_range).lower()}">{lb}</button>'
+                   for lb in labels)
+    payload = json.dumps({"dates": dates, "values": values, "trades": trades or [],
+                          "ranges": ranges, "height": int(height), "store": store,
+                          "defaultRange": default_range}, ensure_ascii=False,
+                         allow_nan=False).replace("<", "\\u003c")
+    return (_PNL_TPL.replace("__CSS__", _PNL_CSS).replace("__HEADING__", heading)
+            .replace("__BTNS__", btns).replace("__DATA__", payload))
+
+
 def _pf_detail(it: dict) -> None:
     """点开一只基金：它自己的关键数字 + 走势（标出历史买卖点）+ 它的成交流水。"""
     code = it["code"]
@@ -2442,6 +2684,19 @@ def _pf_detail(it: dict) -> None:
                        "悬停或点一下净值线能看到每笔的份额与成交净值。")
         else:
             st.caption("这只基金还没有买卖成交 —— 在「买卖提醒」登记或「交易记录」补录后，图上就会出现三角标记。")
+
+    # 累计盈亏：换成「元」来看赚了多少，口径与支付宝「累计盈亏」一致
+    _pnl = _code_pnl_curve(code)
+    if len(_pnl) > 1:
+        st.iframe(_pnl_chart_html(_pnl, trades=_tr, store="awPnl.fund",
+                                  default_range="全部"), height=380)
+        st.caption("累计盈亏 = 手上还拿着的浮盈 + 已经卖出落袋的实盈（买入算手续费、卖出扣手续费），"
+                   "所以卖掉之后曲线不会掉下来；零轴以上填红＝赚、以下填绿＝亏，三角是这只基金的买卖点。"
+                   "上面的「持有收益」只算手上这一部分，两者差多少，就是已经卖掉的那部分赚到（或亏掉）的钱。"
+                   + (f"这只基金目前只有 {len(_pnl)} 个交易日的记录（第一笔 {_pnl.index[0].strftime('%Y/%m/%d')}），"
+                      "曲线会随着持有天数慢慢长起来。" if len(_pnl) <= 5 else ""))
+    elif _tr:
+        st.caption("累计盈亏要等有净值数据才能画：这只基金缺净值，拉取后自动出现。")
 
     _mine_tr = [t for t in ((acct or {}).get("trades") or [])
                 if str(t.get("code") or "") == code]

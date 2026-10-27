@@ -114,6 +114,55 @@ def replay(trades, prices: pd.DataFrame, capital: float, created: str):
     return daily, pos, cost, cash, units
 
 
+def fund_pnl(trades, nav: pd.Series) -> pd.Series:
+    """单只基金的累计盈亏曲线（元）—— 口径对齐支付宝「累计盈亏」。
+
+    累计盈亏 = 当前持仓市值 + 累计卖出净额 − 累计买入总额（买入含手续费、卖出扣手续费）。
+    所以卖出后曲线不会掉下来（已经落袋的收益还在），而「持有收益」只算手上这一部分。
+    转入/转出是账户层面的钱，与单只基金无关，这里不参与。
+
+    Args:
+        trades: 这只基金自己的成交 [{"date","side","shares","nav","fee"}]，只认买入 / 卖出
+        nav: 这只基金的单位净值序列（DatetimeIndex）
+    """
+    nav = pd.Series(nav).dropna().sort_index()
+    if nav.empty:
+        return pd.Series(dtype=float)
+    rows = [t for t in (trades or [])
+            if t.get("side") in ("买入", "卖出") and float(t.get("shares") or 0) > 0]
+    if not rows:
+        return pd.Series(dtype=float)
+
+    buckets: dict[pd.Timestamp, list] = {}
+    for t in rows:
+        try:
+            d = pd.Timestamp(t.get("date"))
+        except Exception:  # noqa: BLE001
+            continue
+        i = min(int(nav.index.searchsorted(d)), len(nav) - 1)   # 非交易日顺延到下一个有净值的交易日
+        buckets.setdefault(nav.index[i], []).append(t)
+    if not buckets:
+        return pd.Series(dtype=float)
+
+    start = min(buckets)
+    out_cash = in_cash = shares = 0.0
+    out: dict[pd.Timestamp, float] = {}
+    for d, px_d in zip(nav.index, nav.values):
+        if d < start:
+            continue
+        for t in buckets.get(d, []):
+            sh, fee = float(t.get("shares") or 0), float(t.get("fee") or 0)
+            px = float(t.get("nav") or 0) or float(px_d)     # 没记净值的成交按当日净值算
+            if t.get("side") == "买入":
+                out_cash += sh * px + fee
+                shares += sh
+            else:
+                in_cash += sh * px - fee
+                shares -= sh
+        out[d] = shares * float(px_d) + in_cash - out_cash
+    return pd.Series(out, dtype=float)
+
+
 def stats(daily: pd.DataFrame) -> dict:
     """净值曲线指标：累计收益、最大回撤。"""
     if daily is None or not len(daily):
