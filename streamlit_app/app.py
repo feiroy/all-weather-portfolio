@@ -680,7 +680,13 @@ __RANGE_BTNS__
   const D = __CHART_DATA__;
   const svg = document.getElementById('chart'), wrap = document.getElementById('wrap');
   const tip = document.getElementById('tip'), range = document.getElementById('range');
-  let period = '日', lastRange = '近1月', activeRange = lastRange, customDates = null;
+  // 切「单只/多只」或换基金都会重建 iframe，JS 里的选择随之丢失 → 存一份到 localStorage（srcdoc 同源可访问），重建时还原
+  const STORE = 'awTrend.single';
+  const memo = (() => { try { return JSON.parse(localStorage.getItem(STORE) || '{}'); } catch (e) { return {}; } })();
+  const saveMemo = () => { try { localStorage.setItem(STORE, JSON.stringify({period, range: lastRange})); } catch (e) {} };
+  let period = D.histories[memo.period] ? memo.period : '日';
+  let lastRange = (D.histories[period].windows || {})[memo.range] ? memo.range : '近1月';
+  let activeRange = lastRange, customDates = null;
   let P = D.histories[period], n = P.prices.length;
   const H = D.height, L = 64, R = 16, T = 32, B = 32, GAP = 30, minCount = 1;
   // 绘图区主次：净值55%、累计变化27%、单期变化18%。
@@ -691,6 +697,7 @@ __RANGE_BTNS__
   let dragging = null, pinned = null, hover = null;
   const periodControl = document.getElementById('period');
   for (const option of periodControl.options) option.disabled = !D.histories[option.value];
+  periodControl.value = period;
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   const valid = v => v !== null && Number.isFinite(v);
   const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -719,7 +726,7 @@ __RANGE_BTNS__
     lastRange = activeRange = label; customDates = null;
     initialCount = P.windows[label].count; initialStart = P.windows[label].start;
     count = initialCount; start = initialStart; pinned = hover = null;
-    wrap.setAttribute('aria-busy', 'true'); requestDraw();
+    wrap.setAttribute('aria-busy', 'true'); requestDraw(); saveMemo();
   }
   document.querySelectorAll('[data-range]').forEach(button => button.onclick = () => useRange(button.dataset.range));
   periodControl.onchange = () => {
@@ -732,8 +739,8 @@ __RANGE_BTNS__
       while (last >= 0 && P.dates[last] > keepDates[1]) last--;
       start = Math.max(0, first); count = first < 0 || last < first ? 0 : last - first + 1;
       activeRange = null;
-    } else {start = initialStart; count = initialCount;}
-    pinned = hover = null; wrap.setAttribute('aria-busy', 'true'); requestDraw();
+    } else { start = initialStart; count = initialCount; }
+    pinned = hover = null; wrap.setAttribute('aria-busy', 'true'); requestDraw(); saveMemo();
   };
   function zoom(factor, px = L + PW / 2) {
     if (!PW) return;
@@ -2400,6 +2407,21 @@ def _cmp_cached_last(codes) -> str:
     return max(out) if out else ""
 
 
+def _sticky_search(key: str, **kw):
+    """基金搜索框的记忆版：切走再切回时保住已选值。
+
+    「单只走势」和「多只对比」是 if / else 两个分支，切走后那个分支的搜索框这一轮不渲染，
+    Streamlit 会把它的 widget state 一起丢掉（切回来就退回默认值）。这里在 Python 侧另存一份
+    镜像，组件被重新挂载时把它当默认值传回去。注意：只在「条件渲染」的搜索框上用，
+    默认值会随数据变化的搜索框（如持仓配置）不能用，否则镜像会盖住真实值。
+    """
+    memo_key = f"_sel_{key}"
+    kw["default"] = st.session_state.get(memo_key, kw.get("default"))
+    val = FS.fund_search(key, **kw)
+    st.session_state[memo_key] = list(val) if isinstance(val, list) else val
+    return val
+
+
 def _stage_rows(series):
     """四个固定阶段数字，基准与图表视窗同一口径（_trend_window_start），不受图表拖动影响。"""
     clean = _trend_aggregate(series, "日")
@@ -2706,7 +2728,13 @@ __CMP_CSS__
       Hh.steps[nm] = r;
     }
   }
-  let period = '日', lastRange = D.defaultRange, activeRange = lastRange, customDates = null;
+  // 与单只走势同一套记忆：切视图 / 增删基金都会重建 iframe，区间与周期从 localStorage 还原
+  const STORE = 'awTrend.multi';
+  const memo = (() => { try { return JSON.parse(localStorage.getItem(STORE) || '{}'); } catch (e) { return {}; } })();
+  const saveMemo = () => { try { localStorage.setItem(STORE, JSON.stringify({period, range: lastRange})); } catch (e) {} };
+  let period = D.histories[memo.period] ? memo.period : '日';
+  let lastRange = (D.histories[period].windows || {})[memo.range] ? memo.range : D.defaultRange;
+  let activeRange = lastRange, customDates = null;
   let P = D.histories[period], n = P.dates.length;
   const hidden = new Set();
   const H = D.height, L = 64, R = 16, T = 32, B = 32, GAP = 30;
@@ -2718,6 +2746,7 @@ __CMP_CSS__
   let dragging = null, pinned = null, hover = null, bases = {};
   const periodControl = document.getElementById('period');
   for (const o of periodControl.options) o.disabled = !D.histories[o.value];
+  periodControl.value = period;
   legend.innerHTML = names.map((nm, k) => `<button class="lg" data-k="${k}" aria-pressed="true" title="点击隐藏/显示"><i style="background:${col(nm)}"></i><span>${esc(nm)}</span></button>`).join('');
   legend.querySelectorAll('.lg').forEach(b => b.onclick = () => {
     const nm = names[+b.dataset.k];
@@ -2748,7 +2777,7 @@ __CMP_CSS__
     lastRange = activeRange = label; customDates = null;
     initialCount = P.windows[label].count; initialStart = P.windows[label].start;
     count = initialCount; start = initialStart; pinned = hover = null;
-    wrap.setAttribute('aria-busy', 'true'); requestDraw();
+    wrap.setAttribute('aria-busy', 'true'); requestDraw(); saveMemo();
   }
   document.querySelectorAll('[data-range]').forEach(b => b.onclick = () => useRange(b.dataset.range));
   periodControl.onchange = () => {
@@ -2762,7 +2791,7 @@ __CMP_CSS__
       start = Math.max(0, first); count = first < 0 || last < first ? 0 : last - first + 1;
       activeRange = null;
     } else { start = initialStart; count = initialCount; }
-    pinned = hover = null; wrap.setAttribute('aria-busy', 'true'); requestDraw();
+    pinned = hover = null; wrap.setAttribute('aria-busy', 'true'); requestDraw(); saveMemo();
   };
   function zoom(factor, px = L + PW / 2) {
     if (!PW) return;
@@ -3254,12 +3283,15 @@ with tab7:
             _h1, _h2 = st.columns([3.5, 1.15], vertical_alignment="center")
             with _h2:
                 # 自研搜索框：全市场名录只在第一次点开时下载（静态文件），不随页面加载传输（见 fund_search.py）
-                _pick = FS.fund_search("trend_pick", mode="single", fixed=_BT_FIXED, default="bt:hs300",
+                _pick = _sticky_search("trend_pick", mode="single", fixed=_BT_FIXED, default="bt:hs300",
                                        placeholder="输入基金名称或代码")
                 asset = _pick[3:] if str(_pick).startswith("bt:") else None
                 if asset:
                     # 单位净值（基金公司每晚公布，与支付宝「单位净值/日涨幅」一致） / 场内价格（交易所实时成交价）
+                    # 口径也跨视图记住：切到「多只对比」再切回来时，widget state 会被丢掉
+                    _pm_memo = "_sel_trend_price_mode"
                     _price_mode = st.radio("口径", ["单位净值", "场内价格"], horizontal=True,
+                                           index=1 if st.session_state.get(_pm_memo) == "场内价格" else 0,
                                            key="trend_price_mode", label_visibility="collapsed",
                                            help="单位净值：基金公司每晚按持仓算出的每份价值，日涨幅与支付宝一致（分红日已复权）。\n\n"
                                                 "场内价格：ETF 在交易所买卖的成交价（收盘价），会围绕净值小幅溢价/折价。\n\n"
@@ -3267,6 +3299,8 @@ with tab7:
                 else:
                     _price_mode = "净值"
                     st.caption("单位净值 + 官方日涨幅（分红日复权）")
+                if _price_mode != "净值":           # 记住口径选择，切视图回来还是上一次那个
+                    st.session_state["_sel_trend_price_mode"] = _price_mode
 
             _ready, _own = True, None
             if asset:
@@ -3362,7 +3396,11 @@ with tab7:
             # 头卡必须在搜索框之前、且只用「已选了哪几只」就渲染出来：
             # 之前用 st.empty() 占位、等净值全拉完才填，重跑时占位先是空的（矮 28px），
             # 页面整体上移、等回填再落下 —— 看起来就是「加一只基金页面跳一下」。
-            _prev_sel = [c for c in ((st.session_state.get("cmp_pick") or {}).get("value") or []) if c]
+            # 实时值优先（同一轮里组件回报的最新选择），widget state 被丢掉时才用镜像兜底；
+            # 不能用 `or`：用户把标签删光时 value=[] 也是「有效值」，不能退回旧的镜像
+            _live_sel = (st.session_state.get("cmp_pick") or {}).get("value")
+            _prev_sel = [c for c in (_live_sel if _live_sel is not None
+                                     else (st.session_state.get("_sel_cmp_pick") or [])) if c]
             _prev_last = _cmp_cached_last(_prev_sel)     # 只读本地缓存，不联网
             _head_right = (f'数据截至 {_prev_last}' if _prev_last
                            else ('' if _prev_sel else f'最多同时对比 {len(_CMP_COLORS)} 只'))
@@ -3374,7 +3412,7 @@ with tab7:
                 f'</div></div>',
                 unsafe_allow_html=True,
             )
-            _sel = FS.fund_search("cmp_pick", mode="multi", fixed=_BT_FIXED, default=[],
+            _sel = _sticky_search("cmp_pick", mode="multi", fixed=_BT_FIXED, default=[],
                                   placeholder="搜索并添加基金，可多选对比", max_sel=len(_CMP_COLORS))
             _bt_label = {f["code"]: f["label"] for f in _BT_FIXED}
             _series_map, _cmp_fail = {}, []

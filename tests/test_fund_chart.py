@@ -38,7 +38,7 @@ STAGES = {"近1月": ("months", 1), "近3月": ("months", 3), "近6月": ("month
 PERIODS = ("日", "月", "年")
 # 2026/10/24 更新：区间按钮改由 _range_buttons() 生成；去掉「近1月=30自然日」提示（区间口径改为与支付宝一致）。
 # 已用 jsdom 实跑验证区间切换、日/月/年线、悬停提示与区间统计。
-CHART_SOURCE_SHA256 = "e251eb7fc4b0328e1c8ba29583947599b53ac0ef7eab2b4022134cfa6c0cf7ec"
+CHART_SOURCE_SHA256 = "82acf3e713d7a436b9595b5fbfbff47857c76f2434a82f481c5cba6c42d57e0e"
 NAMES = {"_scroll_chart_html", "_trend_aggregate", "_trend_window_start",
          "_stage_rows", "_stage_summary_html", "_trend_chart_data",
          "_period_label", "_range_buttons"}
@@ -251,7 +251,7 @@ class ChartRangeTests(unittest.TestCase):
         self.assertEqual(len(nodes), 1)
         segment = ast.get_source_segment(source, nodes[0])
         self.assertEqual(hashlib.sha256(segment.encode("utf-8")).hexdigest(), CHART_SOURCE_SHA256,
-                         "图表函数变更后必须验证交互，当前锁定已修复点位提示的版本")
+                         "图表函数变更后必须验证交互，当前锁定「区间/周期写入 localStorage、重建 iframe 后还原」的版本")
 
     def test_tooltip_uses_finite_svg_geometry(self):
         markup = self.ns["_scroll_chart_html"](["2024/01/02"], [100.], 1)

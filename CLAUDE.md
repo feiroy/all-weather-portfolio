@@ -79,6 +79,8 @@ This file provides guidance to Claude Code when working with code in this reposi
 - **头部**：左侧 `.fund-head`（名称 + 代码 + 标签 + 最新值 + 单日涨跌 + 截至日期），下方 `.stage-summary` 阶段表现；右侧放选择器。
 - **一个 tab 内的视图切换**用 `st.segmented_control`，外层必须包 `st.container(key=...)` 才能挂样式：`.st-key-trend_mode_switch [role="radiogroup"]`（tab 按钮组：3px 内衬、12px 圆角、34px 高、选中白底 + `--brand` 字）。**不要为了两种视图再开一个 tab**——单只走势和多只对比已合并进「基金走势」（见下）。
 - **不许让重跑把页面「跳一下」**：每次交互 Streamlit 整页重跑，任何「要等数据回来才知道写什么」的头部/统计条，必须先用 `st.session_state` 里已有的值渲染出等高内容，**禁止 `st.empty()` 占位、等算完再回填**——占位先是 0 高、回填后撑开，用户看到的就是上下抖一下（实测 28.8px）。耗时提示用 `st.toast`，不用 `st.spinner`（spinner 会在版面里插一行，同样跳）。
+- **条件渲染（if / else 分支）里的控件会丢 state**：Streamlit 只保留「本轮渲染过」的 widget state，切到另一个分支后原控件这一轮不渲染，切回来就退回默认值。搜索框一律用 `_sticky_search(key, ...)`（在 Python 侧另存 `_sel_<key>` 镜像当兜底），`口径` 这类按钮把选中值存 `_sel_*` 再回填 `index`。**默认值会随数据变化的控件（如持仓配置）不能用镜像**，否则镜像会盖住真实值。头卡这类「先渲染、后拿值」的地方要 **实时值优先、丢了才用镜像**，且不能用 `or` 判断（清空后的 `[]` 是有效值）。
+- **iframe 内的控件选择靠 localStorage 记住**：`_scroll_chart_html` / `_compare_chart_html` 把区间与周期存 `awTrend.single` / `awTrend.multi`（srcdoc 与父页同源，可用；访问要包 try/catch）。切视图、换基金、加删线都会重建 iframe，靠它还原。
 
 ### 交互图表（统一组件体系，禁止用 Altair/st.dataframe 替代）
 - 时间序列图一律用 `app.py` 里的 iframe 组件，共用 `_COMP_BASE_CSS`：
