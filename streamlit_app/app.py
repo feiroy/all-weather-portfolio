@@ -264,7 +264,7 @@ hr{ border-color:var(--line); margin:1.6rem 0; }
 [data-testid="stMetricValue"]{ font-size:27px !important; font-weight:650; letter-spacing:-.6px; }
 [data-testid="stMetricDelta"]{ font-size:12px !important; }
 
-/* ========== 我的持仓：支付宝式头卡与基金卡 ========== */
+/* ========== 我的持仓：支付宝式头卡 + 列表 + 点开的详情面板 ========== */
 /* 头卡只有一个：总资产大字 + 今日/持有/收益率，蓝底白字（与侧栏 brand 同一渐变） */
 .pf-head{
   background:linear-gradient(135deg,#1E3A8A 0%,#1E40AF 55%,#3B82F6 100%);
@@ -288,36 +288,24 @@ hr{ border-color:var(--line); margin:1.6rem 0; }
 .pf-head .pf-grid .v.up{ color:#FCA5A5; }    /* 蓝底上用浅红/浅绿，保持红涨绿跌语义 */
 .pf-head .pf-grid .v.down{ color:#86EFAC; }
 
-/* 基金卡片流：一条基金一张卡，含量额大字 + 三列收益 + 买卖标记 */
-.pf-cards{ display:grid; grid-template-columns:repeat(auto-fill,minmax(330px,1fr)); gap:12px; margin:12px 0 4px; }
-.pf-card{
-  background:var(--card); border:1px solid var(--line); border-radius:16px;
-  padding:14px 16px 12px; box-shadow:var(--shadow); display:flex; flex-direction:column;
+/* 点开一只基金：详情面板（列表点中哪一只，就在下面展开哪一只） */
+.pf-detail{
+  background:var(--card); border:1px solid var(--line); border-left:4px solid var(--brand);
+  border-radius:14px; padding:15px 18px 13px; box-shadow:var(--shadow); margin:14px 0 10px;
 }
-.pf-card:hover{ box-shadow:var(--shadow2); }
-.pf-card .pf-top{ display:flex; align-items:flex-start; gap:8px; }
-.pf-card .pf-slot{ font-size:11px; color:var(--muted); letter-spacing:.3px; margin-bottom:3px; }
-.pf-card .pf-name{ font-size:14.5px; font-weight:650; letter-spacing:-.2px; line-height:1.35; }
-.pf-card .pf-code{ font-size:11.5px; color:var(--sub); font-variant-numeric:tabular-nums; margin-top:2px; }
-.pf-card .pf-tag{
-  font-size:10.5px; color:var(--sub); background:var(--bg); border:1px solid var(--line);
-  border-radius:999px; padding:1px 7px; margin-left:6px; white-space:nowrap;
+.pf-detail .pd-top{ display:flex; align-items:flex-start; gap:10px; }
+.pf-detail .pd-name{ font-size:16px; font-weight:650; letter-spacing:-.3px; line-height:1.3; }
+.pf-detail .pd-sub{ font-size:11.5px; color:var(--sub); font-variant-numeric:tabular-nums; margin-top:3px; }
+.pf-detail .pd-grid{
+  display:grid; grid-template-columns:repeat(6,1fr); gap:10px; margin-top:14px;
+  padding-top:12px; border-top:1px solid var(--line-soft);
 }
-.pf-card .pf-amt{
-  font-size:25px; font-weight:700; letter-spacing:-.9px; margin-top:12px;
-  font-variant-numeric:tabular-nums;
-}
-.pf-card .pf-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:10px; }
-.pf-card .pf-grid .k{ font-size:11px; color:var(--sub); }
-.pf-card .pf-grid .v{ font-size:13px; font-weight:600; margin-top:2px; font-variant-numeric:tabular-nums; }
-.pf-card .pf-grid .v.up{ color:var(--red); }
-.pf-card .pf-grid .v.down{ color:var(--green); }
-.pf-card .pf-foot{
-  display:flex; gap:6px 14px; flex-wrap:wrap; margin-top:12px; padding-top:9px;
-  border-top:1px solid var(--line-soft); font-size:11.5px; color:var(--sub);
-  font-variant-numeric:tabular-nums;
-}
-/* 买卖标记：贴卡片右上角，红买绿卖，和支付宝走势图里的「买入 / 卖出」气泡同色 */
+.pf-detail .pd-grid .k{ font-size:11px; color:var(--sub); }
+.pf-detail .pd-grid .v{ font-size:14px; font-weight:650; margin-top:2px; font-variant-numeric:tabular-nums; }
+.pf-detail .pd-grid .v.up{ color:var(--red); }
+.pf-detail .pd-grid .v.down{ color:var(--green); }
+@media(max-width:900px){ .pf-detail .pd-grid{ grid-template-columns:repeat(3,1fr); row-gap:14px; } }
+/* 买卖标记：红买绿卖，和支付宝走势图里的「买入 / 卖出」气泡同色 */
 .pf-badge{
   margin-left:auto; border-radius:999px; padding:4px 11px; font-size:11.5px;
   font-weight:650; white-space:nowrap; border:1px solid transparent;
@@ -762,6 +750,24 @@ def _period_label(t, period):
     return f"{t.year}年"
 
 
+def _trend_chart_data(series):
+    """一次提供三种粒度的全量历史；只预计算五个初始视窗，不截断历史。"""
+    histories = {}
+    for period in ("日", "月", "年"):
+        agg = _trend_aggregate(series, period)
+        returns = agg.pct_change(fill_method=None) * 100
+        histories[period] = {
+            "labels": [_period_label(t, period) for t in agg.index],
+            "dates": agg.index.strftime("%Y/%m/%d").tolist(),
+            "prices": agg.tolist(),
+            "rets": [float(v) if pd.notna(v) and np.isfinite(v) else None for v in returns],
+            "windows": {label: {"start": _trend_window_start(agg, span),
+                                "count": len(agg) - _trend_window_start(agg, span)}
+                        for label, span in _TREND_RANGES.items()},
+        }
+    return histories
+
+
 # ------------------------------------------------------------------
 # 多基金走势对比组件（iframe）：与 _scroll_chart_html 同交互、同样式，多条线同图
 # ------------------------------------------------------------------
@@ -1089,11 +1095,17 @@ __CMP_CSS__
             .replace("__BTNS__", btns).replace("__CMP_DATA__", payload).replace("__TITLE__", title))
 
 
-def _scroll_chart_html(labels, values, win, height=540, rets=None, revision=0, histories=None):
+def _scroll_chart_html(labels, values, win, height=540, rets=None, revision=0, histories=None,
+                       trades=None, store=None, default_range="近1月", heading="走势分析"):
     """全历史数据 + 有界索引视窗；只绘制可见部分，不创建超宽画布。
 
     一张图三层面板，共用同一条时间轴：上方净值折线（含起点虚线），
     中间每个点位相对区间起点的涨跌幅柱，下方单期涨跌幅柱（涨红跌绿）。
+
+    trades：历史成交点 [{date:"2026/10/27", side:"买入", label:"1,234.00 份 @ 2.4567"}]，
+    按日期落到当前粒度的那一期上，买画红上三角、卖画绿下三角，悬停/点开进提示框。
+    持仓页「点开一只基金」用它标出这只基金自己的买卖时间点（基金走势页不传，行为不变）。
+    store/default_range/heading：同一个组件的三种文案，持仓页要独立的区间记忆与标题。
     """
     def numbers(items):
         if items is None:
@@ -1109,12 +1121,14 @@ def _scroll_chart_html(labels, values, win, height=540, rets=None, revision=0, h
                                           for key in _TREND_RANGES}}}
     payload = json.dumps({
         "histories": histories, "win": int(win), "height": int(height), "revision": revision,
+        "trades": trades or [], "store": store or "awTrend.single",
+        "defaultRange": default_range, "heading": heading,
     }, ensure_ascii=False, allow_nan=False).replace("<", "\\u003c")
     template = r"""<style>
 __BASE_CSS__
 </style>
 <div id="wrap" aria-busy="false">
-<div class="heading"><h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4v16h16M7 14l4-5 4 3 5-7"/></svg>走势分析</h3><span id="updating" role="status">正在更新</span></div>
+<div class="heading"><h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4v16h16M7 14l4-5 4 3 5-7"/></svg>__HEADING__</h3><span id="updating" role="status">正在更新</span></div>
 <div class="controls"><div id="range-controls" role="group" aria-label="常用区间">
 __RANGE_BTNS__
 </div><select id="period" aria-label="周期"><option value="日">日线</option><option value="月">月线</option><option value="年">年线</option></select></div>
@@ -1129,11 +1143,12 @@ __RANGE_BTNS__
   const svg = document.getElementById('chart'), wrap = document.getElementById('wrap');
   const tip = document.getElementById('tip'), range = document.getElementById('range');
   // 切「单只/多只」或换基金都会重建 iframe，JS 里的选择随之丢失 → 存一份到 localStorage（srcdoc 同源可访问），重建时还原
-  const STORE = 'awTrend.single';
+  const STORE = D.store || 'awTrend.single';
   const memo = (() => { try { return JSON.parse(localStorage.getItem(STORE) || '{}'); } catch (e) { return {}; } })();
   const saveMemo = () => { try { localStorage.setItem(STORE, JSON.stringify({period, range: lastRange})); } catch (e) {} };
+  const DEF_RANGE = D.defaultRange || '近1月';
   let period = D.histories[memo.period] ? memo.period : '日';
-  let lastRange = (D.histories[period].windows || {})[memo.range] ? memo.range : '近1月';
+  let lastRange = (D.histories[period].windows || {})[memo.range] ? memo.range : DEF_RANGE;
   let activeRange = lastRange, customDates = null;
   let P = D.histories[period], n = P.prices.length;
   const H = D.height, L = 64, R = 16, T = 32, B = 32, GAP = 30, minCount = 1;
@@ -1143,6 +1158,8 @@ __RANGE_BTNS__
   let initialCount = P.windows[lastRange].count, initialStart = P.windows[lastRange].start;
   let count = initialCount, start = initialStart, W = 0, PW = 0, frame = 0;
   let dragging = null, pinned = null, hover = null;
+  // 当前视窗内的成交点：期号 → [成交...]，每次 draw 重算，悬停提示与三角标记共用
+  let tradeAt = new Map(), nBuy = 0, nSell = 0;
   const periodControl = document.getElementById('period');
   for (const option of periodControl.options) option.disabled = !D.histories[option.value];
   periodControl.value = period;
@@ -1316,7 +1333,26 @@ __RANGE_BTNS__
           + `<text x="${box.x+10}" y="${box.y+33}" font-size="11" fill="#475569">${esc(P.dates[i])}</text></g>`;
       });
     }
-    svg.innerHTML = `<defs><clipPath id="plot-clip"><rect x="${L}" y="${T-5}" width="${PW}" height="${H-T-B+10}"/></clipPath></defs>${grid}<g clip-path="url(#plot-clip)">${marks}<line id="guide" y1="${T}" y2="${H-B}" stroke="#94A3B8" stroke-dasharray="4 4" visibility="hidden"/></g>${ticks}${annotations}`;
+    // 历史成交点：按日期落到当前粒度的那一期（日线=当天，月/年线=该期最后一条记录）。
+    // 买入画在净值点下方的红三角、卖出画在上方的绿三角；同一期多笔只画一个，逐笔细节进提示框。
+    // 单独一组、画在「最高/最低」标注之后，否则成交点落在极值附近时会被那两个白底标签盖住。
+    tradeAt = new Map(); nBuy = 0; nSell = 0;
+    let tmarks = '';
+    for (const t of (D.trades || [])) {
+      let ti = -1;
+      for (let k = n - 1; k >= 0; k--) { if (P.dates[k] <= t.date) { ti = k; break; } }
+      if (ti < 0 || ti < first || ti > last || !valid(P.prices[ti])) continue;
+      const e = tradeAt.get(ti) || {list: []}; e.list.push(t); tradeAt.set(ti, e);
+    }
+    for (const [ti, e] of tradeAt) {
+      // 首末那两期的点在裁剪框边缘，三角会有一半被裁掉 → 水平往内收 6px
+      const cx = clamp(x(ti), L + 6, W - R - 6), cy = y(P.prices[ti]);
+      const nb = e.list.filter(t => t.side === '买入').length;
+      nBuy += nb; nSell += e.list.length - nb;
+      if (nb) tmarks += `<path d="M${cx-5.5},${cy+10.5} L${cx+5.5},${cy+10.5} L${cx},${cy+2.5} Z" fill="#C52828" stroke="#fff" stroke-width="1.3"/>`;
+      if (e.list.length - nb) tmarks += `<path d="M${cx-5.5},${cy-10.5} L${cx+5.5},${cy-10.5} L${cx},${cy-2.5} Z" fill="#16703B" stroke="#fff" stroke-width="1.3"/>`;
+    }
+    svg.innerHTML = `<defs><clipPath id="plot-clip"><rect x="${L}" y="${T-5}" width="${PW}" height="${H-T-B+10}"/></clipPath></defs>${grid}<g clip-path="url(#plot-clip)">${marks}<line id="guide" y1="${T}" y2="${H-B}" stroke="#94A3B8" stroke-dasharray="4 4" visibility="hidden"/></g>${ticks}${annotations}${tmarks ? `<g clip-path="url(#plot-clip)" data-trades="${nBuy + nSell}">${tmarks}</g>` : ''}`;
     wrap.dataset.bars = String(cntRel); wrap.dataset.stepBars = String(cntStep);
     const change = relAt(last);
     const amplitude = hiI !== null && loI !== null && P.prices[loI] > 0 ? (P.prices[hiI]/P.prices[loI]-1)*100 : null;
@@ -1326,7 +1362,11 @@ __RANGE_BTNS__
       + `<div class="summary-prices"><span><small>起点价</small><b id="start-price" data-value="${startPx ?? ''}">${price(startPx)}</b></span>`
       + `<span aria-hidden="true">→</span><span><small>终点价</small><b id="end-price" data-value="${P.prices[last] ?? ''}">${price(P.prices[last])}</b></span></div></div>`
       + `<div class="amp-row"><span>净值区间振幅</span><b id="amplitude" data-value="${valid(amplitude) ? amplitude : ''}">${valid(amplitude) ? amplitude.toFixed(2)+'%' : '—'}</b>`
-      + `<small>最高净值 ÷ 最低净值 − 1 · 当前 ${visibleCount} 期 / 全历史 ${n} 期</small></div>`;
+      + `<small>最高净值 ÷ 最低净值 − 1 · 当前 ${visibleCount} 期 / 全历史 ${n} 期</small></div>`
+      + ((nBuy || nSell)
+         ? `<div class="amp-row" id="trade-row"><span>历史成交</span><b>▲ ${nBuy} 买 · ▼ ${nSell} 卖</b>`
+           + `<small>三角标在净值曲线上（红买绿卖），悬停或点开看每笔的份额与净值</small></div>`
+         : '');
     if (pinned !== null) showTip(pinned); else tip.style.display = 'none';
   }
   function showTip(i, clientY = null) {
@@ -1341,6 +1381,9 @@ __RANGE_BTNS__
       + `<div class="tip-row"><span class="tip-label">净值</span><b>${price(px)}</b></div>`
       + `<div class="tip-row"><span class="tip-label">单${period}涨跌幅</span><b style="color:${color(rt)}">${pct(rt)}</b></div>`
       + `<div class="tip-row"><span class="tip-label">相对起点</span><b style="color:${color(rel)}">${pct(rel)}</b></div>`
+      + ((tradeAt.get(i) || {list: []}).list.map(t =>
+          `<div class="tip-row"><span class="tip-label" style="color:${t.side === '买入' ? '#C52828' : '#16703B'}">${esc(t.side)}</span>`
+          + `<b>${esc(t.label)}</b></div>`).join(''))
       + `<small class="tip-label">基准 ${esc(P.dates[first])}</small>`
       + `${pinned!==null?'<br><small>已固定，再次点击取消</small>':''}`;
     tip.style.display='block';
@@ -1413,7 +1456,9 @@ __RANGE_BTNS__
 })();
 </script>"""
     return (template.replace("__BASE_CSS__", _COMP_BASE_CSS)
-            .replace("__RANGE_BTNS__", _range_buttons("近1月")).replace("__CHART_DATA__", payload))
+            .replace("__RANGE_BTNS__", _range_buttons(default_range))
+            .replace("__HEADING__", html_escape(heading))
+            .replace("__CHART_DATA__", payload))
 
 
 def _sparkline(series, height=58):
@@ -1921,7 +1966,7 @@ _ACCT_ASSETS = [a for a in ["hs300", "us_sp500", "credit", "bond_10y",
 _ASSET_LABEL = {a: f"{ETF_META.get(a, {}).get('name', a)} ({ETF_META.get(a, {}).get('code', '')})"
                 for a in _ACCT_ASSETS}
 
-# 账户重放结果（按份额记账）：tab3 我的持仓、tab4 买卖提醒、tab7 提醒共用
+# 账户重放结果（按份额记账）：tab3 我的持仓、tab4 买卖提醒、tab9 提醒共用
 _acct_daily, _acct_pos, _acct_cost, _acct_cash, _acct_units = (
     _replay_holdings(acct.get("trades", []), acct.get("capital", 0), acct.get("created"))
     if acct else (pd.DataFrame(), {}, {}, 0.0, 0.0)
@@ -2040,63 +2085,260 @@ def _pf_sign(v: float) -> str:
     return "up" if v > 0 else ("down" if v < 0 else "")
 
 
-def _pf_badge(it: dict) -> str:
-    """买卖标记 —— 一张卡只看右上角就知道这一轮该买还是该卖。"""
+def _pf_num(v: float, digits: int = 0) -> str:
+    """0 不写正负号（避免「+0」「-0」这种看着像出错的写法），其余照常带符号。"""
+    if abs(v) < 0.5 * 10 ** (-digits):
+        return f"{0:.{digits}f}"
+    return f"{v:+,.{digits}f}"
+
+
+def _pf_badge_parts(it: dict) -> tuple[str, str]:
+    """买卖标记的（文字, 样式类）—— 列表、提醒清单、成交登记共用一套措辞，不改口径。"""
     if it.get("side") == "买入":
-        return f'<span class="pf-badge buy">买入 ¥{it["amount"]:,.0f}</span>'
+        return (f'买入 ¥{it["amount"]:,.0f}', "buy")
     if it.get("side") == "卖出":
-        return f'<span class="pf-badge sell">卖出 ¥{it["amount"]:,.0f}</span>'
+        return (f'卖出 ¥{it["amount"]:,.0f}', "sell")
     if it.get("note") == "缺净值":
-        return '<span class="pf-badge warn">缺净值</span>'
+        return ("缺净值", "warn")
     if it.get("note") == "不足一手":
-        return '<span class="pf-badge warn">不足一手</span>'
+        return ("不足一手", "warn")
     if it.get("shares", 0) <= 0:
-        return '<span class="pf-badge hold">未持有</span>'
-    return '<span class="pf-badge hold">持有不动</span>'
+        return ("未持有", "hold")
+    return ("持有不动", "hold")
 
 
-def _pf_card(it: dict) -> str:
-    """一张基金卡：金额大字 + 今日/持有/收益率 + 买卖标记（支付宝资产详情页的信息层级）。"""
-    code, f = it["code"], it["f"]
-    name = html_escape(str(f.get("name") or FL.fund_name(code) or code))
-    slot = html_escape(HG.SLOT_LABEL.get(it["slot"], it["slot"]))
+def _pf_badge(it: dict) -> str:
+    """买卖标记 —— 一行只看最右就知道这一轮该买还是该卖。"""
+    text, cls = _pf_badge_parts(it)
+    return f'<span class="pf-badge {cls}">{text}</span>'
+
+
+def _pf_row(it: dict) -> dict:
+    """一只基金 → 持仓列表的一行。所有显示串在这里算好，组件只负责排版与点击。"""
+    code = it["code"]
     tag = "场外" if it["otc"] else "场内"
     if it["slot_n"] > 1:
-        tag += f" · 位置内 {it['x']*100:.0f}%"
+        tag += f" · 位置内 {it['x'] * 100:.0f}%"
     shares, px, px_prev, cost = it["shares"], it["px"], it["px_prev"], it["cost"]
-    mv = it["mv"]
+    held = shares > 0
     day = (px - px_prev) * shares
-    day_pct = ((px / px_prev - 1) * 100) if (px_prev > 0 and shares > 0) else 0.0
-    hold = mv - shares * cost
-    hold_pct = (it["pl"] or 0.0) * 100
-    qty = f"{shares:,.2f} 份" if it["otc"] else f"{shares:,.0f} 股"
+    day_pct = ((px / px_prev - 1) * 100) if (px_prev > 0 and held) else None
+    hold = it["mv"] - shares * cost
+    hold_pct = it["pl"] * 100 if it["pl"] is not None else None
     dev = it["w_now"] - it["w_tgt"]
-    dev_html = ("—" if abs(dev) < 0.005 else
-                f'<span class="{_pf_sign(dev)}">{dev*100:+.1f}pp</span>')
-    hold_cell = ("—" if shares <= 0 else
-                 f'<span class="{_pf_sign(hold)}">{hold:+,.0f}<br>{hold_pct:+.2f}%</span>')
-    day_cell = ("—" if shares <= 0 else
-                f'<span class="{_pf_sign(day)}">{day:+,.2f}<br>{day_pct:+.2f}%</span>')
-    return (
-        '<div class="pf-card">'
-        '<div class="pf-top"><div style="min-width:0">'
-        f'<div class="pf-slot">{slot}</div>'
-        f'<div class="pf-name">{name}</div>'
-        f'<div class="pf-code">{code}<span class="pf-tag">{tag}</span></div>'
+    badge, badge_cls = _pf_badge_parts(it)
+    return {
+        "code": code,
+        "name": str(it["f"].get("name") or FL.fund_name(code) or code),
+        "tag": tag,
+        "slot": HG.SLOT_LABEL.get(it["slot"], it["slot"]),
+        "amt": f"{it['mv']:,.0f}",
+        "day": _pf_num(day) if held else "—",
+        "day_sub": (f"{_pf_num(day_pct, 2)}%" if (held and day_pct is not None) else ""),
+        "day_cls": _pf_sign(day) if held else "",
+        "hold": _pf_num(hold) if held else "—",
+        "hold_sub": (f"{_pf_num(hold_pct, 2)}%" if (held and hold_pct is not None) else ""),
+        "hold_cls": _pf_sign(hold) if held else "",
+        "w": f'{it["w_now"] * 100:.1f}%',
+        "wtgt": f'{it["w_tgt"] * 100:.1f}%',
+        "dev": "—" if abs(dev) < 0.005 else f"{dev * 100:+.1f}pp",
+        "dev_cls": "" if abs(dev) < 0.005 else _pf_sign(dev),
+        "badge": badge,
+        "badge_cls": badge_cls,
+    }
+
+
+# 持仓列表：一只基金一行，点一行回传代码。用 components v2 而不是 st.dataframe，
+# 因为「涨红跌绿 + 买卖标记」要自己上色，表格控件给不了每个单元格的颜色。
+_PF_LIST_CSS = r"""
+:host{display:block}
+.tbl{font:13px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Noto Sans SC","Microsoft YaHei",sans-serif;
+  color:#0F172A;background:#fff;border:1px solid #E2E8F0;border-radius:14px;
+  max-height:462px;overflow:auto}   /* 限高：点任意一行，下面的详情面板都还在同一屏里 */
+.hd,.rw{display:grid;grid-template-columns:minmax(0,2.2fr) 118px 104px 104px 128px 112px;
+  gap:10px;align-items:center;padding:10px 14px}
+.hd{background:#F8FAFC;border-bottom:1px solid #E2E8F0;font-size:12px;color:#64748B;
+  position:sticky;top:0;z-index:2}
+.hd .r{text-align:right}
+.rw{border-bottom:1px solid #F1F5F9;cursor:pointer;transition:background .12s}
+.rw:last-child{border-bottom:0}
+.rw:hover{background:#F8FAFC}
+.rw:focus-visible{outline:2px solid #3B82F6;outline-offset:-2px}
+.rw.on{background:#EFF6FF;box-shadow:inset 3px 0 0 #3B82F6}
+.nm{font-size:13.5px;font-weight:600;letter-spacing:-.1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sub{font-size:11.5px;color:#94A3B8;margin-top:2px;font-variant-numeric:tabular-nums;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.num{text-align:right;font-variant-numeric:tabular-nums;font-size:13px;font-weight:600}
+.num .sub{font-weight:400;opacity:.78;color:inherit}
+.up{color:#C52828}
+.down{color:#16703B}
+.bg{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;
+  border:1px solid transparent;white-space:nowrap}
+.bg.buy{background:#FEF2F2;color:#C52828;border-color:#FECACA}
+.bg.sell{background:#F0FDF4;color:#16703B;border-color:#BBF7D0}
+.bg.hold{background:#F1F5F9;color:#64748B;border-color:#E2E8F0;font-weight:500}
+.bg.warn{background:#FFFBEB;color:#B45309;border-color:#FDE68A;font-weight:500}
+.c-badge{text-align:right}
+@media(max-width:900px){   /* 手机上只留「基金名 / 金额 / 这一轮」，其余数字点开看详情 */
+  .hd,.rw{grid-template-columns:minmax(0,1fr) 88px 92px;padding:9px 12px;gap:8px}
+  .c-day,.c-hold,.c-w{display:none}
+  .hd div{white-space:nowrap}
+}
+"""
+
+_PF_LIST_JS = r"""
+export default function (c) {
+  const { data, setStateValue, parentElement } = c;
+  const D = data || {};
+  // 每次重跑都会重新调用本函数，旧实例的清理要等卸载，先清掉上一次留下的
+  Array.from(parentElement.children).forEach(el => {
+    if (el && el.classList && el.classList.contains('tbl')) el.remove();
+  });
+  const rows = D.rows || [], sel = D.selected || '';
+  const esc = s => String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const rowHtml = r => '<div class="rw' + (r.code === sel ? ' on' : '') + '" role="row" tabindex="0"'
+    + ' data-code="' + esc(r.code) + '">'
+    + '<div class="c-name"><div class="nm">' + esc(r.name) + '</div>'
+    + '<div class="sub">' + esc(r.code) + ' · ' + esc(r.tag) + ' · ' + esc(r.slot) + '</div></div>'
+    + '<div class="num c-amt">' + esc(r.amt) + '</div>'
+    + '<div class="num c-day ' + esc(r.day_cls) + '">' + esc(r.day)
+    + (r.day_sub ? '<div class="sub">' + esc(r.day_sub) + '</div>' : '') + '</div>'
+    + '<div class="num c-hold ' + esc(r.hold_cls) + '">' + esc(r.hold)
+    + (r.hold_sub ? '<div class="sub">' + esc(r.hold_sub) + '</div>' : '') + '</div>'
+    + '<div class="num c-w">' + esc(r.w) + ' <span class="sub">/ ' + esc(r.wtgt) + '</span>'
+    + '<div class="sub ' + esc(r.dev_cls) + '">' + esc(r.dev) + '</div></div>'
+    + '<div class="c-badge"><span class="bg ' + esc(r.badge_cls) + '">' + esc(r.badge) + '</span></div>'
+    + '</div>';
+  const root = document.createElement('div');
+  root.className = 'tbl';
+  root.setAttribute('role', 'table');
+  root.innerHTML = '<div class="hd"><div>我的基金</div><div class="r">金额</div>'
+    + '<div class="r c-day">今日收益</div><div class="r c-hold">持有收益</div>'
+    + '<div class="r c-w">占比 / 目标</div><div class="r c-badge">这一轮</div></div>'
+    + rows.map(rowHtml).join('');
+  parentElement.appendChild(root);
+  root.querySelectorAll('.rw').forEach(el => {
+    const pick = () => { if (el.dataset.code !== sel) setStateValue('picked', el.dataset.code); };
+    el.addEventListener('click', pick);
+    el.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); }
+    });
+  });
+  return () => root.remove();
+}
+"""
+
+_PF_LIST = st.components.v2.component("aw_pf_list", css=_PF_LIST_CSS, js=_PF_LIST_JS)
+
+
+def _pf_list(rows: list[dict], key: str = "pf_list"):
+    """渲染持仓列表并返回选中的基金代码；没点过就选第一只，选中的那只被删了也回退到第一只。"""
+    if not rows:
+        return None
+    codes = [r["code"] for r in rows]
+    _state = st.session_state.get(key)
+    picked = _state.get("picked") if isinstance(_state, dict) else None
+    if picked not in codes:
+        picked = codes[0]
+    res = _PF_LIST(key=key, data={"rows": rows, "selected": picked},
+                   default={"picked": picked}, on_picked_change=lambda: None)
+    out = res.get("picked") if hasattr(res, "get") else None
+    return out if out in codes else picked
+
+
+def _code_trades(code: str) -> list[dict]:
+    """这只基金的历史买卖点：图上三角 + 提示框文案。日期转成与图表相同的 2026/10/27 口径。"""
+    out = []
+    for t in ((acct or {}).get("trades") or []):
+        if str(t.get("code") or "") != str(code) or t.get("side") not in ("买入", "卖出"):
+            continue
+        try:
+            day = pd.Timestamp(str(t.get("date"))).strftime("%Y/%m/%d")
+        except Exception:  # noqa: BLE001
+            continue
+        sh, nav = float(t.get("shares") or 0), float(t.get("nav") or 0)
+        _, _meta = HG.fund_meta(holdings, code)
+        _unit = (_meta.get("unit") if _meta else None) or HG.default_unit(code)
+        qty = f"{sh:,.0f} 股" if _unit == "股" else f"{sh:,.2f} 份"
+        out.append({"date": day, "side": t["side"],
+                    "label": (f"{qty} @ {nav:.4f}" if nav > 0 else qty)})
+    return sorted(out, key=lambda x: x["date"])
+
+
+def _pf_detail(it: dict) -> None:
+    """点开一只基金：它自己的关键数字 + 走势（标出历史买卖点）+ 它的成交流水。"""
+    code = it["code"]
+    name = str(it["f"].get("name") or FL.fund_name(code) or code)
+    shares, px, px_prev, cost = it["shares"], it["px"], it["px_prev"], it["cost"]
+    held = shares > 0
+    day = (px - px_prev) * shares
+    hold = it["mv"] - shares * cost
+    hold_pct = it["pl"] * 100 if it["pl"] is not None else None
+    qty = (f"{shares:,.2f} 份" if it["otc"] else f"{shares:,.0f} 股") if held else "未持有"
+    _cells = [
+        ("金额", f"¥{it['mv']:,.0f}", ""),
+        ("今日收益", _pf_num(day, 2) if held else "—", _pf_sign(day) if held else ""),
+        ("持有收益", _pf_num(hold) if held else "—", _pf_sign(hold) if held else ""),
+        ("持有收益率", (f"{_pf_num(hold_pct, 2)}%" if (held and hold_pct is not None) else "—"),
+         _pf_sign(hold) if held else ""),
+        ("份额 / 股数", qty, ""),
+        ("成本 / 净值", f"{cost:.4f} / {px:.4f}" if cost > 0 else f"— / {px:.4f}", ""),
+    ]
+    st.markdown(
+        '<div class="pf-detail">'
+        '<div class="pd-top"><div>'
+        f'<div class="pd-name">{html_escape(name)}</div>'
+        f'<div class="pd-sub">{code} · {"场外" if it["otc"] else "场内"} · '
+        f'{html_escape(HG.SLOT_LABEL.get(it["slot"], it["slot"]))}</div>'
         '</div>' + _pf_badge(it) + '</div>'
-        f'<div class="pf-amt">¥{mv:,.0f}</div>'
-        '<div class="pf-grid">'
-        f'<div><div class="k">今日收益</div><div class="v">{day_cell}</div></div>'
-        f'<div><div class="k">持有收益</div><div class="v">{hold_cell}</div></div>'
-        f'<div><div class="k">占比 / 目标</div><div class="v">'
-        f'{it["w_now"]*100:.1f}% / {it["w_tgt"]*100:.1f}%<br>偏离 {dev_html}</div></div>'
-        '</div>'
-        '<div class="pf-foot">'
-        f'<span>{qty}</span>'
-        + (f'<span>成本 {cost:.4f}</span>' if cost > 0 else '')
-        + (f'<span>净值 {px:.4f}</span>' if px > 0 else '<span>缺净值</span>')
-        + '</div></div>'
+        '<div class="pd-grid">'
+        + "".join(f'<div><div class="k">{k}</div><div class="v {c}">{v}</div></div>'
+                  for k, v, c in _cells)
+        + '</div></div>',
+        unsafe_allow_html=True,
     )
+
+    _tr = _code_trades(code)
+    _ser = _hg_panel[code].dropna() if code in _hg_panel.columns else pd.Series(dtype=float)
+    if len(_ser) < 2:
+        st.info("这只基金还没有净值数据，拉取后才有走势图（页底「拉取缺的净值」）。")
+    else:
+        _hist = _trend_chart_data(_ser)
+        _d = _hist["日"]
+        st.iframe(
+            _scroll_chart_html(_d["labels"], _d["prices"], _d["windows"]["近1年"]["count"],
+                               rets=_d["rets"], histories=_hist, trades=_tr,
+                               store="awTrend.fund", default_range="近1年",
+                               heading="走势与买卖点"),   # 基金名就在上面的详情卡里，标题不再重复，手机上也少换行
+            height=840,
+        )
+        if _tr:
+            st.caption(f"红三角＝买入、绿三角＝卖出（这只基金共 {len(_tr)} 笔），"
+                       "悬停或点一下净值线能看到每笔的份额与成交净值。")
+        else:
+            st.caption("这只基金还没有买卖成交 —— 在「买卖提醒」登记或「交易记录」补录后，图上就会出现三角标记。")
+
+    _mine_tr = [t for t in ((acct or {}).get("trades") or [])
+                if str(t.get("code") or "") == code]
+    if _mine_tr:
+        _rows = []
+        for t in _mine_tr:
+            _side = t.get("side") or "—"
+            _cls = "buy" if _side == "买入" else ("sell" if _side == "卖出" else "")
+            _q = (f"¥{float(t.get('shares', 0)):,.0f}" if _side in ("入金", "出金")
+                  else (f"{float(t.get('shares', 0)):,.2f} 份" if it["otc"]
+                        else f"{float(t.get('shares', 0)):,.0f} 股"))
+            _rows.append([
+                _cn_date(t.get("date")),
+                f'<span class="pf-badge {_cls}">{_side}</span>' if _cls else _side,
+                _q,
+                f'{float(t.get("nav", 0)):.4f}' if float(t.get("nav", 0) or 0) > 0 else "—",
+                f'{float(t.get("fee", 0)):,.2f}' if float(t.get("fee", 0) or 0) else "—",
+            ])
+        st.markdown("**这只基金的成交**")
+        _render_table([("日期", "left"), ("类型", "left"), ("数量", "right"),
+                       ("成交净值", "right"), ("手续费", "right")], _rows)
 
 # ============================================================
 # Hero
@@ -2153,9 +2395,9 @@ def _hg_slot_options():
             out.append((s, f["code"],
                         f'{HG.SLOT_LABEL[s]} · {f["code"]} {f.get("name") or ""}'.strip()))
     return out
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
-    ["信号仪表盘", "目标权重", "我的持仓", "买卖提醒",
-     "基金走势", "回测表现", "提醒", "指数估值"]
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs(
+    ["信号仪表盘", "目标权重", "我的持仓", "买卖提醒", "交易记录",
+     "收益对比", "基金走势", "回测表现", "提醒", "指数估值"]
 )
 
 # ============================================================
@@ -2391,8 +2633,9 @@ def _hg_apply(code_map: dict[str, tuple[str, str]]) -> dict:
 with tab3:
     st.subheader("我的持仓 · 有什么，跑得怎么样")
     st.caption(
-        "一张卡一只基金：金额、今日收益、持有收益、占比，右上角直接标出**这一轮该买还是该卖**。"
-        "下面是账户净值和两条基准的对比；换基金、改买卖单位、开关位置都在页底展开。"
+        "一只基金一行，**点一行**看它自己的走势和历史买卖点（图上红三角＝买入、绿三角＝卖出）。"
+        "最右列是这一轮该买还是该卖，逐笔金额在「买卖提醒」页；账户净值与两条基准的对比在「收益对比」页；"
+        "换基金、改买卖单位、开关位置都在页底展开。"
     )
 
     # ---- 头卡：全站唯一一处「总金额 / 今日 / 持有收益」----
@@ -2407,17 +2650,17 @@ with tab3:
         f'<div class="pf-sub">{_head_sub}</div>'
         '<div class="pf-grid">'
         f'<div><div class="k">今日收益</div><div class="v {_pf_sign(_plan["today"])}">'
-        f'{_plan["today"]:+,.2f}</div></div>'
+        f'{_pf_num(_plan["today"], 2)}</div></div>'
         f'<div><div class="k">持有收益</div><div class="v {_pf_sign(_plan["pnl"])}">'
-        f'{_plan["pnl"]:+,.2f}</div></div>'
+        f'{_pf_num(_plan["pnl"], 2)}</div></div>'
         f'<div><div class="k">持有收益率</div><div class="v {_pf_sign(_plan["pnl_pct"])}">'
-        f'{_plan["pnl_pct"] * 100:+.2f}%</div></div>'
+        f'{_pf_num(_plan["pnl_pct"] * 100, 2)}%</div></div>'
         f'<div><div class="k">现金</div><div class="v">¥{_plan["cash"]:,.0f}</div></div>'
         '</div></div>',
         unsafe_allow_html=True,
     )
 
-    # ---- 这一轮要动几笔：卡片上有逐只标记，明细在「买卖提醒」----
+    # ---- 这一轮要动几笔：逐只标记在下面的列表里，金额明细在「买卖提醒」----
     if _plan["has_acct"] and (_plan["buy"] or _plan["sell"]):
         st.markdown(
             '<div class="pf-summary">'
@@ -2435,24 +2678,30 @@ with tab3:
             unsafe_allow_html=True,
         )
 
-    # ---- 基金卡片：一只一张，右上角是买卖标记 ----
+    # ---- 持仓列表：一只基金一行（原来的卡片流平铺在电脑上太占地方）----
     if not _plan["rows"] and not _plan["other"]:
         st.info("还没有挂任何基金 —— 展开页底的「换基金 / 加基金」给位置加一只，"
                 "或点「恢复项目默认代码」。")
+        _sel, _sel_it = None, None
     else:
-        _cards = "".join(_pf_card(it) for it in _plan["rows"])
-        for _o in _plan["other"]:
-            _onm = html_escape(FL.fund_name(_o["code"]) or _o["code"])
-            _cards += (
-                '<div class="pf-card"><div class="pf-top"><div style="min-width:0">'
-                '<div class="pf-slot">其他</div>'
-                f'<div class="pf-name">{_onm}</div>'
-                f'<div class="pf-code">{_o["code"]}<span class="pf-tag">不在配置里</span></div>'
-                '</div><span class="pf-badge warn">自行处理</span></div>'
-                f'<div class="pf-amt">¥{_o["mv"]:,.0f}</div>'
-                '<div class="pf-foot"><span>配置里已删掉，账上还留着份额</span></div></div>'
-            )
-        st.markdown(f'<div class="pf-cards">{_cards}</div>', unsafe_allow_html=True)
+        _pf_rows = [_pf_row(it) for it in _plan["rows"]]
+        for _o in _plan["other"]:          # 配置里已删、账上还留份额的代码
+            _pf_rows.append({
+                "code": _o["code"], "slot": "不在配置里", "name": FL.fund_name(_o["code"]) or _o["code"],
+                "tag": "自行处理", "amt": f'{_o["mv"]:,.0f}',
+                "day": "—", "day_sub": "", "day_cls": "",
+                "hold": "—", "hold_sub": "", "hold_cls": "",
+                "w": f'{(_o["mv"] / _plan["asset"] * 100) if _plan["asset"] else 0:.1f}%',
+                "wtgt": "—", "dev": "—", "dev_cls": "",
+                "badge": "自行处理", "badge_cls": "warn", "qty": "", "cost": "", "px": "",
+            })
+        _sel = _pf_list(_pf_rows)           # 点一行 → 返回该基金代码（组件里高亮选中行）
+        _sel_it = next((it for it in _plan["rows"] if it["code"] == _sel), None)
+        st.caption("点一行展开这只基金的走势与历史买卖点。" if _sel_it
+                   else f"{_sel} 不在配置里（账上还有份额，占着总资产）—— 到「交易记录」核对或补录卖出。")
+
+        if _sel_it:
+            _pf_detail(_sel_it)
 
         _empty_slots = [s for s in HG.SLOTS
                         if holdings.get(s, {}).get("on", True) and not HG.funds(holdings.get(s, {}))]
@@ -2460,57 +2709,6 @@ with tab3:
             st.caption("这些位置没有挂基金（不持有，目标权重已按同桶比例让给其它位置）："
                        + "、".join(HG.SLOT_LABEL[s] for s in _empty_slots)
                        + "。要买就展开页底给它加一只。")
-
-    # ---- 我的净值 vs 项目默认基金 vs 策略理论（三条都归一到起点 1.0）----
-    st.divider()
-    st.markdown("**账户净值 vs 两条基准**")
-    st.caption(
-        "三条线同一起点、同样目标权重、同样每月再平衡，所以差多少就是差在哪："
-        "**项目默认基金**是用项目自带那 8 个代码按你现在的权重重放 —— 和它的差＝「换基金」带来的；"
-        "**策略理论**是回测曲线 —— 和它的差还含调仓时点、申赎费用，以及回测按累计净值、实盘按单位净值的口径差。"
-    )
-
-    _mine = _acct_daily["nav"].dropna() if (acct is not None and len(_acct_daily)) else pd.Series(dtype=float)
-    if acct is None or len(_mine) <= 1:
-        st.info("账户还没有净值曲线：在「买卖提醒」登记成交后自动生成。")
-    else:
-        _curves, _gap_def, _gap_strat = {}, None, None
-        if float(_mine.iloc[0]) > 0:
-            _curves["我的账户"] = _mine / float(_mine.iloc[0])
-        _bench_def = BM.replay_target(w, acct.get("created"), nav_getter=HG.nav_series)
-        if _bench_def is not None and len(_bench_def.dropna()) > 1:
-            _bd = _bench_def.dropna()
-            _curves["项目默认基金"] = _bd / float(_bd.iloc[0])
-        _bench_strat = BM.strategy_curve(_BENCH_COL.get(acct.get("strategy"), ""),
-                                         start=acct.get("created"))
-        if _bench_strat is not None and len(_bench_strat.dropna()) > 1:
-            _bs = _bench_strat.dropna()
-            _curves["策略理论"] = _bs / float(_bs.iloc[0])
-        # 差距按两条线共同覆盖的最后一天算，避免其中一条缺数据时把区间拉长
-        for _nm, _tag in (("项目默认基金", "def"), ("策略理论", "strat")):
-            if "我的账户" in _curves and _nm in _curves:
-                _a, _b = _curves["我的账户"], _curves[_nm]
-                _e = min(_a.index[-1], _b.index[-1])
-                _v = float(_a.loc[:_e].iloc[-1] / _b.loc[:_e].iloc[-1] - 1)
-                if _tag == "def":
-                    _gap_def = _v
-                else:
-                    _gap_strat = _v
-        if len(_curves) > 1:
-            st.iframe(_compare_chart_html(_curves, height=420, default_range="全部",
-                                          title="净值对比"),
-                      height="content")
-        else:
-            st.info("基准曲线暂时取不到，只显示我的账户净值。")
-        _g1, _g2, _g3 = st.columns(3)
-        _g1.metric("vs 项目默认基金", f"{_gap_def*100:+.2f}pp" if _gap_def is not None else "—",
-                   help="把项目默认那 8 个代码按你现在的权重、同样的再平衡节奏重放一遍。"
-                        "这一列只体现「换成你的基金」带来的差异。")
-        _g2.metric("vs 策略理论", f"{_gap_strat*100:+.2f}pp" if _gap_strat is not None else "—",
-                   help="回测曲线从建仓日起归一。差的是选基、调仓时点、费用，"
-                        "以及回测用累计净值/实盘用单位净值的口径差。")
-        _g3.metric("账户净值", f"{float(_mine.iloc[-1]):.4f}",
-                   help="1.0000 = 建仓起点。也可以用「份额 × 最新单位净值 + 现金 = 总资产」跟支付宝对一遍。")
 
     # ---- 配置区：加删基金、买卖单位、位置开关（低频操作，收在展开里）----
     st.divider()
@@ -2651,7 +2849,7 @@ with tab3:
 
         st.markdown("**换成场外（支付宝可买）同类基金 — 一键填入参考代码**")
         st.caption("下面是同类基金的参考代码，跟踪指数和费率不一定和原版一致，填入后请自己核对；"
-                   "收益差异会在上面的「vs 项目默认基金」里体现出来。"
+                   "收益差异会在「收益对比」页的「vs 项目默认基金」里体现出来。"
                    "填入会把该位置**替换**成这一只（原来挂的多只会被清掉）。")
         _preset_rows = [[HG.SLOT_LABEL[s], ETF_META.get(s, {}).get("code", ""),
                          ETF_META.get(s, {}).get("name", ""), c, n] for s, c, n in _HG_PRESET]
@@ -2663,19 +2861,19 @@ with tab3:
             st.rerun()
 
 # ============================================================
-# Tab 4: 买卖提醒（按策略算买卖 → 登记成交 → 留台账）
+# Tab 4: 买卖提醒（按策略算买卖 → 一键登记）—— 计划在这页，补录与流水在「交易记录」
 # ============================================================
 with tab4:
-    st.subheader("买卖提醒 · 按策略算，登记每一笔操作")
+    st.subheader("买卖提醒 · 按策略算，这一轮买什么、卖什么")
     st.caption(
-        "这一页只有两件事：按策略告诉你**该买什么、该卖什么**，再把你实际做的操作**登记**进来。"
-        "持仓和收益在「我的持仓」看，登记之后那边立刻跟着变。"
+        "只做一件事：按目标权重算出差额，告诉你**该买多少、该卖多少**，确认后一键落成成交。"
+        "手工补录和成交流水在「交易记录」页，持仓与收益在「我的持仓」页 —— 登记完两边立刻跟着变。"
     )
 
     if not _plan["has_acct"]:
-        st.info("还没有账户：先在页底补录一笔「入金」，之后这里就会按你的真实持仓算买卖。")
+        st.info("还没有账户：先到「交易记录」建一个账户（或直接补录一笔入金），之后这里就会按你的真实持仓算买卖。")
     elif _plan["asset"] <= 0:
-        st.info("账户里还没有钱和持仓：先在页底补录一笔「入金」，或在支付宝买好后补录买入。")
+        st.info("账户里还没有钱和持仓：先到「交易记录」补录一笔「入金」，或在支付宝买好后补录买入。")
     elif not _plan["rows"]:
         st.warning("还没有挂任何基金：先到「我的持仓」给位置加一只，或点右上角「更新数据」拉取净值。")
     else:
@@ -2740,15 +2938,24 @@ with tab4:
         # ---- 一键登记：把这份清单落成成交（相当于批量补录）----
         if _plan["orders"]:
             if st.button(f"把这份清单登记成 {len(_plan['orders'])} 笔成交", type="primary", key="rb_write",
-                         help="按最新净值记成买入/卖出成交，登记后可在下面的台账里核对"):
+                         help="按最新净值记成买入/卖出成交，登记后可在「交易记录」页逐笔核对"):
                 acct.setdefault("trades", []).extend(_plan["orders"])
                 save_acct(acct, ACCT_FILE)
                 st.toast(f"已登记 {len(_plan['orders'])} 笔成交", icon=":material/check_circle:")
                 st.rerun()
-            st.caption("这里按最新净值估算；实际以你在支付宝成交的价格为准，差得多可以在下面逐笔修正。")
+            st.caption("这里按最新净值估算；实际以你在支付宝成交的价格为准，"
+                       "差得多可以到「交易记录」逐笔修正，或直接手工补录真实那一笔。")
 
-    # ---- 补录：支付宝上真实发生的每一笔 ----
-    st.divider()
+# ============================================================
+# Tab 5: 交易记录（补录 + 台账）—— 只记录支付宝上实际发生了什么
+# ============================================================
+with tab5:
+    st.subheader("交易记录 · 支付宝上真实发生的每一笔")
+    st.caption(
+        "这一页只记账：入金、出金、买入、卖出各记一笔，台账按录入顺序列出全部成交（最后一笔在最后）。"
+        "「买卖提醒」是按策略算出来的计划，这里是**实际做了什么**；两边都落进同一份账户文件，改任何一边都会重算持仓和收益。"
+    )
+
     _slot_opts = _hg_slot_options()
     if acct is None:
         st.markdown("**先建一个账户**")
@@ -2771,7 +2978,7 @@ with tab4:
         st.warning("还没有挂任何基金：先到「我的持仓」给位置加至少一只基金，才能记账。")
     else:
         st.markdown("**补录一笔操作**")
-        st.caption("入金 / 出金 / 买入 / 卖出都在这里记；清单之外的操作（比如临时加了一笔）也记这里。")
+        st.caption("入金 / 出金 / 买入 / 卖出都在这里记；计划之外的操作（比如临时加了一笔）也记这里。")
         _fund_map = {(s, f["code"]): f
                      for s in HG.SLOTS for f in HG.funds(holdings.get(s, {}))}
         with st.form("acct_trade", clear_on_submit=True):
@@ -2807,63 +3014,106 @@ with tab4:
                     st.toast("已记录", icon=":material/check_circle:")
                     st.rerun()
 
-        with st.expander(f"台账 · 成交流水（{len(acct.get('trades', []))} 笔）", expanded=False):
-            _tr_rows = []
-            for i, t in enumerate(acct.get("trades", [])):
-                _s_code, _f_meta = HG.fund_meta(holdings, t.get("code", ""))
-                _nm = (_f_meta.get("name") if _f_meta else "") or FL.fund_name(t.get("code", "")) \
-                    or t.get("code", "") or "—"
-                _u = (_f_meta.get("unit") if _f_meta else None) or "份额"
-                _qty = (f"¥{float(t.get('shares', 0)):,.0f}" if t.get("side") in ("入金", "出金")
-                        else (f'{float(t.get("shares", 0)):,.2f} 份' if _u == "份额"
-                              else f'{float(t.get("shares", 0)):,.0f} 股'))
-                _tr_rows.append([
-                    _cn_date(t.get("date")), t.get("side"),
-                    f'{_nm}<br><span class="muted">{t.get("code", "") or "—"}</span>',
-                    _qty,
-                    f'{float(t.get("nav", 0)):.4f}' if float(t.get("nav", 0) or 0) > 0 else "—",
-                    f'{float(t.get("fee", 0)):,.2f}' if float(t.get("fee", 0) or 0) else "—",
-                    str(i),
-                ])
-            if not _tr_rows:
-                st.caption("暂无成交")
-            else:
-                _render_table([("日期", "left"), ("类型", "left"), ("基金", "left"),
-                               ("数量", "right"), ("净值", "right"), ("手续费", "right"),
-                               ("#", "right")], _tr_rows)
-                _del = st.number_input("删除第几笔（最后一列的序号）", min_value=0,
-                                       max_value=max(0, len(acct.get("trades", [])) - 1),
-                                       step=1, format="%d", key="acct_del_idx")
-                if st.button("删除这笔", key="acct_del_btn"):
-                    acct["trades"].pop(int(_del))
-                    save_acct(acct, ACCT_FILE)
-                    st.rerun()
-            st.caption(f"账户文件：{ACCT_FILE.name}（保存在 data/ 下，重装或换机时记得备份）")
+        st.markdown(f"**台账 · 全部成交（{len(acct.get('trades', []))} 笔）**")
+        _tr_rows = []
+        for i, t in enumerate(acct.get("trades", [])):
+            _s_code, _f_meta = HG.fund_meta(holdings, t.get("code", ""))
+            _nm = (_f_meta.get("name") if _f_meta else "") or FL.fund_name(t.get("code", "")) \
+                or t.get("code", "") or "—"
+            _u = (_f_meta.get("unit") if _f_meta else None) or "份额"
+            _qty = (f"¥{float(t.get('shares', 0)):,.0f}" if t.get("side") in ("入金", "出金")
+                    else (f'{float(t.get("shares", 0)):,.2f} 份' if _u == "份额"
+                          else f'{float(t.get("shares", 0)):,.0f} 股'))
+            _cls = "buy" if t.get("side") == "买入" else ("sell" if t.get("side") == "卖出" else "")
+            _tr_rows.append([
+                _cn_date(t.get("date")),
+                f'<span class="pf-badge {_cls}">{t.get("side")}</span>' if _cls else (t.get("side") or "—"),
+                f'{_nm}<br><span class="muted">{t.get("code", "") or "—"}</span>',
+                _qty,
+                f'{float(t.get("nav", 0)):.4f}' if float(t.get("nav", 0) or 0) > 0 else "—",
+                f'{float(t.get("fee", 0)):,.2f}' if float(t.get("fee", 0) or 0) else "—",
+                str(i),
+            ])
+        if not _tr_rows:
+            st.caption("暂无成交")
+        else:
+            _render_table([("日期", "left"), ("类型", "left"), ("基金", "left"),
+                           ("数量", "right"), ("净值", "right"), ("手续费", "right"),
+                           ("#", "right")], _tr_rows)
+            st.caption("最后一列的 # 是这笔在文件里的序号，用来删除记错的那一笔。")
+            _del_cols = st.columns([1.2, 1, 3], gap="small")
+            _del = _del_cols[0].number_input("删除第几笔", min_value=0,
+                                             max_value=max(0, len(acct.get("trades", [])) - 1),
+                                             step=1, format="%d", key="acct_del_idx")
+            if _del_cols[1].button("删除这笔", key="acct_del_btn"):
+                acct["trades"].pop(int(_del))
+                save_acct(acct, ACCT_FILE)
+                st.toast("已删除这一笔", icon=":material/delete:")
+                st.rerun()
+        st.caption(f"账户文件：{ACCT_FILE.name}（保存在 data/ 下，重装或换机时记得备份）")
 
 # ============================================================
-# Tab 5: 基金走势（日 / 月 / 年 的涨跌幅与价格）
+# Tab 6: 收益对比（我的账户 vs 项目默认基金 vs 策略理论）
+# ============================================================
+with tab6:
+    st.subheader("收益对比 · 我的账户 vs 项目默认基金 vs 策略理论")
+    st.caption(
+        "三条线同一起点（都归一到 1.0）、同样目标权重、同样每月再平衡，所以**差多少就是差在哪**："
+        "**项目默认基金**＝用项目自带那 8 个代码按你现在的权重重放一遍，和它的差就是「换基金」带来的；"
+        "**策略理论**＝回测曲线，和它的差还含调仓时点、申赎费用，以及回测按累计净值、实盘按单位净值的口径差。"
+    )
+
+    _mine = _acct_daily["nav"].dropna() if (acct is not None and len(_acct_daily)) else pd.Series(dtype=float)
+    if acct is None or len(_mine) <= 1:
+        st.info("账户还没有净值曲线：在「交易记录」补录成交（或在「买卖提醒」一键登记）后自动生成。")
+    else:
+        _curves, _gap_def, _gap_strat = {}, None, None
+        if float(_mine.iloc[0]) > 0:
+            _curves["我的账户"] = _mine / float(_mine.iloc[0])
+        _bench_def = BM.replay_target(w, acct.get("created"), nav_getter=HG.nav_series)
+        if _bench_def is not None and len(_bench_def.dropna()) > 1:
+            _bd = _bench_def.dropna()
+            _curves["项目默认基金"] = _bd / float(_bd.iloc[0])
+        _bench_strat = BM.strategy_curve(_BENCH_COL.get(acct.get("strategy"), ""),
+                                         start=acct.get("created"))
+        if _bench_strat is not None and len(_bench_strat.dropna()) > 1:
+            _bs = _bench_strat.dropna()
+            _curves["策略理论"] = _bs / float(_bs.iloc[0])
+        # 差距按两条线共同覆盖的最后一天算，避免其中一条缺数据时把区间拉长
+        for _nm, _tag in (("项目默认基金", "def"), ("策略理论", "strat")):
+            if "我的账户" in _curves and _nm in _curves:
+                _a, _b = _curves["我的账户"], _curves[_nm]
+                _e = min(_a.index[-1], _b.index[-1])
+                _v = float(_a.loc[:_e].iloc[-1] / _b.loc[:_e].iloc[-1] - 1)
+                if _tag == "def":
+                    _gap_def = _v
+                else:
+                    _gap_strat = _v
+        if len(_curves) > 1:
+            st.iframe(_compare_chart_html(_curves, height=420, default_range="全部",
+                                          title="净值对比"),
+                      height="content")
+        else:
+            st.info("基准曲线暂时取不到，只显示我的账户净值。")
+        _g1, _g2, _g3 = st.columns(3)
+        _g1.metric("vs 项目默认基金", f"{_gap_def*100:+.2f}pp" if _gap_def is not None else "—",
+                   help="把项目默认那 8 个代码按你现在的权重、同样的再平衡节奏重放一遍。"
+                        "这一列只体现「换成你的基金」带来的差异。")
+        _g2.metric("vs 策略理论", f"{_gap_strat*100:+.2f}pp" if _gap_strat is not None else "—",
+                   help="回测曲线从建仓日起归一。差的是选基、调仓时点、费用，"
+                        "以及回测用累计净值/实盘用单位净值的口径差。")
+        _g3.metric("账户净值", f"{float(_mine.iloc[-1]):.4f}",
+                   help="1.0000 = 建仓起点。也可以用「份额 × 最新单位净值 + 现金 = 总资产」跟支付宝对一遍。")
+        st.caption("两条差距都是「我的账户 ÷ 基准 − 1」的累计值，区间不同会看到不同数字；"
+                   "图上可以拖动缩放、切日/月/年线，和「基金走势」页的用法一致。")
+# ============================================================
+# Tab 7: 基金走势（日 / 月 / 年 的涨跌幅与价格）
 # ============================================================
 # 范围和采样粒度独立，切周期不改变所选范围。区间口径与支付宝「历史业绩」一致（见 _trend_window_start）。
 
 
 
 
-def _trend_chart_data(series):
-    """一次提供三种粒度的全量历史；只预计算五个初始视窗，不截断历史。"""
-    histories = {}
-    for period in ("日", "月", "年"):
-        agg = _trend_aggregate(series, period)
-        returns = agg.pct_change(fill_method=None) * 100
-        histories[period] = {
-            "labels": [_period_label(t, period) for t in agg.index],
-            "dates": agg.index.strftime("%Y/%m/%d").tolist(),
-            "prices": agg.tolist(),
-            "rets": [float(v) if pd.notna(v) and np.isfinite(v) else None for v in returns],
-            "windows": {label: {"start": _trend_window_start(agg, span),
-                                "count": len(agg) - _trend_window_start(agg, span)}
-                        for label, span in _TREND_RANGES.items()},
-        }
-    return histories
 
 
 @st.cache_data(show_spinner=False, max_entries=200)
@@ -3422,7 +3672,7 @@ _CAT = {"hs300": "宽基·A股", "us_sp500": "宽基·美股", "credit": "信用
 _BT_FIXED = [{"code": f"bt:{a}", "label": f"{ETF_META.get(a, {}).get('code', '')} {ETF_META.get(a, {}).get('name', a)}",
               "tag": "回测资产"} for a in _ACCT_ASSETS]
 
-with tab5:
+with tab7:
     # 视图切换：单只走势 / 多只对比（原「基金对比」页合并到这里，少一个标签页）
     _MODE_S, _MODE_C = "单只走势", "多只对比"
     with st.container(key="trend_mode_switch"):
@@ -3626,9 +3876,9 @@ with tab5:
                 _render_table([("基金", "left")] + [(f"{_l}", "right") for _l in _TREND_STAGES], _rows,
                               min_width=700)
 # ============================================================
-# Tab 6: 三策略比较 / 调频影响（统一月度、年度、多年视图）
+# Tab 8: 三策略比较 / 调频影响（统一月度、年度、多年视图）
 # ============================================================
-with tab6:
+with tab8:
     st.caption("这里是**项目原始策略**的历史回测：三策略对比、调频影响，"
                "以及最下方「历史调仓」里每月的目标权重和当月收益。"
                "我自己持仓的收益在「我的持仓」看。")
@@ -3638,7 +3888,7 @@ with tab6:
 
 
 # ============================================================
-# Tab 7: 提醒（偏离 / 估值 / 体检）—— 全部按我持仓的基金算
+# Tab 9: 提醒（偏离 / 估值 / 体检）—— 全部按我持仓的基金算
 # ============================================================
 def _alert_card(level, title, body, tip=""):
     _cls = {"urgent": "warn", "warn": "warn", "info": "", "ok": "calm"}.get(level, "")
@@ -3647,7 +3897,7 @@ def _alert_card(level, title, body, tip=""):
             f'<div class="m">{body}</div>{_tip}</div></div>')
 
 
-with tab7:
+with tab9:
     st.subheader("提醒 · 按我持仓的基金算")
     st.caption("三类提醒分开看：偏离是「该不该调仓」，估值是「贵不贵」，体检是「账户本身怎么样」。")
 
@@ -3746,9 +3996,9 @@ with tab7:
 
 
 # ============================================================
-# Tab 8: 指数估值 —— 蛋卷估值快照 + 近10年 PE/PB 走势（仅展示，不进入策略计算）
+# Tab 10: 指数估值 —— 蛋卷估值快照 + 近10年 PE/PB 走势（仅展示，不进入策略计算）
 # ============================================================
-with tab8:
+with tab10:
     _vp = _valuation_payload()
     if not _vp:
         with st.container(key="val_head"):

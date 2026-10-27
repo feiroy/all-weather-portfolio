@@ -38,7 +38,11 @@ STAGES = {"近1月": ("months", 1), "近3月": ("months", 3), "近6月": ("month
 PERIODS = ("日", "月", "年")
 # 2026/10/24 更新：区间按钮改由 _range_buttons() 生成；去掉「近1月=30自然日」提示（区间口径改为与支付宝一致）。
 # 已用 jsdom 实跑验证区间切换、日/月/年线、悬停提示与区间统计。
-CHART_SOURCE_SHA256 = "82acf3e713d7a436b9595b5fbfbff47857c76f2434a82f481c5cba6c42d57e0e"
+# 2026/10/27 更新：新增 trades（历史买卖点，红上三角买入 / 绿下三角卖出）、store / default_range / heading
+# 三个文案参数（持仓页详情图要独立记忆区间与标题）。用 headless Chrome + CDP 实跑 10 项验证：
+# 三角形数量与颜色、统计条笔数、悬停提示列出该笔成交、区间切换只画区间内成交点且不残留、
+# 月线按周期聚合仍标点、区间/周期写入各自 localStorage 键并还原。
+CHART_SOURCE_SHA256 = "b1834f4582e0dfcb4cd5dcba870e98ac96eaf1763e46ebf7da85ceed42e756ff"
 NAMES = {"_scroll_chart_html", "_trend_aggregate", "_trend_window_start",
          "_stage_rows", "_stage_summary_html", "_trend_chart_data",
          "_period_label", "_range_buttons"}
@@ -252,6 +256,29 @@ class ChartRangeTests(unittest.TestCase):
         segment = ast.get_source_segment(source, nodes[0])
         self.assertEqual(hashlib.sha256(segment.encode("utf-8")).hexdigest(), CHART_SOURCE_SHA256,
                          "图表函数变更后必须验证交互，当前锁定「区间/周期写入 localStorage、重建 iframe 后还原」的版本")
+
+    def test_trade_markers_are_opt_in_and_labelled(self):
+        """历史买卖点：不传 trades 时行为与之前完全一致；传了就带上成交数据与三角标记。"""
+        plain = self.ns["_scroll_chart_html"](["2024/01/02", "2024/01/03"], [100., 101.], 2)
+        self.assertIn('"trades": []', plain)
+        self.assertIn('"store": "awTrend.single"', plain)
+        self.assertIn('"defaultRange": "近1月"', plain)
+        self.assertIn("走势分析", plain)
+
+        trades = [{"date": "2024/01/03", "side": "买入", "label": "1,000.00 份 @ 1.0100"}]
+        markup = self.ns["_scroll_chart_html"](
+            ["2024/01/02", "2024/01/03"], [100., 101.], 2, trades=trades,
+            store="awTrend.fund", default_range="全部", heading="某基金 · 历史买卖点")
+        self.assertIn('"date": "2024/01/03"', markup)
+        self.assertIn('"side": "买入"', markup)
+        self.assertIn('"store": "awTrend.fund"', markup)
+        self.assertIn('"defaultRange": "全部"', markup)
+        self.assertIn("某基金 · 历史买卖点", markup)
+        self.assertIn('aria-pressed="true">全部</button>', markup)   # 默认区间按钮跟着 default_range
+        # 买=红上三角、卖=绿下三角，颜色沿用全站涨跌 token
+        self.assertIn('fill="#C52828" stroke="#fff"', markup)
+        self.assertIn('fill="#16703B" stroke="#fff"', markup)
+        self.assertIn("trade-row", markup)
 
     def test_tooltip_uses_finite_svg_geometry(self):
         markup = self.ns["_scroll_chart_html"](["2024/01/02"], [100.], 1)
