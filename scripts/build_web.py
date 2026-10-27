@@ -75,7 +75,13 @@ def build(new_password: bool) -> str | None:
     _copy_tree(ROOT / "streamlit_app", OUT / "streamlit_app", ("*.py", "*.json"))
     _copy_tree(ROOT / "data", OUT / "data")
     (OUT / "output").mkdir()
-    shutil.copy2(ROOT / "output" / "nv_curves.csv", OUT / "output" / "nv_curves.csv")
+    for name in ("nv_curves.csv", "signal_log.csv"):
+        src = ROOT / "output" / name
+        if src.exists():
+            shutil.copy2(src, OUT / "output" / name)
+    # 回测表现页「历史调仓」用的每月目标权重（三策略各一份）
+    for fp in (ROOT / "output").glob("weight_history_*.csv"):
+        shutil.copy2(fp, OUT / "output" / fp.name)
     if REBAL_NAV.exists():
         _copy_tree(REBAL_NAV, OUT / "data" / "fund_nav", ("*.csv",))
         if (REBAL_NAV.parent / "purchase_all.csv").exists():
