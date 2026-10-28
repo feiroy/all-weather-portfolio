@@ -297,6 +297,8 @@ hr{ border-color:var(--line); margin:1.6rem 0; }
 }
 .pf-head .pf-grid .v.up{ color:#FCA5A5; }    /* 蓝底上用浅红/浅绿，保持红涨绿跌语义 */
 .pf-head .pf-grid .v.down{ color:#86EFAC; }
+/* 现金那格多一个小占比：¥12,714 单放着既看不出是多是少，也不知道该不该管 */
+.pf-head .pf-grid .v .s{ font-size:11.5px; font-weight:500; opacity:.72; margin-left:7px }
 
 /* 点开一只基金：详情面板（列表点中哪一只，就在下面展开哪一只） */
 .pf-detail{
@@ -5109,7 +5111,12 @@ with tab3:
         f'{_pf_num(_plan["pnl"], 2)}</div></div>'
         f'<div><div class="k">持有收益率</div><div class="v {_pf_sign(_plan["pnl_pct"])}">'
         f'{_pf_num(_plan["pnl_pct"] * 100, 2)}%</div></div>'
-        f'<div><div class="k">现金</div><div class="v">¥{_plan["cash"]:,.0f}</div></div>'
+        # 现金不是凭空来的：本金 − 已买入＝还留在账上、没买成基金的钱。带上占比，
+        # 否则一个孤零零的 ¥12,714 既看不出多还是少，也不知道该不该管它。
+        f'<div title="起始本金 − 已买入 = 现在还留在账上、没买成基金的钱">'
+        f'<div class="k">现金</div><div class="v">¥{_plan["cash"]:,.0f}'
+        f'<span class="s">{(_plan["cash"] / _tot * 100) if _tot else 0:.1f}%</span>'
+        '</div></div>'
         '</div></div>',
         unsafe_allow_html=True,
     )
@@ -5255,11 +5262,42 @@ def _calc_rebalance() -> None:
                 unsafe_allow_html=True,
             )
         else:
-            st.markdown(
-                '<div class="pf-summary quiet"><span class="lead">这一轮不用动</span>'
-                '<span class="item">所有位置偏离都在 0.5% 以内</span></div>',
-                unsafe_allow_html=True,
-            )
+            # 「没有单」其实是两件事：真的都在阈值内，和「偏离超标但一手都买不起」。
+            # 一律写「都在 0.5% 以内」就是在撒谎 —— 30Y 实际差 1.9%，用户会以为仓位是对的，
+            # 同时那笔现金（¥12,714）明明闲着，页面上却没有任何一处说它为什么闲着。
+            _over = [it for it in _plan["rows"]
+                     if it.get("slot_first") and abs(it.get("dev") or 0) >= 0.005]
+            if not _over:
+                st.markdown(
+                    '<div class="pf-summary quiet"><span class="lead">这一轮不用动</span>'
+                    '<span class="item">所有位置偏离都在 0.5% 以内</span></div>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                # 买不进的原因按主要那条说。注意「现金够不够」和「缺口够不够一手」是两件事：
+                # 30Y 缺口 ¥9,507、现金 ¥12,714 明明够，可一手要 ¥11,032 —— 差的是缺口，不是现金。
+                _over.sort(key=lambda it: -abs(it["dev"]))
+                _maxd = abs(_over[0]["dev"]) * 100
+                _lots = [it["px"] * int(it["f"].get("lot") or 100) for it in _over
+                         if it.get("note") == "不足一手" and it["px"] > 0]
+                if _lots:
+                    # 缺口和一手价必须来自同一只，否则「差 ¥9,262、一手 ¥11,087」其实是两只基金的数字
+                    _worst = _over[0]
+                    _gap = abs(_worst["dev"]) * _plan["asset"]
+                    _lot = _worst["px"] * int(_worst["f"].get("lot") or 100)
+                    # 一手比缺口还大：买一手就超配、不买就一直欠着 —— 这才是这笔现金闲着的原因。
+                    # 只写「不够一手」会被反问「现金 ¥12,714 明明够买 ¥11,087 的一手」，得把这层说破
+                    _tail = (f'一手 ¥{_lot:,.0f} 比缺口 ¥{_gap:,.0f} 还大 —— 买了超、不买欠'
+                             if _worst.get("note") == "不足一手" and _lot > 0 else
+                             f'缺口 ¥{_gap:,.0f} 不够一手（一手 ¥{min(_lots):,.0f} 起）')
+                else:
+                    _tail = "偏离的几处这一轮下不了单"
+                st.markdown(
+                    '<div class="pf-summary quiet"><span class="lead">这一轮买不进</span>'
+                    f'<span class="item">{len(_over)} 个位置偏离超标 · 最大 {_maxd:.1f}%</span>'
+                    f'<span class="item">{_tail}</span></div>',
+                    unsafe_allow_html=True,
+                )
 
         # ---- 差额清单：当前权重 vs 目标权重 → 该买卖多少 ----
         _rb_rows = []
