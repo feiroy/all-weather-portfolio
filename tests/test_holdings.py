@@ -235,6 +235,69 @@ class PlanInvest(unittest.TestCase):
         self.assertAlmostEqual(out["b"], 500, places=2)
 
 
+class PeriodPerformance(unittest.TestCase):
+    """账户按年/按月切段：收益要扣掉入金，收益率不能被转入抬高，回撤每段重新起算。"""
+
+    @staticmethod
+    def _daily(eq, nav, start="2025-06-02"):
+        idx = pd.bdate_range(start, periods=len(eq))
+        return pd.DataFrame({"equity": eq, "nav": nav}, index=idx)
+
+    def test_year_pnl_excludes_deposit(self):
+        # 建仓转入 100 → 涨到 110（赚 10）→ 再转入 100（总资产 210，不是收益）→ 涨到 220（再赚 10）
+        d = self._daily([100, 105, 110, 210, 220], [1.0, 1.05, 1.10, 1.10, 1.10 * 220 / 210])
+        flows = pd.Series([100.0, 0, 0, 100.0, 0], index=d.index)
+        out = HG.period_performance(d, flows, "Y")
+        self.assertEqual(len(out), 1)
+        self.assertAlmostEqual(out[0]["pnl"], 20, places=2)      # 不是 120
+        self.assertAlmostEqual(out[0]["flow"], 200, places=2)
+        self.assertAlmostEqual(out[0]["ret"], 220 / 210 * 1.10 - 1, places=6)
+
+    def test_pnl_splits_at_year_boundary(self):
+        # 同样的数据跨年：2025 只算到年末，2026 接着上一年末总资产起算
+        d = self._daily([100, 105, 110, 210, 220], [1.0, 1.05, 1.10, 1.10, 1.20],
+                        start="2025-12-29")
+        flows = pd.Series([100.0, 0, 0, 100.0, 0], index=d.index)
+        out = {r["period"]: r for r in HG.period_performance(d, flows, "Y")}
+        self.assertEqual(sorted(out), ["2025年", "2026年"])
+        self.assertAlmostEqual(out["2025年"]["pnl"], 10, places=2)   # 100 → 110
+        self.assertAlmostEqual(out["2026年"]["pnl"], 10, places=2)   # 210 → 220
+
+    def test_return_uses_nav_so_deposit_does_not_inflate(self):
+        # 转入当天总资产翻倍，但 nav 没动 → 收益率 0，不是 +100%
+        d = self._daily([100, 100, 200, 210], [1.0, 1.0, 1.0, 1.05])
+        flows = pd.Series([100.0, 0, 100.0, 0], index=d.index)
+        out = HG.period_performance(d, flows, "Y")
+        y = out[0]
+        self.assertAlmostEqual(y["ret"], 0.05, places=6)
+        self.assertAlmostEqual(y["pnl"], 10, places=2)
+
+    def test_first_period_starts_before_the_first_deposit(self):
+        d = self._daily([1000, 1010, 1020], [1.0, 1.01, 1.02])
+        flows = pd.Series([1000.0, 0, 0], index=d.index)
+        out = HG.period_performance(d, flows, "Y")
+        self.assertAlmostEqual(out[0]["pnl"], 20, places=2)
+
+    def test_month_grouping_and_order(self):
+        d = self._daily([100, 101, 102, 103, 104], [1.0, 1.0, 1.0, 1.0, 1.0], "2026-01-28")
+        out = HG.period_performance(d, None, "M")
+        self.assertEqual([r["period"] for r in out][0], "2026年2月")   # 最新在前
+        self.assertTrue(all(r["period"].count("年") == 1 for r in out))
+
+    def test_drawdown_resets_each_period(self):
+        # 第一年最高 1.5 后跌到 1.2；第二年从 1.2 起算，不该带着上一年 -20% 的回撤
+        idx = pd.bdate_range("2025-12-29", periods=8)
+        nav = [1.0, 1.5, 1.2, 1.2, 1.25, 1.1, 1.2, 1.3]
+        d = pd.DataFrame({"equity": [100 * v for v in nav], "nav": nav}, index=idx)
+        out = {r["period"]: r for r in HG.period_performance(d, None, "Y")}
+        self.assertAlmostEqual(out["2025年"]["mdd"], 1.2 / 1.5 - 1, places=6)
+        self.assertAlmostEqual(out["2026年"]["mdd"], 1.1 / 1.25 - 1, places=6)
+
+    def test_empty_input(self):
+        self.assertEqual(HG.period_performance(pd.DataFrame(), None, "Y"), [])
+        self.assertEqual(HG.period_performance(None, None, "M"), [])
+
+
 class Benchmark(unittest.TestCase):
     def test_monthly_rebalance_resets_to_target(self):
         idx = pd.bdate_range("2024-01-01", "2024-06-30")

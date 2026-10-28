@@ -419,3 +419,64 @@ def order_quantity(h: dict, amount: float, nav: float) -> tuple[float, float]:
     lot = int(h.get("lot") or 100)
     shares = int(amount / nav / lot) * lot
     return float(shares), shares * nav
+
+
+def period_performance(daily: pd.DataFrame, flows: pd.Series | None = None,
+                       freq: str = "Y") -> list[dict]:
+    """账户按年 / 按月切段：每段赚了多少钱、收益率多少、期内最深回撤多少。
+
+    daily：index 是日期，必须含 equity（总资产）和 nav（账户单位净值）。
+      nav 是「总资产 ÷ 份额」，转入按当时净值折份额，所以 **nav 本身已经扣掉入金的影响**，
+      `nav 末期 / nav 期初 − 1` 就是这段时间真实的收益率。
+    flows：index 是日期、值是当天净入金（转入为正、转出为负）；缺省当 0。
+
+    每段的算法：
+      期初总资产 = 上一段最后一个交易日的总资产（第一段 = 当天总资产 − 当天净入金，
+                   即「打钱进来之前」的账户，通常是 0）
+      收益（元） = 期末总资产 − 期初总资产 − 期内净入金
+      收益率     = 期末 nav / 期初 nav − 1（第一段期初 nav 取 1.0，账户建仓日按面值起步）
+      期内回撤   = 期内 nav 相对「期内最高点」的最大跌幅（每段重新起算，不跨段累计）
+
+    收益（元）和收益率各回答一个问题：前者是「这段时间账户多/少了多少钱」，
+    后者是「不管中间加了多少钱，这份钱本身涨跌了几个点」。加了钱不等于赚了钱，
+    所以两者一定对不上，表里要并排给。
+
+    返回**最新的一段在前**，每项：period / start / end / eq0 / eq1 / flow / pnl / ret / mdd / days。
+    """
+    if daily is None or len(daily) == 0:
+        return []
+    d = daily.copy()
+    if "equity" not in d.columns or "nav" not in d.columns:
+        return []
+    d = d.sort_index()
+    f = (flows.reindex(d.index).fillna(0.0) if flows is not None
+         else pd.Series(0.0, index=d.index))
+    freq = "Y" if str(freq).upper().startswith("Y") else "M"
+    key = pd.Series(d.index, index=d.index).dt.to_period(freq)
+    out: list[dict] = []
+    prev_eq = prev_nav = None
+    for per, block in d.groupby(key, sort=True):
+        eq = block["equity"].astype(float)
+        nav = block["nav"].astype(float)
+        flow = float(f.loc[block.index].sum())
+        if prev_eq is None:
+            # 第一段：期初 = 第一天总资产 − 当天入金（否则「刚转入就建仓」会被算成一笔收益）
+            first_flow = float(f.loc[block.index[0]])
+            eq0 = float(eq.iloc[0]) - first_flow
+            nav0 = 1.0          # 建仓日按面值 1.0 起步，第一段把当天的手续费一起算进收益
+        else:
+            eq0, nav0 = prev_eq, prev_nav
+        eq1 = float(eq.iloc[-1])
+        nav1 = float(nav.iloc[-1])
+        peak = nav.cummax()
+        mdd = float((nav / peak - 1).min()) if len(nav) else 0.0
+        out.append({
+            "period": (f"{per.year}年" if freq == "Y" else f"{per.year}年{per.month}月"),
+            "start": block.index[0], "end": block.index[-1],
+            "eq0": eq0, "eq1": eq1, "flow": flow,
+            "pnl": eq1 - eq0 - flow,
+            "ret": (nav1 / nav0 - 1) if nav0 > 0 else 0.0,
+            "mdd": mdd, "days": int(len(block)),
+        })
+        prev_eq, prev_nav = eq1, nav1
+    return list(reversed(out))
