@@ -2485,27 +2485,84 @@ export default function (c) {
     if (el && el.classList && el.classList.contains('tbl')) el.remove();
   });
   const rows = D.rows || [], sel = D.selected || '';
-  // 展开/收起会让这一块高度骤变，浏览器会把滚动位置夹回最上面（用户看到「抖一下跳到顶部」）。
-  // 只记 scrollTop 不够：收起之后详情消失、页面变矮，原来的位置超界会被夹到末尾，还是像跳。
-  // 所以记的是「被点那一行在屏幕上的位置」，重跑后把它挪回原位——行还在，位置就还在。
+  // 展开/收起时，这块内容会被整块清空重画：页面高度瞬间掉到几十像素，浏览器就把滚动位置
+  // 夹到顶上再让我们拉回来 —— 用户看到的就是「闪一下、往上跳、再弹回去」。两件事一起做：
+  //   1) 点下去的瞬间把主容器 min-height 钉在当前高度，页面塌不下来，位置就不会被夹；
+  //   2) 同时记下被点那一行在屏幕上离顶多远，重跑期间按帧把它挪回原位（行还没画出来的帧不动）。
+  // 守卫挂在父页 window 上而不是本组件里：重跑会卸载本组件，卸载之后还得有人继续钉着。
   const PDOC = parentElement.ownerDocument, PWIN = PDOC && PDOC.defaultView;
-  const SKEY = 'aw_pf_scroll';
+  const GKEY = '__awPfGuard';
   const scroller = () => (PDOC && (PDOC.querySelector('[data-testid="stMain"]') || PDOC.scrollingElement)) || null;
-  const readMemo = () => {
-    try { return JSON.parse(PWIN.sessionStorage.getItem(SKEY) || 'null'); } catch (e) { return null; }
+  const hostOf = () => PDOC && PDOC.querySelector('[data-testid="stMainBlockContainer"]');
+  // 行在组件自己的影子树里，document.querySelector 找不到 —— 递归穿一遍 shadowRoot
+  const deepRow = (code) => {
+    const find = (root) => {
+      const hit = root.querySelector && root.querySelector('.rw[data-code="' + code + '"]');
+      if (hit) return hit;
+      const kids = (root.querySelectorAll && root.querySelectorAll('*')) || [];
+      for (const k of kids) if (k.shadowRoot) { const r = find(k.shadowRoot); if (r) return r; }
+      return null;
+    };
+    return find(PDOC);
   };
-  const clearMemo = () => { try { PWIN.sessionStorage.removeItem(SKEY); } catch (e) {} };
-  // 被点的那一行可能落在上面或下面那个列表里 —— 谁持有它谁负责挪，另一个什么都不做。
-  // 传的是滚动量（当前 offset 减去当时的 offset），钳位交给浏览器：超界就停在能滚到的位置。
-  const restore = (memo, row) => {
-    const sc = scroller();
-    if (!sc || !row || typeof memo.top !== 'number') return;
-    const dy = row.getBoundingClientRect().top - memo.top;
-    if (Math.abs(dy) > 0.5) sc.scrollTop = sc.scrollTop + dy;
-  };
-  let pend = readMemo();
-  // 只认刚点下的那一下：几秒前的旧记录（比如那次点击没引发重跑）不该再动页面
-  if (pend && (!pend.code || Date.now() - (pend.t || 0) > 5000)) { pend = null; clearMemo(); }
+  const guard = (PWIN && (PWIN[GKEY] = PWIN[GKEY] || { anchor: null, raf: 0, row: null, hostMin: null })) || null;
+  if (guard) {
+    guard.stop = () => {
+      const h = hostOf();
+      if (h && guard.hostMin !== null) h.style.minHeight = guard.hostMin;   // 先把钉住的高度还回去
+      const a = guard.anchor, row = guard.row;
+      guard.anchor = null; guard.row = null; guard.hostMin = null;
+      // 还回去之后页面可能变矮（收起的那个方向），再按行钉一次；超界就交给浏览器夹
+      const sc = scroller();
+      if (sc && row && row.isConnected && a) {
+        const dy = row.getBoundingClientRect().top - a.top;
+        if (Math.abs(dy) > 0.5) sc.scrollTop = sc.scrollTop + dy;
+      }
+    };
+    guard.loop = () => {
+      const a = guard.anchor;
+      if (!a) { guard.raf = 0; return; }
+      const sc = scroller();
+      let key = '?';
+      if (sc) {
+        if (!guard.row || !guard.row.isConnected) guard.row = deepRow(a.code);
+        if (guard.row) {
+          const dy = guard.row.getBoundingClientRect().top - a.top;
+          if (Math.abs(dy) > 0.5) sc.scrollTop = sc.scrollTop + dy;
+        }
+        key = sc.scrollTop + '/' + sc.scrollHeight;
+      }
+      const now = Date.now();
+      if (key !== a.key) { a.key = key; a.still = now; }
+      // 位置连续 260ms 没再变就收工（常见的展开 300ms 内就稳了）；
+      // 最多钉 900ms，防止中途出错把页面高度永久锁住
+      if (now - a.t > 900 || (now - a.t > 280 && now - (a.still || now) > 260)) {
+        guard.stop(); guard.raf = 0; return;
+      }
+      guard.raf = requestAnimationFrame(guard.loop);
+    };
+    guard.start = (code, el) => {
+      const h = hostOf();
+      // 连点同一下（展开再收起）：沿用第一次记下的屏幕位置。第二次若在重排中间量，
+      // 量到的是「已经被挪走」的位置，越钉越偏
+      const keep = guard.anchor && guard.anchor.code === code && Date.now() - guard.anchor.t < 1500;
+      guard.anchor = { code, top: keep ? guard.anchor.top : el.getBoundingClientRect().top,
+                       t: Date.now(), key: '', still: Date.now() };
+      guard.row = el;
+      if (h && guard.hostMin === null) {
+        guard.hostMin = h.style.minHeight || '';
+        h.style.minHeight = Math.round(h.offsetHeight) + 'px';
+      }
+      if (!guard.raf) guard.raf = requestAnimationFrame(guard.loop);
+    };
+    // 用户自己滚了就不再抢：滚轮/触摸/按键一出现就收工（我们自己改 scrollTop 不会触发这些）
+    if (!guard.wired) {
+      guard.wired = true;
+      const bail = () => { if (guard.anchor) guard.stop(); };
+      ['wheel', 'touchstart', 'keydown'].forEach(n =>
+        PDOC.addEventListener(n, bail, { passive: true, capture: true }));
+    }
+  }
   const esc = s => String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const rowHtml = r => '<div class="rw' + (r.code === sel ? ' on' : '') + '" role="row" tabindex="0"'
@@ -2532,28 +2589,12 @@ export default function (c) {
     + '<div class="r c-w">占比 / 目标</div><div class="r c-badge">状态</div></div>'
     + rows.map(rowHtml).join('');
   parentElement.appendChild(root);
-  // 重跑后本组件重新挂载：被点的那一行如果落在本组件里，分几拍把它挪回原位。
-  // 详情里的走势图 iframe 是后到的，高度会再变一次，所以不能只在第一帧放。
-  if (pend) {
-    const own = pend.code ? root.querySelector('.rw[data-code="' + String(pend.code) + '"]') : null;
-    if (own) {
-      const mine = pend;
-      pend = null;
-      clearMemo();
-      const put = () => restore(mine, own);
-      requestAnimationFrame(put);
-      [60, 180, 380].forEach(ms => setTimeout(put, ms));
-    }
-  }
   root.querySelectorAll('.rw').forEach(el => {
     // 每次点击都带上时间戳：点同一行（收起后再点回来）也要触发重跑，
     // 只回传代码时「值没变 → 不重跑 → 点了没反应」
     const pick = () => {
-      // 记下这一行此刻在屏幕上离顶多远，重跑后拿它当锚点把页面挪回来
-      try {
-        const box = el.getBoundingClientRect();
-        PWIN.sessionStorage.setItem(SKEY, JSON.stringify({ code: el.dataset.code, top: box.top, t: Date.now() }));
-      } catch (e) { /* 记不住就记不住，不影响这一下点击 */ }
+      // 先把守卫叫起来（钉高度 + 记锚点），再交给 Streamlit 重跑 —— 顺序反了会漏掉第一帧
+      try { if (guard) guard.start(el.dataset.code, el); } catch (e) { /* 钉不住也不影响点击 */ }
       setStateValue('picked', el.dataset.code);
       setStateValue('picked_at', Date.now());
     };
@@ -4423,11 +4464,14 @@ with tab3:
                 _lower = [] if _cut < 0 else _pf_rows[_cut + 1:]
                 _sel_it = next((it for it in _plan["rows"] if it["code"] == _pf_open), None)
                 _sel_other = next((o for o in _plan["other"] if o["code"] == _pf_open), None)
+                _sel_note = ""
                 if not _sel_it and _sel_other:
                     _why = "位置被关掉了" if _sel_other.get("in_cfg") else "位置已从配置里删掉"
-                    st.caption(f"这只基金所在的{_why}（账上还有 ¥{_sel_other['mv']:,.0f}，占着总资产）："
-                               "想卖就到「交易记录」记一笔卖出，想继续拿就把位置重新打开 —— "
-                               "否则它不参与这一轮的调仓。")
+                    # 这句解释放进详情面板、贴着被点的那一行：留在列表上方的话，
+                    # 选中/取消各来一次，整张表就上下平移 37px —— 那正是「点一下抖一下」的来源
+                    _sel_note = (f"这只基金所在的{_why}（账上还有 ¥{_sel_other['mv']:,.0f}，占着总资产）："
+                                 "想卖就到「交易记录」记一笔卖出，想继续拿就把位置重新打开 —— "
+                                 "否则它不参与这一轮的调仓。")
                     _sel_it = _hg_other_item(_pf_open,
                                              "位置已关闭" if _sel_other.get("in_cfg") else "不在配置里")
 
@@ -4437,6 +4481,8 @@ with tab3:
                                              cap=not _sel_it, pos="top" if _sel_it else "")
                     if _sel_it:
                         with st.container(key="pf_inline"):
+                            if _sel_note:
+                                st.caption(_sel_note)
                             _pf_detail(_sel_it, inline=True)
                     if _lower:
                         _sel_b, _at_b = _pf_list(_lower, key="pf_list_b", head=False,
