@@ -48,7 +48,10 @@ PERIODS = ("日", "月", "年")
 # #updating），持仓页「点开一只基金」的详情图不再和上面的子页签重复写一遍标题。
 # 已用 headless Chrome + CDP 在详情面板里实跑：区间按钮 8 个齐、点近3月后区间文案与统计条同步重算、
 # 日线切月线（5 期 / 全历史 155 期）、localStorage awTrend.fund 写入 {"period":"日","range":"近3月"} 并还原。
-CHART_SOURCE_SHA256 = "d91a5d65f552511510d628cdd0f9ee2c0d5d65e836273c3bd1beb006c9bdb6cb"
+# 2026/10/28 再更新：删掉「最高/最低」白底标注框（只用来算振幅，不再钉在图上压住三角），
+# 买卖三角放大到 8×13 并加 2px 白描边。改完实跑 CDP：区间按钮点近1年 → sel 文案与按钮同步、
+# localStorage 写入、整页重载后仍是近1年（iframe 重建读回）；点回近3月同样还原。
+CHART_SOURCE_SHA256 = "110906798588e65c6e6f08cf5bb733ede16d9ec533e397e70fbf34e25377b8f8"
 NAMES = {"_scroll_chart_html", "_trend_aggregate", "_trend_window_start",
          "_stage_rows", "_stage_summary_html", "_trend_chart_data",
          "_period_label", "_range_buttons", "_chart_head_block"}

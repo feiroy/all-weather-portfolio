@@ -95,9 +95,12 @@ def _purchase_map() -> dict:
 
 
 def is_otc(code: str) -> bool | None:
-    """这只基金能不能在支付宝（场外）申购？查不到返回 None。
+    """这只基金是不是**场外**（按份额申购）？查不到返回 None。
 
-    申购状态是「开放申购 / 限大额」等就算场外可买；「场内」「暂停申购」不算。
+    只看「场内」两个字，不再要求「开放申购」：000005 嘉实增强信用定期债券是
+    暂停申购的场外债基，按旧规则会掉进「按股、100 股一手」，「帮你算」随之
+    算出一句「至少要投 ¥22,571」。暂停申购/限大额说的是**买不买得进**，
+    和「一手多少股」没关系。
     """
     info = _purchase_map().get(str(code).strip())
     if not info:
@@ -105,9 +108,7 @@ def is_otc(code: str) -> bool | None:
     buy = str(info.get("buy", "") or "").strip()
     if not buy:
         return None
-    if "开放申购" in buy or "限大额" in buy:
-        return True
-    return False
+    return "场内" not in buy
 
 
 def name_map() -> dict:
