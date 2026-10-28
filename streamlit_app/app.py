@@ -354,13 +354,22 @@ hr{ border-color:var(--line); margin:1.6rem 0; }
   .tr-tip{ display:none }                              /* 窄屏留给控件本身，下面那句提示已经说过一遍 */
   .st-key-tr_mode_switch > [data-testid="stElementContainer"]:last-child{ margin-left:0 }
 }
-/* 台账头：右边摘要和左边筛选框一样高（原来摘要 48px、下拉 40px，两个盒子齐头不齐尾） */
+/* 台账头：摘要条铺满整行、紧贴表格，左右两端跟表格对齐 ——
+   它原来是跟筛选下拉挤一行的右半格，左边比表格缩进 270px、右边却齐平，看着「前后没对上」 */
 .pf-summary.ledger{
-  height:40px; padding:0 14px; margin:0; gap:10px 16px;
+  height:40px; padding:0 14px 0 12px; margin:6px 0 0; gap:10px 16px;
   flex-wrap:nowrap; overflow:hidden; box-shadow:none; border-left-width:3px;
 }
 .pf-summary.ledger .lead{ font-size:13px; white-space:nowrap }
 .pf-summary.ledger .item{ font-size:12.5px; white-space:nowrap }
+/* 台账筛选那行的右半边：说明文字贴底对齐下拉框，右端跟表格内容右边缘（14px 内边距）对齐 */
+.tr-ledger-hint{ display:flex; justify-content:flex-end; align-items:center; height:40px;
+  padding-right:14px; font-size:12px; color:var(--muted); white-space:nowrap }
+@media(max-width:900px){
+  .tr-ledger-hint{ display:none }                      /* 手机上列会叠成一列，这句跟着落到下拉下面很碍事 */
+  /* 摘要条别裁：窄屏放不下一行就换行，宁可两行也别把「涉及 N 只基金」切掉 */
+  .pf-summary.ledger{ height:auto; min-height:40px; padding:9px 12px; flex-wrap:wrap; row-gap:4px }
+}
 /* 子页签那一条：左侧留白和上面的数据带对齐 */
 .st-key-pf_sub{ margin-top:2px; }
 /* 只有两三天记录时，累计盈亏先给数字，不画那条一条直线的图 */
@@ -5168,16 +5177,17 @@ with tab5:
         _pick_map = {"全部基金": ""}
         for _c0 in _ledger_codes:
             _pick_map[f'{_c0} {FL.fund_name(_c0) or ""}'.strip()] = _c0
-        st.markdown(
-            '<div class="sec-head"><span class="t">成交台账</span>'
-            '<span class="r">最近的在上 · 铅笔就地改，垃圾桶就地删</span></div>',
-            unsafe_allow_html=True,
-        )
+        st.markdown('<div class="sec-head"><span class="t">成交台账</span></div>',
+                    unsafe_allow_html=True)
         # 筛选和摘要是台账的头，跟表贴在一起 ——
-        # 夹在「记一笔」和表中间，看着就像凭空多出来的第三个区块
+        # 夹在「记一笔」和表中间，看着就像凭空多出来的第三个区块。
+        # 摘要必须**单独一行铺满全宽**：跟下拉挤一行时它从下拉右边起，左边比表格缩进近 300px、
+        # 右边却跟表格齐平，上下扫过去就是「前后没对齐」。那空出来的右半行给操作说明，别留白。
         _fc1, _fc2 = st.columns([1.6, 5.0], gap="medium", vertical_alignment="bottom")
         _fcode = _pick_map[_fc1.selectbox("看哪只基金的历史", list(_pick_map),
                                           key="tr_fund_filter")]
+        _fc2.markdown('<div class="tr-ledger-hint">最近的在上 · 铅笔就地改，垃圾桶就地删</div>',
+                      unsafe_allow_html=True)
         _f_tr = ([t for t in _trades if str(t.get("code") or "") == _fcode]
                  if _fcode else list(_trades))
         # 摘要跟着筛选走：不选基金时给全账户的，别把右半边留成一片空白
@@ -5217,7 +5227,7 @@ with tab5:
         else:
             _it_html += [f'<span class="item">涉及 {len(_ledger_codes)} 只基金</span>']
             _lead = "全部成交"
-        _fc2.markdown(
+        st.markdown(
             f'<div class="pf-summary quiet ledger"><span class="lead">{_lead}</span>'
             + "".join(_it_html) + '</div>', unsafe_allow_html=True)
 
