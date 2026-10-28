@@ -2292,7 +2292,12 @@ export default function (c) {
     + rows.map(rowHtml).join('');
   parentElement.appendChild(root);
   root.querySelectorAll('.rw').forEach(el => {
-    const pick = () => { if (el.dataset.code !== sel) setStateValue('picked', el.dataset.code); };
+    // 每次点击都带上时间戳：点同一行（收起后再点回来）也要触发重跑，
+    // 只回传代码时「值没变 → 不重跑 → 点了没反应」
+    const pick = () => {
+      setStateValue('picked', el.dataset.code);
+      setStateValue('picked_at', Date.now());
+    };
     el.addEventListener('click', pick);
     el.addEventListener('keydown', e => {
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); }
@@ -2305,19 +2310,23 @@ export default function (c) {
 _PF_LIST = st.components.v2.component("aw_pf_list", css=_PF_LIST_CSS, js=_PF_LIST_JS)
 
 
-def _pf_list(rows: list[dict], key: str = "pf_list"):
-    """渲染持仓列表并返回选中的基金代码；没点过就选第一只，选中的那只被删了也回退到第一只。"""
+def _pf_list(rows: list[dict], selected: str = "", key: str = "pf_list"):
+    """渲染持仓列表，返回 (这次点中的代码, 点击时刻)。
+
+    `selected` 由调用方给（没展开详情就传空串，列表不高亮任何一行）；
+    时刻用来区分「用户刚点了这一行」和「上一次的选择还留着」——
+    有了它，收起之后再点同一行也能重新展开。
+    """
     if not rows:
-        return None
+        return "", 0
     codes = [r["code"] for r in rows]
-    _state = st.session_state.get(key)
-    picked = _state.get("picked") if isinstance(_state, dict) else None
-    if picked not in codes:
-        picked = codes[0]
-    res = _PF_LIST(key=key, data={"rows": rows, "selected": picked},
-                   default={"picked": picked}, on_picked_change=lambda: None)
+    sel = selected if selected in codes else ""
+    res = _PF_LIST(key=key, data={"rows": rows, "selected": sel},
+                   default={"picked": sel, "picked_at": 0},
+                   on_picked_change=lambda: None, on_picked_at_change=lambda: None)
     out = res.get("picked") if hasattr(res, "get") else None
-    return out if out in codes else picked
+    at = int(res.get("picked_at") or 0) if hasattr(res, "get") else 0
+    return (out if out in codes else ""), at
 
 
 # 台账：点行尾铅笔，这一行下面直接展开编辑面板（日期 / 类型 / 基金 / 金额 / 单价 / 手续费），
@@ -2957,8 +2966,11 @@ def _pnl_chart_html(series, trades=None, height=200, store="awPnl.fund",
             .replace("__BTNS__", btns).replace("__DATA__", payload))
 
 
-def _pf_detail(it: dict) -> None:
-    """点开一只基金：它自己的关键数字 + 走势（标出历史买卖点）+ 它的成交流水。"""
+def _pf_detail(it: dict) -> bool:
+    """点开一只基金：上面是它自己的数字，下面是「买卖点 / 累计盈亏」两个子页签。
+
+    返回 True = 用户点了「收起」，调用方负责把面板收回去（页面重跑一次）。
+    """
     code = it["code"]
     name = str(it["f"].get("name") or FL.fund_name(code) or code)
     shares, px, px_prev, cost = it["shares"], it["px"], it["px_prev"], it["cost"]
@@ -3000,36 +3012,54 @@ def _pf_detail(it: dict) -> None:
             st.caption(f"这一只已经清仓（最近一次 {_cn_date(_cl[0]['close'])}，"
                        f"当时累计 {_pf_num(float(_cl[0]['pnl'] or 0), 2)} 元）—— "
                        "清仓那天赚了多少、拿了多久、期间最高最低，都在页面下方「已清仓」里。")
-    if len(_ser) < 2:
-        st.info("这只基金还没有净值数据，拉取后才有走势图（页底「拉取缺的净值」）。")
-    else:
-        _hist = _trend_chart_data(_ser)
-        _d = _hist["日"]
-        st.iframe(
-            _scroll_chart_html(_d["labels"], _d["prices"], _d["windows"]["近1年"]["count"],
-                               rets=_d["rets"], histories=_hist, trades=_tr,
-                               store="awTrend.fund", default_range="近1年",
-                               heading="走势与买卖点"),   # 基金名就在上面的详情卡里，标题不再重复，手机上也少换行
-            height=840,
-        )
-        if _tr:
-            st.caption(f"红三角＝买入、绿三角＝卖出（这只基金共 {len(_tr)} 笔），"
-                       "悬停或点一下净值线能看到每笔的份额与成交净值。")
-        else:
-            st.caption("这只基金还没有买卖成交 —— 在「买卖提醒」登记或「交易记录」补录后，图上就会出现三角标记。")
 
-    # 累计盈亏：换成「元」来看赚了多少，口径与支付宝「累计盈亏」一致
-    _pnl = _code_pnl_curve(code)
-    if len(_pnl) > 1:
-        st.iframe(_pnl_chart_html(_pnl, trades=_tr, store="awPnl.fund",
-                                  default_range="全部"), height=380)
-        st.caption("累计盈亏 = 手上还拿着的浮盈 + 已经卖出落袋的实盈（买入算手续费、卖出扣手续费），"
-                   "所以卖掉之后曲线不会掉下来；零轴以上填红＝赚、以下填绿＝亏，三角是这只基金的买卖点。"
-                   "上面的「持有收益」只算手上这一部分，两者差多少，就是已经卖掉的那部分赚到（或亏掉）的钱。"
-                   + (f"这只基金目前只有 {len(_pnl)} 个交易日的记录（第一笔 {_pnl.index[0].strftime('%Y/%m/%d')}），"
-                      "曲线会随着持有天数慢慢长起来。" if len(_pnl) <= 5 else ""))
-    elif _tr:
-        st.caption("累计盈亏要等有净值数据才能画：这只基金缺净值，拉取后自动出现。")
+    # 子页签 + 收起：一行里左边左右切换、右边收回面板。
+    # 两张图不再上下堆着（原来加起来 1200 多像素，点开一只基金得滚半天）。
+    _sc1, _sc2 = st.columns([3, 1], gap="small", vertical_alignment="center")
+    with _sc1:
+        _sub = st.segmented_control(
+            "看这只基金的", ["买卖点", "累计盈亏"], default="买卖点", key="pf_sub",
+            label_visibility="collapsed",
+            help="买卖点＝净值走势上标出每一笔买入/卖出；累计盈亏＝这只基金从第一笔到现在的累计赚亏（元）。",
+        ) or "买卖点"
+    with _sc2:
+        with st.container(horizontal=True, horizontal_alignment="right"):
+            _closed = st.button("收起", key="pf_close", help="收回这只基金的详情，回到上面的持仓列表")
+
+    if _sub == "买卖点":
+        if len(_ser) < 2:
+            st.info("这只基金还没有净值数据，拉取后才有走势图（页底「拉取缺的净值」）。")
+        else:
+            _hist = _trend_chart_data(_ser)
+            _d = _hist["日"]
+            st.iframe(
+                _scroll_chart_html(_d["labels"], _d["prices"], _d["windows"]["近1年"]["count"],
+                                   rets=_d["rets"], histories=_hist, trades=_tr,
+                                   store="awTrend.fund", default_range="近1年",
+                                   heading="走势与买卖点"),   # 基金名就在上面的详情卡里，标题不再重复，手机上也少换行
+                height=840,
+            )
+            if _tr:
+                st.caption(f"红三角＝买入、绿三角＝卖出（这只基金共 {len(_tr)} 笔），"
+                           "悬停或点一下净值线能看到每笔的份额与成交净值。")
+            else:
+                st.caption("这只基金还没有买卖成交 —— 在「买卖提醒」登记或「交易记录」补录后，"
+                           "图上就会出现三角标记。")
+    else:
+        # 累计盈亏：换成「元」来看赚了多少，口径与支付宝「累计盈亏」一致
+        _pnl = _code_pnl_curve(code)
+        if len(_pnl) > 1:
+            st.iframe(_pnl_chart_html(_pnl, trades=_tr, store="awPnl.fund",
+                                      default_range="全部"), height=520)
+            st.caption("累计盈亏 = 手上还拿着的浮盈 + 已经卖出落袋的实盈（买入算手续费、卖出扣手续费），"
+                       "所以卖掉之后曲线不会掉下来；零轴以上填红＝赚、以下填绿＝亏，三角是这只基金的买卖点。"
+                       "上面的「持有收益」只算手上这一部分，两者差多少，就是已经卖掉的那部分赚到（或亏掉）的钱。"
+                       + (f"这只基金目前只有 {len(_pnl)} 个交易日的记录（第一笔 {_pnl.index[0].strftime('%Y/%m/%d')}），"
+                          "曲线会随着持有天数慢慢长起来。" if len(_pnl) <= 5 else ""))
+        elif _tr:
+            st.caption("累计盈亏要等有净值数据才能画：这只基金缺净值，拉取后自动出现。")
+        else:
+            st.caption("这只基金还没有成交，累计盈亏是 0。")
 
     # 逐笔成交流水不在这里重复一遍：只报个数并指路，「交易记录」页可以按基金筛出全部记录就地改
     _mine_tr = [t for t in ((acct or {}).get("trades") or [])
@@ -3047,6 +3077,7 @@ def _pf_detail(it: dict) -> None:
                    f"累计买入 ¥{_amt_b:,.0f}、卖出 ¥{_amt_s:,.0f}。"
                    "要逐笔看或改动，去「交易记录」页顶上选这只基金 —— 那里能把它的记录全筛出来，"
                    "日期 / 金额 / 单价都可以就地改。")
+    return _closed
 
 # ============================================================
 # 已清仓：份额归零的那一轮，赚了多少、拿了多久 —— 从成交记录还原，不依赖基金是否还在配置里
@@ -3849,7 +3880,8 @@ with tab2:
 with tab3:
     st.subheader("我的持仓 · 有什么，跑得怎么样")
     st.caption(
-        "一只基金一行，**点一行**看它自己的走势和历史买卖点（图上红三角＝买入、绿三角＝卖出）、累计盈亏和这一轮该不该动。"
+        "一只基金一行，**点一行**在下面展开它：上面是金额/收益/成本，下面用「买卖点 / 累计盈亏」两个子页签左右切换，"
+        "看完点**收起**就回到这个列表。"
         "逐笔成交在「交易记录」页；账户与两条基准的对比在「收益对比」页。"
     )
 
@@ -3905,7 +3937,13 @@ with tab3:
             # 占比列留空：这些钱不参与目标权重，跟上面几行的百分比不是同一把尺，混排会看起来「对不上」
             _r.update({"badge": _why, "badge_cls": "warn", "w": "—"})
             _pf_rows.append(_r)
-        _sel = _pf_list(_pf_rows)           # 点一行 → 返回该基金代码（组件里高亮选中行）
+        # 详情面板默认收着：一进页面只有列表，点哪只展开哪只
+        _pf_open = st.session_state.get("pf_open") or ""
+        _sel, _click_at = _pf_list(_pf_rows, selected=_pf_open)   # (这次点中的代码, 点击时刻)
+        if _click_at and _click_at != st.session_state.get("pf_click_at"):
+            st.session_state["pf_click_at"] = _click_at
+            st.session_state["pf_open"] = _sel
+            st.rerun()          # 重跑一次，让列表的高亮跟上这次点击
         # 汇总紧跟列表：点开某只基金后详情很长，这句被推到详情下面就等于看不见了
         _other_sum = sum(float(o["mv"]) for o in _plan["other"])
         if _other_sum > 0:
@@ -3917,18 +3955,18 @@ with tab3:
             )
         _sel_it = next((it for it in _plan["rows"] if it["code"] == _sel), None)
         _sel_other = next((o for o in _plan["other"] if o["code"] == _sel), None)
-        if _sel_it:
-            st.caption("点一行展开这只基金的走势与历史买卖点。")
-        elif _sel_other:
+        if not _sel_it and _sel_other:
             _why = "位置被关掉了" if _sel_other.get("in_cfg") else "位置已从配置里删掉"
             st.caption(f"这只基金所在的{_why}（账上还有 ¥{_sel_other['mv']:,.0f}，占着总资产）："
                        "想卖就到「交易记录」记一笔卖出，想继续拿就把位置重新打开 —— 否则它不参与这一轮的调仓。")
             _sel_it = _hg_other_item(_sel, "位置已关闭" if _sel_other.get("in_cfg") else "不在配置里")
-        else:
-            st.caption("点一行展开这只基金的走势与历史买卖点。")
 
-        if _sel_it:
-            _pf_detail(_sel_it)
+        # 面板收着的时候只留一句指路（刚收起、或第一次进来都是这个状态）
+        if not (_sel_it and _pf_open == _sel_it["code"]):
+            st.caption("点一行展开这只基金的买卖点与累计盈亏。")
+        elif _pf_detail(_sel_it):
+            st.session_state["pf_open"] = ""
+            st.rerun()
 
         _empty_slots = [s for s in HG.SLOTS
                         if holdings.get(s, {}).get("on", True) and not HG.funds(holdings.get(s, {}))]
