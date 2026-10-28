@@ -3492,9 +3492,18 @@ def _calendar_payload(series, money=None):
         prev = last
 
     def per(freq, fmt):
+        """每期涨跌 = 期末 / 上期期末 − 1。
+
+        第一段没有「上期末」，就拿区间起点当基准 —— 否则 `pct_change` 会把第一段整段丢掉：
+        账户只跑了一年时「年」只剩下一段，页脚就变成「全年涨跌 —」，明明月月都有数。
+        """
         p = x.resample(freq).last().dropna()
-        r = (p.pct_change(fill_method=None) * 100).dropna()
-        return {t.strftime(fmt): round(float(v), 4) for t, v in r.items()}
+        out, prev = {}, float(x.iloc[0])
+        for t, v in p.items():
+            if prev > 0:
+                out[t.strftime(fmt)] = round((float(v) / prev - 1) * 100, 4)
+            prev = float(v)
+        return out
 
     def per_money(freq, fmt):
         """每期赚的钱 = 期内每天的「当天收益（已扣入金）」相加。"""
@@ -3545,16 +3554,16 @@ __CAL_CSS__
   const pick = document.getElementById('pick'), prevB = document.getElementById('prev'), nextB = document.getElementById('next'), nav = document.getElementById('nav');
   let mode = '日', ym = D.defMonth.slice(), yy = D.defYear;
   const ok = v => v !== null && v !== undefined && Number.isFinite(v);
-  // 百分比保留两位小数，小于 0.005% 的按 0.00% 显示，别出现「-0.00%」这种负零
-  const EPS = 0.005;
+  // 保留两位小数，但量级不到 0.01% 时多给两位 —— 账户一天赚两块 / 五十万 = 0.0004%，
+  // 只留两位就成了「-0.00%」：既看不出涨跌，又会跟页脚「上涨 3 天」对不上。
   const pct = v => !ok(v) ? '—'
-    : (Math.abs(v) < EPS ? '0.00' : (v > 0 ? '+' : '') + v.toFixed(2)) + '%';
-  const color = v => !ok(v) || Math.abs(v) < EPS ? '#475569' : (v > 0 ? '#C52828' : '#16703B');
+    : (v > 0 ? '+' : '') + v.toFixed(Math.abs(v) > 0 && Math.abs(v) < 0.01 ? 4 : 2) + '%';
+  const color = v => !ok(v) || Math.abs(v) < 1e-10 ? '#475569' : (v > 0 ? '#C52828' : '#16703B');
   const p2 = n => String(n).padStart(2, '0');
-  const cls = v => !ok(v) ? 'none' : (v > EPS ? 'up' : (v < -EPS ? 'down' : 'flat'));
+  const cls = v => !ok(v) ? 'none' : (v > 1e-10 ? 'up' : (v < -1e-10 ? 'down' : 'flat'));
   // 涨跌幅越大底色越深（热力），颜色与 --red / --green 同值
   const heat = (v, mx) => {
-    if (!ok(v) || Math.abs(v) < EPS) return '';
+    if (!ok(v) || Math.abs(v) < 1e-10) return '';
     const a = (0.06 + 0.22 * Math.min(1, Math.abs(v) / (mx || 1))).toFixed(3);
     return v > 0 ? `background:rgba(197,40,40,${a})` : `background:rgba(22,112,59,${a})`;
   };
