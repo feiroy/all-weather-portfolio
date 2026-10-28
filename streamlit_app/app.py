@@ -315,6 +315,45 @@ hr{ border-color:var(--line); margin:1.6rem 0; }
 .pf-detail .pd-grid .v.up{ color:var(--red); }
 .pf-detail .pd-grid .v.down{ color:var(--green); }
 .pf-detail.is-closed{ border-left-color:var(--line-strong); }   /* 已清仓：灰边，和「在手上」的蓝边区分 */
+/* 就地展开：详情插在被点的那一行下面，和上下两段列表拼成一张卡（各自只留需要的圆角/边框） */
+.pf-detail.inline{
+  margin:0; border:0; border-radius:0; box-shadow:none; padding:0 0 2px;
+}
+/* 就地展开时上面那一行已经写着基金名/代码/这一轮标记，详情里不再重复一遍 */
+.pf-detail.inline .pd-top{ display:none; }
+/* 6 个数字收成一条浅色数据带：比直接摊在白底上整齐，也不会看着像散落的几串数字 */
+.pf-detail.inline .pd-grid{
+  margin:0; padding:10px 12px; gap:4px 10px;
+  background:var(--bg); border:1px solid var(--line-soft); border-radius:10px;
+}
+.pf-detail.inline .pd-grid .v{ font-size:13.5px; margin-top:1px; }
+/* Streamlit 给 markdown 内层挂了 -15px 底边（为了吃掉末段 <p> 的间距），
+   我们这里末行是 <div>，于是真实高度被吃掉 15px —— 数据带会压到下面那条工具行上 */
+.st-key-pf_inline .stMarkdown div{ margin-bottom:0 !important; }
+.st-key-pf_stack{ gap:0 !important; }        /* 三段之间不要空隙，否则断成三张卡 */
+.st-key-pf_inline{
+  background:var(--card); border-left:1px solid var(--line); border-right:1px solid var(--line);
+  padding:10px 14px 12px; gap:.5rem !important;
+  box-shadow:inset 3px 0 0 #3B82F6;           /* 和上面那一行「选中」的竖条同宽同色，连成一条 */
+}
+/* 子页签与「收起」共用的那条工具行：两头对齐，收起做成小药丸 —— 否则是右端一行孤零零的灰字 */
+.st-key-pf_bar .stButton button{
+  border:1px solid var(--line); background:var(--card); color:var(--sub);
+  border-radius:999px; font-size:12px; font-weight:600;
+  min-height:0; height:26px; padding:0 12px; box-shadow:none;
+}
+.st-key-pf_bar .stButton button:hover{
+  border-color:var(--line-strong); color:var(--ink); background:var(--bg);
+}
+/* 只有两三天记录时，累计盈亏先给数字，不画那条一条直线的图 */
+.pf-short{
+  margin:0; padding:14px 16px; border:1px solid var(--line-soft); border-radius:10px;
+  background:var(--bg);
+}
+.pf-short .v{ font-size:24px; font-weight:680; letter-spacing:-.5px; font-variant-numeric:tabular-nums; }
+.pf-short .v.up{ color:var(--red); }
+.pf-short .v.down{ color:var(--green); }
+.pf-short .t{ font-size:11.5px; color:var(--sub); margin-top:4px; line-height:1.6; }
 @media(max-width:900px){ .pf-detail .pd-grid{ grid-template-columns:repeat(3,1fr); row-gap:14px; } }
 /* 买卖标记：红买绿卖，和支付宝走势图里的「买入 / 卖出」气泡同色 */
 .pf-badge{
@@ -676,7 +715,7 @@ box-shadow:0 4px 16px rgba(15,23,42,.16);font-variant-numeric:tabular-nums}
 .summary-prices small{color:#475569;margin-right:4px}.summary-prices b{font-weight:500}
 .amp-row{display:flex;align-items:center;gap:8px 16px;flex-wrap:wrap;margin-top:10px;color:#475569;font-size:12px}
 .amp-row b{color:#334155;font-size:14px;font-weight:600}.amp-row small{font-size:11px}
-@media(max-width:520px){#range-controls{gap:0;width:100%}
+@media(max-width:520px){#range-controls{gap:0;width:100%;flex-wrap:wrap}
   button[data-range]{padding:8px 9px;font-size:12px}.controls{flex-wrap:wrap;gap:6px}#period{margin-left:auto}
   .state-line{font-size:11px}.summary-result b{font-size:21px}.summary-prices{flex-wrap:wrap;font-size:12px}}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto}}
@@ -1115,6 +1154,18 @@ __CMP_CSS__
             .replace("__BTNS__", btns).replace("__CMP_DATA__", payload).replace("__TITLE__", title))
 
 
+def _chart_head_block(heading: str, icon_path: str) -> str:
+    """图表卡片顶部那一行标题。heading 为空就整行隐藏，只留一个 #updating 给加载提示用。
+
+    详情卡里已经有「买卖点 / 累计盈亏」子页签，图里再写一遍标题就是重复，也把版面撑得很高。
+    """
+    if not heading:
+        return '<div class="heading" hidden><span id="updating" role="status">正在更新</span></div>'
+    return ('<div class="heading"><h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true">'
+            f'<path d="{icon_path}"/></svg>{html_escape(heading)}</h3>'
+            '<span id="updating" role="status">正在更新</span></div>')
+
+
 def _scroll_chart_html(labels, values, win, height=540, rets=None, revision=0, histories=None,
                        trades=None, store=None, default_range="近1月", heading="走势分析"):
     """全历史数据 + 有界索引视窗；只绘制可见部分，不创建超宽画布。
@@ -1146,9 +1197,10 @@ def _scroll_chart_html(labels, values, win, height=540, rets=None, revision=0, h
     }, ensure_ascii=False, allow_nan=False).replace("<", "\\u003c")
     template = r"""<style>
 __BASE_CSS__
+__HEAD_CSS__
 </style>
 <div id="wrap" aria-busy="false">
-<div class="heading"><h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4v16h16M7 14l4-5 4 3 5-7"/></svg>__HEADING__</h3><span id="updating" role="status">正在更新</span></div>
+__HEAD_BLOCK__
 <div class="controls"><div id="range-controls" role="group" aria-label="常用区间">
 __RANGE_BTNS__
 </div><select id="period" aria-label="周期"><option value="日">日线</option><option value="月">月线</option><option value="年">年线</option></select></div>
@@ -1476,8 +1528,9 @@ __RANGE_BTNS__
 })();
 </script>"""
     return (template.replace("__BASE_CSS__", _COMP_BASE_CSS)
+            .replace("__HEAD_CSS__", "" if heading else ".controls{margin-top:2px}")
+            .replace("__HEAD_BLOCK__", _chart_head_block(heading, "M4 4v16h16M7 14l4-5 4 3 5-7"))
             .replace("__RANGE_BTNS__", _range_buttons(default_range))
-            .replace("__HEADING__", html_escape(heading))
             .replace("__CHART_DATA__", payload))
 
 
@@ -1549,6 +1602,7 @@ _cr = f"{ETF_META['credit']['name']} ({ETF_META['credit']['code']})"
 SIGNAL_ACTIONS = [
     {
         "key": "nonferr_below_sma75",
+        "sell_slot": "nonferr", "buy_slot": "credit",
         "desc": f"{_nf} 跌破 SMA75",
         "condition": lambda s: s.get("nonferr_below_sma75", False),
         "sell": _nf,
@@ -1558,6 +1612,7 @@ SIGNAL_ACTIONS = [
     },
     {
         "key": "gold_below_sma75",
+        "sell_slot": "gold", "buy_slot": "credit",
         "desc": f"{_au} 跌破 SMA75",
         "condition": lambda s: s.get("gold_below_sma75", False),
         "sell": _au,
@@ -1567,6 +1622,7 @@ SIGNAL_ACTIONS = [
     },
     {
         "key": "sp500_below_sma75",
+        "sell_slot": "us_sp500", "buy_slot": "credit",
         "desc": f"{_sp} 跌破 SMA{SP500_TREND_WINDOW}",
         "condition": lambda s: s.get("sp500_below_sma75", False),
         "sell": _sp,
@@ -1576,6 +1632,7 @@ SIGNAL_ACTIONS = [
     },
     {
         "key": "hs300_dip_ready",
+        "sell_slot": "credit", "buy_slot": "hs300",
         "desc": f"HS300 回撤>{HS300_DIP_THRESHOLD:.0%} + PB<{HS300_PB_ENTRY}%ile + 价格>SMA{HS300_DIP_SMA}",
         "condition": lambda s: s.get("hs300_dip_ready", False),
         "sell": f"{_cr}（筹资）",
@@ -1585,6 +1642,7 @@ SIGNAL_ACTIONS = [
     },
     {
         "key": "hs300_dip_exit",
+        "sell_slot": "hs300", "buy_slot": "credit",
         "desc": f"PE > {HS300_PE_EXIT}%ile，抄底出场",
         "condition": lambda s: s.get("hs300_dip_exit", False),
         "sell": f"{_hs} 恢复原权重",
@@ -2027,7 +2085,7 @@ _hg_other_mv = {
 def _hg_plan() -> dict:
     """按策略目标权重算「该买多少 / 该卖多少」—— 全站唯一一份调仓计划。
 
-    「我的持仓」的买卖标记、「买卖提醒」的清单与一键登记都读这一份，
+    「我的账户」的买卖标记、「买卖提醒」的清单与一键登记都读这一份，
     两处不再各算一遍，避免数字对不上。
 
     口径：**调仓基数 = 配置内持仓市值 + 现金**，不含「其他」（位置已关/已删、账上还有份额的代码）。
@@ -2119,6 +2177,157 @@ def _hg_plan() -> dict:
 
 
 _plan = _hg_plan()
+
+
+def _acct_flows() -> pd.Series:
+    """日频净入金（正=进钱，负=出钱）：转入/入金为正，转出/出金为负。
+
+    成交日先顺延到交易日（周末、节假日的转账算到下一个净值日），与 `_replay_holdings` 同一口径 ——
+    否则按年切段时这笔钱会落在「那天没有净值」的日子上，收益就被算歪了。
+    """
+    if acct is None or not len(_acct_daily):
+        return pd.Series(dtype=float)
+    idx = _acct_daily.index
+    out = pd.Series(0.0, index=idx)
+    for t in acct.get("trades", []):
+        side = t.get("side")
+        if side not in ("转入", "入金", "转出", "出金"):
+            continue
+        try:
+            d = pd.Timestamp(t.get("date"))
+        except Exception:
+            continue
+        i = min(int(idx.searchsorted(d)), len(idx) - 1)
+        amt = float(t.get("shares", 0) or 0)
+        out.iloc[i] += -amt if side in ("转出", "出金") else amt
+    return out
+
+
+def _period_perf(freq: str = "Y") -> list[dict]:
+    """账户按年 / 按月切段：赚了多少钱、收益率、期内回撤（口径见 HG.period_performance）。"""
+    if acct is None or len(_acct_daily) == 0:
+        return []
+    return HG.period_performance(_acct_daily, _acct_flows(), freq)
+
+
+_PC_CSS = r"""
+#wrap{padding:0}
+.plg{display:flex;gap:18px;align-items:center;font-size:12px;color:#475569;margin:0 0 6px}
+.plg span{display:inline-flex;align-items:center;gap:6px}
+.plg i{width:11px;height:11px;border-radius:2px;display:inline-block}
+.plg i.b{background:#C52828;opacity:.85}
+.plg i.l{height:0;border-top:2px solid #3B82F6;border-radius:0;width:16px}
+#chart{display:block;width:100%}
+#tip{width:172px}
+"""
+
+
+def _period_chart_html(rows: list[dict], height: int = 300) -> str:
+    """每期收益柱（元，左轴）+ 收益率折线（%，右轴）——上面是「钱」，同一张图上叠「百分比」。
+
+    单纯画净值曲线看不出「这个月到底赚了多少钱」；只画柱子又看不出「这份钱本身的涨跌」。
+    两个都画，才能对上「加了钱 ≠ 赚了钱」这件事。
+    """
+    data = json.dumps(
+        {"rows": [{"k": r["period"], "pnl": round(float(r["pnl"]), 2),
+                   "ret": round(float(r["ret"]) * 100, 4),
+                   "mdd": round(float(r["mdd"]) * 100, 4),
+                   "flow": round(float(r["flow"]), 2)} for r in reversed(rows)],
+         "height": int(height)}, ensure_ascii=False, allow_nan=False).replace("<", "\\u003c")
+    tpl = r"""<style>
+__BASE_CSS__
+__PC_CSS__
+</style>
+<div id="wrap">
+<div class="plg"><span><i class="b"></i>每期收益（元 · 左轴）</span><span><i class="l"></i>收益率（% · 右轴）</span></div>
+<svg id="chart" role="img" aria-label="每期收益与收益率"></svg>
+<div id="tip"></div>
+</div>
+<script>
+(() => {
+  const D = __PDATA__;
+  const rows = D.rows || [];
+  const wrap = document.getElementById('wrap'), svg = document.getElementById('chart'), tip = document.getElementById('tip');
+  const H = D.height, L = 66, R = 60, T = 16, B = 30;
+  const ok = v => v !== null && v !== undefined && Number.isFinite(v);
+  const col = v => Math.abs(v) < 1e-9 ? '#94A3B8' : (v > 0 ? '#C52828' : '#16703B');
+  const fmtC = v => { const a = Math.abs(v);
+    if (a >= 10000) return (v / 10000).toFixed(a >= 100000 ? 0 : 2) + '万';
+    return v.toFixed(0); };
+  let rdec = 2, W = 0, slot = 0;
+  const fmtP = v => (v > 0 ? '+' : '') + v.toFixed(Math.max(2, rdec)) + '%';
+  const money = v => Math.abs(v).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  function show(r, i) {
+    tip.innerHTML = `<div class="tip-row"><span class="tip-label">${r.k}</span>`
+      + `<b style="color:${col(r.pnl)}">${r.pnl > 0 ? '+' : ''}¥${money(r.pnl)}</b></div>`
+      + `<div class="tip-row"><span class="tip-label">收益率</span><b style="color:${col(r.ret)}">${fmtP(r.ret)}</b></div>`
+      + `<div class="tip-row"><span class="tip-label">期内回撤</span><b>${fmtP(r.mdd)}</b></div>`
+      + `<div class="tip-row"><span class="tip-label">净投入</span><b>¥${money(r.flow)}</b></div>`;
+    const g = document.getElementById('guide');
+    if (g) { const cx = L + slot * (i + .5); g.setAttribute('x1', cx); g.setAttribute('x2', cx); g.setAttribute('visibility', 'visible'); }
+    tip.style.display = 'block';
+    const x = L + slot * (i + .5) + 12;
+    tip.style.left = Math.max(0, Math.min(W - 184, x)) + 'px';
+    tip.style.top = (T + 4) + 'px';
+  }
+  function hide() {
+    tip.style.display = 'none';
+    const g = document.getElementById('guide');
+    if (g) g.setAttribute('visibility', 'hidden');
+  }
+  function draw() {
+    W = wrap.getBoundingClientRect().width;
+    if (W <= L + R + 10) return;
+    const n = rows.length, PW = W - L - R, PH = H - T - B;
+    svg.setAttribute('width', W); svg.setAttribute('height', H);
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    if (!n) { svg.innerHTML = `<text x="${W/2}" y="${H/2}" text-anchor="middle" font-size="12" fill="#94A3B8">还没有完整的收益区间</text>`; return; }
+    let pLo = 0, pHi = 0, rLo = 0, rHi = 0;
+    for (const r of rows) { pLo = Math.min(pLo, r.pnl); pHi = Math.max(pHi, r.pnl); rLo = Math.min(rLo, r.ret); rHi = Math.max(rHi, r.ret); }
+    const padP = (pHi - pLo) * .16 || 1, padR = (rHi - rLo) * .18 || .5;
+    pLo -= padP; pHi += padP; rLo -= padR; rHi += padR;
+    const yP = v => T + (pHi - v) * PH / (pHi - pLo);
+    const yR = v => T + (rHi - v) * PH / (rHi - rLo);
+    rdec = (rHi - rLo) < 0.2 ? 3 : ((rHi - rLo) < 2 ? 2 : 1);
+    slot = PW / n;
+    const bw = Math.min(42, Math.max(2.5, slot * .56)), xc = i => L + slot * (i + .5);
+    let g = '', tx = '', bars = '', dots = '';
+    for (let k = 0; k <= 4; k++) {
+      const y = T + PH * k / 4;
+      g += `<line x1="${L}" y1="${y}" x2="${W-R}" y2="${y}" stroke="#EEF2F7"/>`;
+      tx += `<text x="${L-8}" y="${y+4}" text-anchor="end" font-size="10" fill="#475569">${fmtC(pHi - (pHi-pLo)*k/4)}</text>`;
+      tx += `<text x="${W-R+8}" y="${y+4}" font-size="10" fill="#94A3B8">${(rHi - (rHi-rLo)*k/4).toFixed(rdec)}%</text>`;
+    }
+    if (pLo < 0 && pHi > 0) g += `<line x1="${L}" y1="${yP(0)}" x2="${W-R}" y2="${yP(0)}" stroke="#CBD5E1"/>`;
+    const step = Math.max(1, Math.ceil(n / Math.max(3, Math.floor(PW / 78))));
+    rows.forEach((r, i) => {
+      const y0 = yP(0), y1 = yP(r.pnl);
+      bars += `<rect x="${xc(i)-bw/2}" y="${Math.min(y0,y1)}" width="${bw}" height="${Math.max(1.5, Math.abs(y1-y0))}" rx="2" fill="${col(r.pnl)}" opacity=".8"/>`;
+      if (i % step === 0 || i === n - 1)
+        tx += `<text x="${xc(i)}" y="${H-B+16}" text-anchor="middle" font-size="10" fill="#475569">${r.k}</text>`;
+      if (n <= 36) dots += `<circle cx="${xc(i)}" cy="${yR(r.ret)}" r="2.8" fill="#3B82F6" stroke="#fff" stroke-width="1"/>`;
+    });
+    const pts = rows.map((r, i) => `${xc(i)},${yR(r.ret)}`).join(' ');
+    let zones = '';
+    rows.forEach((r, i) => { zones += `<rect x="${L + slot*i}" y="${T}" width="${slot}" height="${PH}" fill="transparent" style="cursor:crosshair"/>`; });
+    svg.innerHTML = g + bars
+      + `<polyline points="${pts}" fill="none" stroke="#3B82F6" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>`
+      + dots
+      + `<line id="guide" x1="0" y1="${T}" x2="0" y2="${T+PH}" stroke="#CBD5E1" stroke-dasharray="3 3" visibility="hidden"/>`
+      + tx + zones;
+    svg.querySelectorAll('rect[style]').forEach((el, i) => {
+      el.addEventListener('mouseenter', () => show(rows[i], i));
+      el.addEventListener('mouseleave', hide);
+    });
+  }
+  let raf = 0;
+  window.addEventListener('resize', () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; draw(); }); });
+  draw();
+})();
+</script>"""
+    return (tpl.replace("__BASE_CSS__", _COMP_BASE_CSS).replace("__PC_CSS__", _PC_CSS)
+               .replace("__PDATA__", data))
+
 
 
 def _hg_other_item(code: str, why: str = "位置已关闭") -> dict:
@@ -2227,7 +2436,12 @@ _PF_LIST_CSS = r"""
 :host{display:block}
 .tbl{font:13px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Noto Sans SC","Microsoft YaHei",sans-serif;
   color:#0F172A;background:#fff;border:1px solid #E2E8F0;border-radius:14px;
-  max-height:462px;overflow:auto}   /* 限高：点任意一行，下面的详情面板都还在同一屏里 */
+  max-height:462px;overflow:auto}   /* 限高：不展开详情时列表自己滚，别把整页顶长 */
+/* 点开一只基金时列表被切成上下两段，详情插在中间 —— 三段拼起来仍是一张卡 */
+.tbl.nocap{max-height:none;overflow:visible}
+.tbl.nohead .hd{display:none}
+.tbl.pos-top{border-radius:14px 14px 0 0;border-bottom:0}
+.tbl.pos-bot{border-radius:0 0 14px 14px;border-top:0}
 .hd,.rw{display:grid;grid-template-columns:minmax(0,2.2fr) 118px 104px 104px 128px 112px;
   gap:10px;align-items:center;padding:10px 14px}
 .hd{background:#F8FAFC;border-bottom:1px solid #E2E8F0;font-size:12px;color:#64748B;
@@ -2284,7 +2498,8 @@ export default function (c) {
     + '<div class="c-badge"><span class="bg ' + esc(r.badge_cls) + '">' + esc(r.badge) + '</span></div>'
     + '</div>';
   const root = document.createElement('div');
-  root.className = 'tbl';
+  root.className = ['tbl', D.pos ? 'pos-' + D.pos : '', D.cap === false ? 'nocap' : '',
+    D.head === false ? 'nohead' : ''].filter(Boolean).join(' ');
   root.setAttribute('role', 'table');
   root.innerHTML = '<div class="hd"><div>我的基金</div><div class="r">金额</div>'
     + '<div class="r c-day">今日收益</div><div class="r c-hold">持有收益</div>'
@@ -2310,18 +2525,23 @@ export default function (c) {
 _PF_LIST = st.components.v2.component("aw_pf_list", css=_PF_LIST_CSS, js=_PF_LIST_JS)
 
 
-def _pf_list(rows: list[dict], selected: str = "", key: str = "pf_list"):
+def _pf_list(rows: list[dict], selected: str = "", key: str = "pf_list",
+             head: bool = True, cap: bool = True, pos: str = ""):
     """渲染持仓列表，返回 (这次点中的代码, 点击时刻)。
 
     `selected` 由调用方给（没展开详情就传空串，列表不高亮任何一行）；
     时刻用来区分「用户刚点了这一行」和「上一次的选择还留着」——
     有了它，收起之后再点同一行也能重新展开。
+
+    点开一只基金时，调用方把列表切成上下两段、详情插在中间（详情就落在被点的那一行下面）：
+    上半段 pos="top"、下半段 pos="bot" 且 head=False（不重复表头），两段都不限高。
     """
     if not rows:
         return "", 0
     codes = [r["code"] for r in rows]
     sel = selected if selected in codes else ""
-    res = _PF_LIST(key=key, data={"rows": rows, "selected": sel},
+    res = _PF_LIST(key=key, data={"rows": rows, "selected": sel,
+                                  "head": head, "cap": cap, "pos": pos},
                    default={"picked": sel, "picked_at": 0},
                    on_picked_change=lambda: None, on_picked_at_change=lambda: None)
     out = res.get("picked") if hasattr(res, "get") else None
@@ -2736,9 +2956,9 @@ _PNL_CSS = _COMP_BASE_CSS + r"""
 @media(max-width:520px){.pnl-val{font-size:23px}}
 """
 
-_PNL_TPL = r"""<style>__CSS__</style>
+_PNL_TPL = r"""<style>__CSS____HEAD_CSS__</style>
 <div id="wrap" aria-busy="false">
-<div class="heading"><h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l5-6 4 3 5-7 4 4"/></svg>__HEADING__</h3><span id="updating" role="status">正在更新</span></div>
+__HEAD_BLOCK__
 <div class="pnl-top"><span class="pnl-val" id="last">—</span><span class="pnl-sub" id="lastsub"></span></div>
 <div class="controls"><div id="range-controls" role="group" aria-label="常用区间">__BTNS__</div></div>
 <div class="state-line"><span id="selection"></span><span class="date-line"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2" fill="none"/><path d="M8 3v5m8-5v5M4 10h16"/></svg><span id="range"></span></span></div>
@@ -2962,13 +3182,16 @@ def _pnl_chart_html(series, trades=None, height=200, store="awPnl.fund",
                           "defaultRange": default_range,
                           "mark": mark or "", "markLabel": mark_label}, ensure_ascii=False,
                          allow_nan=False).replace("<", "\\u003c")
-    return (_PNL_TPL.replace("__CSS__", _PNL_CSS).replace("__HEADING__", heading)
+    return (_PNL_TPL.replace("__CSS__", _PNL_CSS)
+            .replace("__HEAD_CSS__", "" if heading else ".controls{margin-top:2px}")
+            .replace("__HEAD_BLOCK__", _chart_head_block(heading, "M3 17l5-6 4 3 5-7 4 4"))
             .replace("__BTNS__", btns).replace("__DATA__", payload))
 
 
-def _pf_detail(it: dict) -> bool:
+def _pf_detail(it: dict, inline: bool = False) -> bool:
     """点开一只基金：上面是它自己的数字，下面是「买卖点 / 累计盈亏」两个子页签。
 
+    inline=True 时是「就地展开」：上下两段列表之间，紧贴被点的那一行，不再是一张独立卡片。
     返回 True = 用户点了「收起」，调用方负责把面板收回去（页面重跑一次）。
     """
     code = it["code"]
@@ -2989,7 +3212,7 @@ def _pf_detail(it: dict) -> bool:
         ("成本 / 净值", f"{cost:.4f} / {px:.4f}" if cost > 0 else f"— / {px:.4f}", ""),
     ]
     st.markdown(
-        '<div class="pf-detail">'
+        '<div class="pf-detail' + (' inline' if inline else '') + '">'
         '<div class="pd-top"><div>'
         f'<div class="pd-name">{html_escape(name)}</div>'
         f'<div class="pd-sub">{code} · {"场外" if it["otc"] else "场内"} · '
@@ -3013,18 +3236,17 @@ def _pf_detail(it: dict) -> bool:
                        f"当时累计 {_pf_num(float(_cl[0]['pnl'] or 0), 2)} 元）—— "
                        "清仓那天赚了多少、拿了多久、期间最高最低，都在页面下方「已清仓」里。")
 
-    # 子页签 + 收起：一行里左边左右切换、右边收回面板。
-    # 两张图不再上下堆着（原来加起来 1200 多像素，点开一只基金得滚半天）。
-    _sc1, _sc2 = st.columns([3, 1], gap="small", vertical_alignment="center")
-    with _sc1:
+    # 子页签 + 收起：同一行，左边切换视图、右边收回面板（distribute 把两头撑开，
+    # 不用两列 —— 用列的话「收起」会被挤成 26px，两个字都放不下）。
+    with st.container(horizontal=True, horizontal_alignment="distribute",
+                      vertical_alignment="center", key="pf_bar"):
         _sub = st.segmented_control(
             "看这只基金的", ["买卖点", "累计盈亏"], default="买卖点", key="pf_sub",
             label_visibility="collapsed",
             help="买卖点＝净值走势上标出每一笔买入/卖出；累计盈亏＝这只基金从第一笔到现在的累计赚亏（元）。",
         ) or "买卖点"
-    with _sc2:
-        with st.container(horizontal=True, horizontal_alignment="right"):
-            _closed = st.button("收起", key="pf_close", help="收回这只基金的详情，回到上面的持仓列表")
+        _closed = st.button("收起", key="pf_close", type="tertiary",
+                            help="收回这只基金的详情（再点一下上面那行基金名也一样）")
 
     if _sub == "买卖点":
         if len(_ser) < 2:
@@ -3036,8 +3258,11 @@ def _pf_detail(it: dict) -> bool:
                 _scroll_chart_html(_d["labels"], _d["prices"], _d["windows"]["近1年"]["count"],
                                    rets=_d["rets"], histories=_hist, trades=_tr,
                                    store="awTrend.fund", default_range="近1年",
-                                   heading="走势与买卖点"),   # 基金名就在上面的详情卡里，标题不再重复，手机上也少换行
-                height=840,
+                                   heading="",   # 子页签已经写着「买卖点」，图里再写一遍就是重复
+                                   # 画布高度要算上页头/控件/状态行那 260px，否则 700 的框里
+                                   # 只有 440 可见，最下面那条涨跌幅栏会被裁掉
+                                   height=440),
+                height=700,
             )
             if _tr:
                 st.caption(f"红三角＝买入、绿三角＝卖出（这只基金共 {len(_tr)} 笔），"
@@ -3048,14 +3273,28 @@ def _pf_detail(it: dict) -> bool:
     else:
         # 累计盈亏：换成「元」来看赚了多少，口径与支付宝「累计盈亏」一致
         _pnl = _code_pnl_curve(code)
-        if len(_pnl) > 1:
+        if len(_pnl) > 5:
             st.iframe(_pnl_chart_html(_pnl, trades=_tr, store="awPnl.fund",
-                                      default_range="全部"), height=520)
+                                      default_range="全部", heading=""), height=470)
             st.caption("累计盈亏 = 手上还拿着的浮盈 + 已经卖出落袋的实盈（买入算手续费、卖出扣手续费），"
                        "所以卖掉之后曲线不会掉下来；零轴以上填红＝赚、以下填绿＝亏，三角是这只基金的买卖点。"
-                       "上面的「持有收益」只算手上这一部分，两者差多少，就是已经卖掉的那部分赚到（或亏掉）的钱。"
-                       + (f"这只基金目前只有 {len(_pnl)} 个交易日的记录（第一笔 {_pnl.index[0].strftime('%Y/%m/%d')}），"
-                          "曲线会随着持有天数慢慢长起来。" if len(_pnl) <= 5 else ""))
+                       "上面的「持有收益」只算手上这一部分，两者差多少，就是已经卖掉的那部分赚到（或亏掉）的钱。")
+        elif len(_pnl) > 1:
+            # 才买了两三天：曲线是一条直线，画出来就是一整块空的色块 —— 直接给数字更清楚
+            def _signed_yuan(v: float) -> str:
+                if abs(v) < 0.005:
+                    return "¥0.00"
+                return ("+¥" if v > 0 else "-¥") + f"{abs(v):,.2f}"
+            _p_last, _p_prev = float(_pnl.iloc[-1]), float(_pnl.iloc[-2])
+            st.markdown(
+                '<div class="pf-short">'
+                f'<div class="v {_pf_sign(_p_last)}">{_signed_yuan(_p_last)}</div>'
+                f'<div class="t">持有以来累计（含已卖出落袋的部分）· '
+                f'今天 {_signed_yuan(_p_last - _p_prev)}</div>'
+                f'<div class="t">这只基金才 {len(_pnl)} 个交易日的记录（第一笔 '
+                f'{_pnl.index[0].strftime("%Y/%m/%d")}），满 5 天后这里会自动变成曲线。</div>'
+                '</div>', unsafe_allow_html=True,
+            )
         elif _tr:
             st.caption("累计盈亏要等有净值数据才能画：这只基金缺净值，拉取后自动出现。")
         else:
@@ -3179,7 +3418,7 @@ def _closed_rounds() -> list[dict]:
 
 
 def _closed_section() -> None:
-    """「我的持仓」底部的已清仓区块：一轮一行，点开看当时的盈亏曲线与成交。"""
+    """「我的账户 · 持仓」底部的已清仓区块：一轮一行，点开看当时的盈亏曲线与成交。"""
     _rows_all = _closed_rounds()
     if acct is None:
         return
@@ -3349,7 +3588,7 @@ def _hg_slot_options():
     """记账下拉选项：每**只基金**一项，value=(位置, 代码)，显示「位置 · 代码 名称」。
 
     一个位置挂多只时这里就有多行 —— 成交必须记到具体那一只基金上。
-    末尾补上「账上还有份额、但配置里已经删掉」的代码：不然「我的持仓」提示你
+    末尾补上「账上还有份额、但配置里已经删掉」的代码：不然「我的账户」提示你
     「想卖就到交易记录记一笔卖出」，而这里根本选不到它（提示指向的操作做不到）。
     """
     out = []
@@ -3651,7 +3890,7 @@ def _slot_config_panel() -> None:
 
         st.markdown("**换成场外（支付宝可买）同类基金 — 一键填入参考代码**")
         st.caption("下面是同类基金的参考代码，跟踪指数和费率不一定和原版一致，填入后请自己核对；"
-                   "收益差异会在「收益对比」页的「vs 项目默认基金」里体现出来。"
+                   "收益差异会在「我的账户 · 对比」里的「vs 项目默认基金」体现出来。"
                    "填入会把该位置**替换**成这一只（原来挂的多只会被清掉）。")
         _preset_rows = [[HG.SLOT_LABEL[s], ETF_META.get(s, {}).get("code", ""),
                          ETF_META.get(s, {}).get("name", ""), c, n] for s, c, n in _HG_PRESET]
@@ -3664,10 +3903,12 @@ def _slot_config_panel() -> None:
 
 
 # ============================================================
-# Main Tabs —— 前三页是「我的账户」（每天用），后三页是项目自带的策略模型（偶尔看）
+# Main Tabs —— 前四页是「我的账户」（每天用），后四页是项目自带的策略模型（偶尔看）
+# 「我的账户」一页管完：有什么（持仓）、赚了多少（收益）、跟谁比（对比）、该不该动（信号）；
+# 「买卖提醒」只回答「这一轮存量怎么调」，「定投一笔」只回答「新钱怎么分」。
 # ============================================================
-tab3, tab5, tab4, tab6, tab7, tab2, tab1, tab8, tab10 = st.tabs(
-    ["我的持仓", "交易记录", "买卖提醒", "收益对比", "基金检索",
+tab3, tab5, tab4, tab_dca, tab7, tab2, tab1, tab8, tab10 = st.tabs(
+    ["我的账户", "交易记录", "买卖提醒", "定投一笔", "基金检索",
      "权重与选基", "模型 · 信号", "模型 · 回测", "指数估值"]
 )
 
@@ -3875,14 +4116,225 @@ with tab2:
     _slot_config_panel()
 
 # ============================================================
-# Tab 3: 我的持仓（只看有什么、赚多少；配置在「权重与选基」）
+# 我的账户 · 三个子视图（收益 / 对比 / 信号）—— 持仓视图直接在 tab3 里写完，本页最长
+# ============================================================
+def _my_funds_txt(slot: str | None) -> str:
+    """位置 → 我实际买的基金，让「策略信号」能落到自己的账户上（不然只知道该卖 510880）。"""
+    if not slot:
+        return '<span class="muted">—</span>'
+    label = HG.SLOT_LABEL.get(slot, slot)
+    if not holdings.get(slot, {}).get("on", True):
+        return f'<span class="muted">{label} · 位置已关闭</span>'
+    fs = HG.funds(holdings.get(slot, {}))
+    if not fs:
+        return f'<span class="muted">{label} · 没挂基金</span>'
+    return "、".join(f'{f.get("name") or f["code"]}<br><span class="muted">{f["code"]}</span>'
+                    for f in fs)
+
+
+def _pct_txt(v: float, digits: int = 2) -> str:
+    """涨跌幅文案：小到 0.00% 以下时自动多留一位，避免「-0.00%」这种看着像出错的写法。"""
+    p = v * 100
+    d = digits + 1 if (p and abs(p) < 10 ** -digits) else digits
+    return ("+" if p > 0 else "") + f"{p:.{d}f}%"
+
+
+def _acct_period_view() -> None:
+    """按年 / 按月：赚了多少钱、收益率多少、期内最深回撤 —— 不画净值。"""
+    st.markdown(
+        '<div class="sec-head"><span class="t">收益 · 按年 / 按月</span>'
+        '<span class="r">收益＝账户多了多少钱；收益率＝这份钱本身涨了几个点</span></div>',
+        unsafe_allow_html=True,
+    )
+    with st.container(key="perf_freq_switch"):
+        _freq = st.segmented_control(
+            "切段", ["按年", "按月"], default="按年", key="perf_freq",
+            label_visibility="collapsed",
+            help="按年＝每年一段；按月＝每月一段（从当月第一个净值日到最后一个）。",
+        ) or "按年"
+    _rows = _period_perf("Y" if _freq == "按年" else "M")
+    if not _rows:
+        st.info("账户还没有可切段的净值曲线：先在「交易记录」补录成交（或在「买卖提醒」一键登记）。")
+        return
+
+    _show = _rows if _freq == "按年" else _rows[:36]      # 按月最多摆三年，再往前看意义不大
+    st.iframe(_period_chart_html(_show, height=320 if len(_show) >= 4 else 236), height="content")
+
+    _nav_all = _acct_daily["nav"].dropna()
+    _tbl = []
+    for _r in _show:
+        _tbl.append([
+            _r["period"],
+            f'{_r["eq0"]:,.0f}',
+            (_r["flow"] if abs(_r["flow"]) >= 0.5 else None) and
+            f'<span class="{_pf_sign(_r["flow"])}">{_pf_num(_r["flow"], 0)}</span>' or
+            '<span class="muted">—</span>',
+            f'<span class="{_pf_sign(_r["pnl"])}">{_pf_num(_r["pnl"], 2)}</span>',
+            f'<span class="{_pf_sign(_r["ret"])}">{_pct_txt(_r["ret"])}</span>',
+            f'<span class="{_pf_sign(_r["mdd"])}">{_pct_txt(_r["mdd"])}</span>',
+            f'{_r["eq1"]:,.0f}',
+        ])
+    _sum_pnl = sum(r["pnl"] for r in _rows)
+    _sum_flow = sum(r["flow"] for r in _rows)
+    _all_ret = float(_nav_all.iloc[-1]) - 1.0 if len(_nav_all) else 0.0
+    _all_mdd = float((_nav_all / _nav_all.cummax() - 1).min()) if len(_nav_all) else 0.0
+    _render_table(
+        [("期间", "left"), ("期初总资产", "right"), ("净投入", "right"), ("收益(元)", "right"),
+         ("收益率", "right"), ("期内回撤", "right"), ("期末总资产", "right")],
+        _tbl,
+        totals=["合计", "—",
+                f'<span class="{_pf_sign(_sum_flow)}">{_pf_num(_sum_flow, 0)}</span>',
+                f'<span class="{_pf_sign(_sum_pnl)}">{_pf_num(_sum_pnl, 2)}</span>',
+                f'<span class="{_pf_sign(_all_ret)}">{_pct_txt(_all_ret)}</span>',
+                f'<span class="{_pf_sign(_all_mdd)}">{_pct_txt(_all_mdd)}</span>', "—"],
+        min_width=760,
+    )
+    if _freq == "按月" and len(_rows) > len(_show):
+        st.caption(f"上面只摆了最近 {len(_show)} 个月（共 {len(_rows)} 个月），合计行给的是建仓以来的全期数。")
+    _gap = _sum_pnl - float(_plan["pnl"])
+    if abs(_gap) >= 1:
+        st.caption(
+            f"合计比首页「持有收益」多 **¥{_gap:,.2f}** —— 首页按「份额本金」算（转入那天按前一天的净值折份额），"
+            "这里按「逐日资产变化 − 当日净投入」算；转入当天的净值有波动，两个口径就会差一点，"
+            "跟支付宝对账以首页的「持有收益」为准。"
+        )
+    st.caption(
+        "**收益（元）= 期末总资产 − 期初总资产 − 期内净投入**，把「又转进来多少钱」剔掉，剩下的才是赚的；"
+        "**收益率 = 账户单位净值的涨跌**（总资产 ÷ 份额，转入按当时净值折份额，所以加钱不会抬高收益率）。"
+        "两个数对不上是正常的 —— 钱多的时候同样 1% 也是更多的钱。"
+        "期初总资产＝上一段最后一个交易日的总资产，所以每段的「收益」跟上一段的「期末」能接上；"
+        "期内回撤每段重新起算，不把上一年的跌幅带进来。"
+    )
+
+
+def _acct_compare_view() -> None:
+    """我的账户 vs 项目默认基金 vs 策略理论（三条线都归一到 1.0）。"""
+    _acct_strat = _strat_display.get(acct.get("strategy"), acct.get("strategy") or "—") if acct else "—"
+    st.markdown(
+        '<div class="sec-head"><span class="t">对比 · 我的账户 vs 项目默认基金 vs 策略理论</span>'
+        '<span class="r">三条线都归一到 1.0</span></div>',
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "**项目默认基金**＝拿项目自带那 8 个代码、按你**此刻侧边栏选的策略**和同样的再平衡节奏重放一遍，"
+        "和它的差基本就是「换基金」带来的；"
+        f"**策略理论**＝账户**建仓时选的策略**（{_acct_strat}）的回测曲线，切侧边栏不会改它 —— "
+        "和它的差还含调仓时点、申赎费用，以及回测按累计净值、实盘按单位净值的口径差。"
+    )
+    _mine = _acct_daily["nav"].dropna() if (acct is not None and len(_acct_daily)) else pd.Series(dtype=float)
+    if acct is None or len(_mine) <= 1:
+        st.info("账户还没有净值曲线：在「交易记录」补录成交（或在「买卖提醒」一键登记）后自动生成。")
+        return
+    _curves, _gap_def, _gap_strat = {}, None, None
+    if float(_mine.iloc[0]) > 0:
+        _curves["我的账户"] = _mine / float(_mine.iloc[0])
+    _bench_def = BM.replay_target(w, acct.get("created"), nav_getter=HG.nav_series)
+    if _bench_def is not None and len(_bench_def.dropna()) > 1:
+        _bd = _bench_def.dropna()
+        _curves["项目默认基金"] = _bd / float(_bd.iloc[0])
+    _bench_strat = BM.strategy_curve(_BENCH_COL.get(acct.get("strategy"), ""),
+                                     start=acct.get("created"))
+    if _bench_strat is not None and len(_bench_strat.dropna()) > 1:
+        _bs = _bench_strat.dropna()
+        _curves["策略理论"] = _bs / float(_bs.iloc[0])
+    # 差距按两条线共同覆盖的最后一天算，避免其中一条缺数据时把区间拉长
+    for _nm, _tag in (("项目默认基金", "def"), ("策略理论", "strat")):
+        if "我的账户" in _curves and _nm in _curves:
+            _a, _b = _curves["我的账户"], _curves[_nm]
+            _e = min(_a.index[-1], _b.index[-1])
+            _v = float(_a.loc[:_e].iloc[-1] / _b.loc[:_e].iloc[-1] - 1)
+            if _tag == "def":
+                _gap_def = _v
+            else:
+                _gap_strat = _v
+    if len(_curves) > 1:
+        st.iframe(_compare_chart_html(_curves, height=420, default_range="全部",
+                                      title="净值对比"), height="content")
+    else:
+        st.info("基准曲线暂时取不到，只显示我的账户净值。")
+    _g1, _g2, _g3 = st.columns(3)
+    _g1.metric("vs 项目默认基金", f"{_gap_def*100:+.2f}pp" if _gap_def is not None else "—",
+               help="把项目默认那 8 个代码按你现在的权重、同样的再平衡节奏重放一遍。"
+                    "这一列只体现「换成你的基金」带来的差异。")
+    _g2.metric("vs 策略理论", f"{_gap_strat*100:+.2f}pp" if _gap_strat is not None else "—",
+               help="回测曲线从建仓日起归一。差的是选基、调仓时点、费用，"
+                    "以及回测用累计净值/实盘用单位净值的口径差。")
+    _g3.metric("账户净值", f"{float(_mine.iloc[-1]):.4f}",
+               help="1.0000 = 建仓起点。也可以用「份额 × 最新单位净值 + 现金 = 总资产」跟支付宝对一遍。")
+    st.caption("两条差距都是「我的账户 ÷ 基准 − 1」的累计值，区间不同会看到不同数字；"
+               "图上可以拖动缩放、切日/月/年线，和「基金检索」页的用法一致。")
+
+
+def _acct_signal_view() -> None:
+    """策略触发信号（落成我的基金）+ 账户体检 —— 原来一个藏在全局 chip 里、一个在「收益对比」页底。"""
+    st.markdown(
+        '<div class="sec-head"><span class="t">信号 · 该不该动，有没有风险</span>'
+        '<span class="r">触发原因看这里，具体下多少单在「买卖提醒」</span></div>',
+        unsafe_allow_html=True,
+    )
+    _trig = [sa for sa in SIGNAL_ACTIONS
+             if bool(sa["condition"](signals)) and strat_key in sa["strategies"]]
+    if not _trig:
+        st.markdown(
+            '<div class="sig calm"><div class="main"><div class="t">当前无触发信号</div>'
+            '<div class="m">估值分位、宏观季节、趋势过滤都没触发 —— 按目标权重拿着，月末看一眼就够</div>'
+            '</div></div>', unsafe_allow_html=True)
+    else:
+        _rows = [[f'{sa["desc"]}<br><span class="muted">{sa["type"]}</span>',
+                  _my_funds_txt(sa.get("sell_slot")),
+                  _my_funds_txt(sa.get("buy_slot")),
+                  f'<span class="muted">卖 {sa["sell"]}<br>买 {sa["buy"]}</span>']
+                 for sa in _trig]
+        st.markdown('<div class="pf-summary">'
+                    f'<span class="lead">策略触发了 {len(_trig)} 项</span>'
+                    '<span class="item">第三列是这些信号落到你账户里的哪只基金</span></div>',
+                    unsafe_allow_html=True)
+        _render_table([("触发的信号", "left"), ("该减的位置 · 我的基金", "left"),
+                       ("该加的位置 · 我的基金", "left"), ("策略原始口径（默认ETF）", "left")],
+                      _rows, min_width=860)
+
+    st.caption("这些是**项目策略**的信号（估值分位 / 宏观季节 / 趋势过滤），跟「模型·信号」页同一套判断，"
+               "只是这里换成了你实际买的那只基金。"
+               "要不要真动手、动多少，看「买卖提醒」页算出来的额度 —— 信号只说明「方向」，不说明「金额」。")
+
+    # ---- 账户体检：回撤 / 现金占比 / 单只浮亏，口径全是账户层面 ----
+    st.divider()
+    st.markdown('<div class="sec-head"><span class="t">账户体检</span>'
+                '<span class="r">回撤 / 现金占比 / 单只浮亏</span></div>',
+                unsafe_allow_html=True)
+    _issues = [x for x in _al["体检"] if not str(x.get("text") or "").startswith("累计收益")]
+    if not _issues:
+        st.markdown('<div class="sig calm"><div class="main"><div class="t">账户状态正常</div>'
+                    '<div class="m">没有回撤超 12%、没有现金占比异常、没有单只浮亏超 15%</div>'
+                    '</div></div>', unsafe_allow_html=True)
+    for _x in _issues:
+        st.markdown(_alert_card(_x["level"], _x["text"], _x.get("tip", "")), unsafe_allow_html=True)
+    _m = _al["指标"]
+    _kv = []
+    for _k, _v in (_m or {}).items():
+        if isinstance(_v, dict):
+            continue
+        if _k == "现金占比":
+            _kv.append([_k, f"{_v*100:.1f}%"])
+        elif _k in ("累计收益", "最大回撤"):
+            _kv.append([_k, f'<span class="{"up" if _v >= 0 else "down"}">{_v*100:+.2f}%</span>'])
+        elif _k.startswith("对比"):
+            _kv.append([_k, f'<span class="{"up" if _v >= 0 else "down"}">{_v*100:+.2f}pp</span>'])
+        else:
+            _kv.append([_k, str(_v)])
+    if _kv:
+        _render_table([("关键指标", "left"), ("数值", "right")], _kv)
+
+
+# ============================================================
+# Tab 3: 我的账户（持仓 / 收益 / 对比 / 信号 四个子页签）
 # ============================================================
 with tab3:
-    st.subheader("我的持仓 · 有什么，跑得怎么样")
+    st.subheader("我的账户 · 有什么，赚多少，跑得怎么样")
     st.caption(
-        "一只基金一行，**点一行**在下面展开它：上面是金额/收益/成本，下面用「买卖点 / 累计盈亏」两个子页签左右切换，"
-        "看完点**收起**就回到这个列表。"
-        "逐笔成交在「交易记录」页；账户与两条基准的对比在「收益对比」页。"
+        "一页四看：**持仓**＝手里有什么、占多少；**收益**＝按年 / 按月赚了多少钱、收益率多少（不是净值）；"
+        "**对比**＝跟项目默认基金、策略理论各差多少；**信号**＝策略有没有触发、账户有没有风险。"
+        "逐笔成交在「交易记录」页，这一轮怎么调在「买卖提醒」页。"
     )
 
     # ---- 头卡：全站唯一一处「总金额 / 今日 / 持有收益」----
@@ -3907,97 +4359,127 @@ with tab3:
         unsafe_allow_html=True,
     )
 
-    # ---- 这一轮要动几笔：逐只标记在下面的列表里，金额明细在「买卖提醒」----
-    if _plan["has_acct"] and (_plan["buy"] or _plan["sell"]):
-        st.markdown(
-            '<div class="pf-summary">'
-            f'<span class="lead">按策略，这一轮要动 {len(_plan["orders"])} 笔</span>'
-            f'<span class="item">买入<b class="buy">¥{_plan["buy"]:,.0f}</b></span>'
-            f'<span class="item">卖出<b class="sell">¥{_plan["sell"]:,.0f}</b></span>'
-            '<span class="item">逐只金额在「买卖提醒」页</span>'
-            '</div>',
-            unsafe_allow_html=True,
-        )
-    elif _plan["has_acct"] and _plan["rows"] and _plan["asset"] > 0:
-        st.markdown(
-            '<div class="pf-summary quiet"><span class="lead">按策略，这一轮不用动</span>'
-            '<span class="item">所有位置偏离都在 0.5% 以内</span></div>',
-            unsafe_allow_html=True,
-        )
+    # ---- 一页四看：持仓 / 收益 / 对比 / 信号（说的是同一个账户，只是角度不同）----
+    with st.container(key="acct_view_switch"):
+        _av = st.segmented_control(
+            "账户视图", ["持仓", "收益", "对比", "信号"], default="持仓", key="acct_view",
+            label_visibility="collapsed",
+            help="持仓：手里有什么、占多少；收益：按年 / 按月赚了多少钱和收益率；"
+                 "对比：跟项目默认基金、策略理论各差多少；信号：策略触发与账户风险。",
+        ) or "持仓"
 
-    # ---- 持仓列表：一只基金一行（原来的卡片流平铺在电脑上太占地方）----
-    if not _plan["rows"] and not _plan["other"]:
-        st.info("还没有挂任何基金 —— 到「权重与选基」页底部给位置加一只，或点「恢复项目默认代码」。")
-        _sel, _sel_it = None, None
-    else:
-        _pf_rows = [_pf_row(it) for it in _plan["rows"]]
-        for _o in _plan["other"]:          # 位置关掉了、或配置里已删，账上还留着份额的代码
-            _why = "位置已关闭" if _o.get("in_cfg") else "不在配置里"
-            _r = _pf_row(_hg_other_item(_o["code"], _why))
-            # 占比列留空：这些钱不参与目标权重，跟上面几行的百分比不是同一把尺，混排会看起来「对不上」
-            _r.update({"badge": _why, "badge_cls": "warn", "w": "—"})
-            _pf_rows.append(_r)
-        # 详情面板默认收着：一进页面只有列表，点哪只展开哪只
-        _pf_open = st.session_state.get("pf_open") or ""
-        _sel, _click_at = _pf_list(_pf_rows, selected=_pf_open)   # (这次点中的代码, 点击时刻)
-        if _click_at and _click_at != st.session_state.get("pf_click_at"):
-            st.session_state["pf_click_at"] = _click_at
-            st.session_state["pf_open"] = _sel
-            st.rerun()          # 重跑一次，让列表的高亮跟上这次点击
-        # 汇总紧跟列表：点开某只基金后详情很长，这句被推到详情下面就等于看不见了
-        _other_sum = sum(float(o["mv"]) for o in _plan["other"])
-        if _other_sum > 0:
-            st.caption(
-                f"另有 **¥{_other_sum:,.0f}**（占 {_other_sum / _plan['total'] * 100 if _plan['total'] else 0:.0f}%）"
-                "落在「位置已关闭 / 不在配置里」的基金上（上表最后几行）：钱是你的、也算进总金额，"
-                "但**不参与目标权重和调仓**。想让它继续干活就到「权重与选基」把那个位置打开，"
-                "不想拿就到「交易记录」记一笔卖出。"
+    if _av == "持仓":
+        # ---- 这一轮要动几笔：逐只标记在下面的列表里，金额明细在「买卖提醒」----
+        if _plan["has_acct"] and (_plan["buy"] or _plan["sell"]):
+            st.markdown(
+                '<div class="pf-summary">'
+                f'<span class="lead">按策略，这一轮要动 {len(_plan["orders"])} 笔</span>'
+                f'<span class="item">买入<b class="buy">¥{_plan["buy"]:,.0f}</b></span>'
+                f'<span class="item">卖出<b class="sell">¥{_plan["sell"]:,.0f}</b></span>'
+                '<span class="item">逐只金额在「买卖提醒」页</span>'
+                '</div>',
+                unsafe_allow_html=True,
             )
-        _sel_it = next((it for it in _plan["rows"] if it["code"] == _sel), None)
-        _sel_other = next((o for o in _plan["other"] if o["code"] == _sel), None)
-        if not _sel_it and _sel_other:
-            _why = "位置被关掉了" if _sel_other.get("in_cfg") else "位置已从配置里删掉"
-            st.caption(f"这只基金所在的{_why}（账上还有 ¥{_sel_other['mv']:,.0f}，占着总资产）："
-                       "想卖就到「交易记录」记一笔卖出，想继续拿就把位置重新打开 —— 否则它不参与这一轮的调仓。")
-            _sel_it = _hg_other_item(_sel, "位置已关闭" if _sel_other.get("in_cfg") else "不在配置里")
+        elif _plan["has_acct"] and _plan["rows"] and _plan["asset"] > 0:
+            st.markdown(
+                '<div class="pf-summary quiet"><span class="lead">按策略，这一轮不用动</span>'
+                '<span class="item">所有位置偏离都在 0.5% 以内</span></div>',
+                unsafe_allow_html=True,
+            )
 
-        # 面板收着的时候只留一句指路（刚收起、或第一次进来都是这个状态）
-        if not (_sel_it and _pf_open == _sel_it["code"]):
-            st.caption("点一行展开这只基金的买卖点与累计盈亏。")
-        elif _pf_detail(_sel_it):
-            st.session_state["pf_open"] = ""
-            st.rerun()
+        # ---- 持仓列表：一只基金一行，点一下就地展开、再点一下收起 ----
+        if not _plan["rows"] and not _plan["other"]:
+            st.info("还没有挂任何基金 —— 到「权重与选基」页底部给位置加一只，或点「恢复项目默认代码」。")
+        else:
+            _pf_rows = [_pf_row(it) for it in _plan["rows"]]
+            for _o in _plan["other"]:          # 位置关掉了、或配置里已删，账上还留着份额的代码
+                _why = "位置已关闭" if _o.get("in_cfg") else "不在配置里"
+                _r = _pf_row(_hg_other_item(_o["code"], _why))
+                # 占比列留空：这些钱不参与目标权重，跟上面几行的百分比不是同一把尺，混排会看起来「对不上」
+                _r.update({"badge": _why, "badge_cls": "warn", "w": "—"})
+                _pf_rows.append(_r)
 
-        _empty_slots = [s for s in HG.SLOTS
-                        if holdings.get(s, {}).get("on", True) and not HG.funds(holdings.get(s, {}))]
-        if _empty_slots:
-            st.caption("这些位置没有挂基金（不持有，目标权重已按同桶比例让给其它位置）："
-                       + "、".join(HG.SLOT_LABEL[s] for s in _empty_slots)
-                       + "。要给位置加基金，去「权重与选基」页底部。")
+            @st.fragment
+            def _pf_stack_block():
+                """持仓列表 + 就地展开的详情，整块跑在 fragment 里。
 
-    # ---- 已清仓：从成交记录还原的历史轮次（清仓时赚了多少、拿了多久）----
-    _closed_section()
+                点一行只重跑这一块（不重跑整页），头卡、上面的统计都不用重算，
+                所以展开是「闪一下」而不是整页重载那种卡顿。
+                """
+                _pf_open = st.session_state.get("pf_open") or ""
+                _codes = [r["code"] for r in _pf_rows]
+                _cut = _codes.index(_pf_open) if _pf_open in _codes else -1
+                _upper = _pf_rows if _cut < 0 else _pf_rows[:_cut + 1]
+                _lower = [] if _cut < 0 else _pf_rows[_cut + 1:]
+                _sel_it = next((it for it in _plan["rows"] if it["code"] == _pf_open), None)
+                _sel_other = next((o for o in _plan["other"] if o["code"] == _pf_open), None)
+                if not _sel_it and _sel_other:
+                    _why = "位置被关掉了" if _sel_other.get("in_cfg") else "位置已从配置里删掉"
+                    st.caption(f"这只基金所在的{_why}（账上还有 ¥{_sel_other['mv']:,.0f}，占着总资产）："
+                               "想卖就到「交易记录」记一笔卖出，想继续拿就把位置重新打开 —— "
+                               "否则它不参与这一轮的调仓。")
+                    _sel_it = _hg_other_item(_pf_open,
+                                             "位置已关闭" if _sel_other.get("in_cfg") else "不在配置里")
+
+                # 三段拼成一张卡：上半段列表 / 详情 / 下半段列表（详情落在被点的那一行正下方）
+                with st.container(key="pf_stack"):
+                    _sel_a, _at_a = _pf_list(_upper, selected=_pf_open, key="pf_list_a",
+                                             cap=not _sel_it, pos="top" if _sel_it else "")
+                    _closed_click = False
+                    if _sel_it:
+                        with st.container(key="pf_inline"):
+                            _closed_click = _pf_detail(_sel_it, inline=True)
+                    if _lower:
+                        _sel_b, _at_b = _pf_list(_lower, key="pf_list_b", head=False,
+                                                 cap=False, pos="bot")
+                    else:
+                        _sel_b, _at_b = "", 0
+
+                # 点行 = 切换：展开着的那行再点一下就收起（「收起」按钮是同一件事的显式入口）
+                if _closed_click:
+                    st.session_state["pf_open"] = ""
+                    st.rerun(scope="fragment")
+                _new_sel, _new_at = (_sel_a, _at_a) if _at_a >= _at_b else (_sel_b, _at_b)
+                if _new_at and _new_at != st.session_state.get("pf_click_at"):
+                    st.session_state["pf_click_at"] = _new_at
+                    st.session_state["pf_open"] = "" if _new_sel == _pf_open else _new_sel
+                    st.rerun(scope="fragment")
+                if not _sel_it:
+                    st.caption("点一下基金名，就在这一行下面展开金额、买卖点与累计盈亏；再点一下收起。")
+
+            _pf_stack_block()
+
+            # 汇总紧跟列表：点开某只基金后详情很长，这句被推到详情下面就等于看不见了
+            _other_sum = sum(float(o["mv"]) for o in _plan["other"])
+            if _other_sum > 0:
+                st.caption(
+                    f"另有 **¥{_other_sum:,.0f}**（占 {_other_sum / _plan['total'] * 100 if _plan['total'] else 0:.0f}%）"
+                    "落在「位置已关闭 / 不在配置里」的基金上（上表最后几行）：钱是你的、也算进总金额，"
+                    "但**不参与目标权重和调仓**。想让它继续干活就到「权重与选基」把那个位置打开，"
+                    "不想拿就到「交易记录」记一笔卖出。"
+                )
+
+
+        # ---- 已清仓：从成交记录还原的历史轮次（清仓时赚了多少、拿了多久）----
+        _closed_section()
+
+    elif _av == "收益":
+        _acct_period_view()
+    elif _av == "对比":
+        _acct_compare_view()
+    else:
+        _acct_signal_view()
 
 # ============================================================
-# Tab 4: 买卖提醒（按策略算买卖 → 一键登记）—— 计划在这页，补录与流水在「交易记录」
+# Tab 4: 买卖提醒（存量再平衡 → 一键登记）—— 这里是「计划」，流水在「交易记录」
 # ============================================================
 with tab4:
     st.subheader("买卖提醒 · 这一轮买什么、卖什么")
     st.caption(
-        "两种场景：「再平衡」= 钱已经在账户里，把仓位调回目标比例（可能一边买一边卖）；"
-        "「定投一笔」= 新投一笔钱，只买不卖，直接给出每只基金买多少份。"
-        "确认后一键落成成交，手工补录和流水在「交易记录」页。"
+        "钱已经在账户里，这一页只回答一件事：把现有仓位调回目标比例，该买什么、卖什么、各多少（可能一边买一边卖）。"
+        "**这里是「计划」** —— 还没发生；逐笔成交在「交易记录」页 —— 已经发生，两边不重复。"
+        "新投一笔钱怎么分，去「定投一笔」页。"
     )
-
-    _RB_REBAL, _RB_DCA = "再平衡", "定投一笔"
-    with st.container(key="rb_mode_switch"):
-        _rb_mode = st.segmented_control(
-            "模式", [_RB_REBAL, _RB_DCA], default=_RB_REBAL, key="rb_mode",
-            label_visibility="collapsed",
-            help="再平衡：钱已经在账户里，把现有仓位调回目标比例 —— 可能一边买一边卖。\n\n"
-                 "定投一笔：往账户里新投一笔钱（先进现金），只买不卖，"
-                 "按目标权重算出每只基金买多少份。",
-        ) or _RB_REBAL
 
     if not _plan["has_acct"]:
         st.info("还没有账户：先到「交易记录」建一个账户（或直接补录一笔转入），之后这里就会按你的真实持仓算买卖。")
@@ -4007,12 +4489,12 @@ with tab4:
         # 钱都在「位置已关闭 / 配置里已删」的代码上：能算不能动，先告诉人怎么把钱挪出来
         st.warning(
             f"账户里有 ¥{_plan['total']:,.0f}，但都落在**已关闭或已删掉的位置**里，没有可调仓的钱。"
-            "这些份额不参与调仓（见「我的持仓」里标「位置已关闭 / 不在配置里」的行）："
+            "这些份额不参与调仓（见「我的账户」里标「位置已关闭 / 不在配置里」的行）："
             "想继续拿就把它所在的位置重新打开，想换掉就到「交易记录」逐笔记卖出。"
         )
     elif not _plan["rows"]:
-        st.warning("还没有挂任何基金：先到「我的持仓」给位置加一只，或点右上角「更新数据」拉取净值。")
-    elif _rb_mode == _RB_REBAL:
+        st.warning("还没有挂任何基金：先到「权重与选基」给位置加一只，或点右上角「更新数据」拉取净值。")
+    else:
         # ---- 结论：这一轮动不动、买多少卖多少 ----
         if _plan["orders"]:
             st.markdown(
@@ -4099,6 +4581,23 @@ with tab4:
             st.caption("这里按最新净值估算；实际以你在支付宝成交的价格为准，"
                        "差得多可以到「交易记录」逐笔修正，或直接手工补录真实那一笔。")
 
+# ============================================================
+# Tab DCA: 定投一笔（新钱按目标权重分）—— 原来塞在「买卖提醒」里，跟「存量调仓」是两件事
+# ============================================================
+with tab_dca:
+    st.subheader("定投一笔 · 新钱怎么分")
+    st.caption(
+        "往账户里新投一笔钱，只买不卖：按目标权重补缺口，直接给出每只基金买多少份/股。"
+        "这是「还没发生」的计算；点按钮登记后才写进「交易记录」。"
+        "钱早就在账户现金里、只想调回目标比例的，去「买卖提醒」页。"
+    )
+
+    if not _plan["has_acct"]:
+        st.info("还没有账户：先到「交易记录」建一个账户（或直接补录一笔转入），之后这里才能按目标权重分钱。")
+    elif _plan["total"] <= 0:
+        st.info("账户里还没有钱和持仓：先到「交易记录」补录一笔「转入」，或在支付宝买好后补录买入。")
+    elif not _plan["rows"]:
+        st.warning("还没有挂任何基金：先到「权重与选基」给位置加一只，或点右上角「更新数据」拉取净值。")
     else:
         # ---------------- 定投一笔：新钱按目标权重分，直接给出每只买多少份 ----------------
         with st.container(key="dca_card"):
@@ -4265,6 +4764,7 @@ with tab4:
                 st.rerun()
             st.caption("按最新净值估算；实际成交净值以支付宝确认为准，差得多可以到「交易记录」逐笔修正。")
 
+
 # ============================================================
 # Tab 5: 交易记录（补录 + 台账）—— 只记录支付宝上实际发生了什么
 # ============================================================
@@ -4297,7 +4797,7 @@ with tab5:
                            "created": str(start0), "trades": []}, ACCT_FILE)
                 st.rerun()
     elif not _slot_opts:
-        st.warning("还没有挂任何基金：先到「我的持仓」给位置加至少一只基金，才能记账。")
+        st.warning("还没有挂任何基金：先到「权重与选基」给位置加至少一只基金，才能记账。")
     else:
         _trades = acct.setdefault("trades", [])
         _funds = [{"slot": s, "code": c, "label": lb,
@@ -4381,7 +4881,7 @@ with tab5:
                 st.warning(
                     f"记完现金会变成 ¥{_cash_after:,.0f}（负的）。这笔钱如果是从银行卡新买进来的，"
                     "说明少记了一笔「转入」：先把类型切到「转入」记一笔，再回来记买入；"
-                    "或者在「买卖提醒 → 定投一笔」里勾上「同时记一笔转入」，一次就记全。"
+                    "或者在「定投一笔」页勾上「同时记一笔转入」，一次就记全。"
                 )
 
             if _act.button("记一笔", type="primary", key="tr_add", width="stretch"):
@@ -4515,94 +5015,6 @@ with tab5:
                 st.rerun()
         st.caption(f"账户文件：{ACCT_FILE.name}（保存在 data/ 下，重装或换机时记得备份）")
 
-
-# ============================================================
-# Tab 6: 收益对比（我的账户 vs 项目默认基金 vs 策略理论）
-# ============================================================
-with tab6:
-    st.subheader("收益对比 · 我的账户 vs 项目默认基金 vs 策略理论")
-    _acct_strat = _strat_display.get(acct.get("strategy"), acct.get("strategy") or "—") if acct else "—"
-    st.caption(
-        "三条线都归一到 1.0。**项目默认基金**＝拿项目自带那 8 个代码、按你**此刻侧边栏选的策略**"
-        "和同样的再平衡节奏重放一遍，和它的差基本就是「换基金」带来的；"
-        f"**策略理论**＝账户**建仓时选的策略**（{_acct_strat}）的回测曲线，切侧边栏不会改它 —— "
-        "和它的差还含调仓时点、申赎费用，以及回测按累计净值、实盘按单位净值的口径差。"
-    )
-
-    _mine = _acct_daily["nav"].dropna() if (acct is not None and len(_acct_daily)) else pd.Series(dtype=float)
-    if acct is None or len(_mine) <= 1:
-        st.info("账户还没有净值曲线：在「交易记录」补录成交（或在「买卖提醒」一键登记）后自动生成。")
-    else:
-        _curves, _gap_def, _gap_strat = {}, None, None
-        if float(_mine.iloc[0]) > 0:
-            _curves["我的账户"] = _mine / float(_mine.iloc[0])
-        _bench_def = BM.replay_target(w, acct.get("created"), nav_getter=HG.nav_series)
-        if _bench_def is not None and len(_bench_def.dropna()) > 1:
-            _bd = _bench_def.dropna()
-            _curves["项目默认基金"] = _bd / float(_bd.iloc[0])
-        _bench_strat = BM.strategy_curve(_BENCH_COL.get(acct.get("strategy"), ""),
-                                         start=acct.get("created"))
-        if _bench_strat is not None and len(_bench_strat.dropna()) > 1:
-            _bs = _bench_strat.dropna()
-            _curves["策略理论"] = _bs / float(_bs.iloc[0])
-        # 差距按两条线共同覆盖的最后一天算，避免其中一条缺数据时把区间拉长
-        for _nm, _tag in (("项目默认基金", "def"), ("策略理论", "strat")):
-            if "我的账户" in _curves and _nm in _curves:
-                _a, _b = _curves["我的账户"], _curves[_nm]
-                _e = min(_a.index[-1], _b.index[-1])
-                _v = float(_a.loc[:_e].iloc[-1] / _b.loc[:_e].iloc[-1] - 1)
-                if _tag == "def":
-                    _gap_def = _v
-                else:
-                    _gap_strat = _v
-        if len(_curves) > 1:
-            st.iframe(_compare_chart_html(_curves, height=420, default_range="全部",
-                                          title="净值对比"),
-                      height="content")
-        else:
-            st.info("基准曲线暂时取不到，只显示我的账户净值。")
-        _g1, _g2, _g3 = st.columns(3)
-        _g1.metric("vs 项目默认基金", f"{_gap_def*100:+.2f}pp" if _gap_def is not None else "—",
-                   help="把项目默认那 8 个代码按你现在的权重、同样的再平衡节奏重放一遍。"
-                        "这一列只体现「换成你的基金」带来的差异。")
-        _g2.metric("vs 策略理论", f"{_gap_strat*100:+.2f}pp" if _gap_strat is not None else "—",
-                   help="回测曲线从建仓日起归一。差的是选基、调仓时点、费用，"
-                        "以及回测用累计净值/实盘用单位净值的口径差。")
-        _g3.metric("账户净值", f"{float(_mine.iloc[-1]):.4f}",
-                   help="1.0000 = 建仓起点。也可以用「份额 × 最新单位净值 + 现金 = 总资产」跟支付宝对一遍。")
-        st.caption("两条差距都是「我的账户 ÷ 基准 − 1」的累计值，区间不同会看到不同数字；"
-                   "图上可以拖动缩放、切日/月/年线，和「基金检索」页的用法一致。")
-
-        # ---- 账户体检（原来在独立的「提醒」tab，跟这页说的都是账户本身，搬过来）----
-        st.divider()
-        st.markdown('<div class="sec-head"><span class="t">账户体检</span>'
-                    '<span class="r">回撤 / 现金占比 / 单只浮亏，口径全是账户层面</span></div>',
-                    unsafe_allow_html=True)
-        # 累计收益在下面的关键指标表里已经有一行，这里不再重复一张卡片
-        _issues = [x for x in _al["体检"] if not str(x.get("text") or "").startswith("累计收益")]
-        if not _issues:
-            st.markdown('<div class="sig calm"><div class="main"><div class="t">账户状态正常</div>'
-                        '<div class="m">没有回撤超 12%、没有现金占比异常、没有单只浮亏超 15%</div>'
-                        '</div></div>', unsafe_allow_html=True)
-        for _x in _issues:
-            st.markdown(_alert_card(_x["level"], _x["text"], _x.get("tip", "")),
-                        unsafe_allow_html=True)
-        _m = _al["指标"]
-        if _m:
-            _kv = []
-            for _k, _v in _m.items():
-                if isinstance(_v, dict):
-                    continue
-                if _k == "现金占比":
-                    _kv.append([_k, f"{_v*100:.1f}%"])
-                elif _k in ("累计收益", "最大回撤"):
-                    _kv.append([_k, f'<span class="{"up" if _v >= 0 else "down"}">{_v*100:+.2f}%</span>'])
-                elif _k.startswith("对比"):
-                    _kv.append([_k, f'<span class="{"up" if _v >= 0 else "down"}">{_v*100:+.2f}pp</span>'])
-                else:
-                    _kv.append([_k, str(_v)])
-            if _kv:
-                _render_table([("关键指标", "left"), ("数值", "right")], _kv)
 
 # ============================================================
 # Tab 7: 基金检索（搜全市场基金 / 8 个回测资产，看日 / 月 / 年 的涨跌幅与价格）
@@ -5379,7 +5791,7 @@ with tab7:
 with tab8:
     st.caption("这里是**项目原始策略**的历史回测：三策略对比、调频影响，"
                "以及最下方「历史调仓」里每月的目标权重和当月收益。"
-               "我自己持仓的收益在「我的持仓」看。")
+               "我自己持仓的收益在「我的账户」看。")
     from streamlit_app.performance import render_performance
     render_performance(PROJECT_ROOT)
 

@@ -44,10 +44,14 @@ PERIODS = ("日", "月", "年")
 # 月线按周期聚合仍标点、区间/周期写入各自 localStorage 键并还原。
 # 2026/10/27 再更新：tab7 改名「基金检索」，只改了 _scroll_chart_html docstring 里的页名，
 # 绘图与交互逻辑一字未动（diff 仅此一处），故刷新哈希、无需重跑 CDP 用例。
-CHART_SOURCE_SHA256 = "236f735db64513b2159406801aa38d5ca6b09653bd7715a1fb9ea44c86e7b2b2"
+# 2026/10/28 更新：标题行改由 _chart_head_block() 生成（heading="" 时整行标题隐藏，只留隐藏的
+# #updating），持仓页「点开一只基金」的详情图不再和上面的子页签重复写一遍标题。
+# 已用 headless Chrome + CDP 在详情面板里实跑：区间按钮 8 个齐、点近3月后区间文案与统计条同步重算、
+# 日线切月线（5 期 / 全历史 155 期）、localStorage awTrend.fund 写入 {"period":"日","range":"近3月"} 并还原。
+CHART_SOURCE_SHA256 = "d91a5d65f552511510d628cdd0f9ee2c0d5d65e836273c3bd1beb006c9bdb6cb"
 NAMES = {"_scroll_chart_html", "_trend_aggregate", "_trend_window_start",
          "_stage_rows", "_stage_summary_html", "_trend_chart_data",
-         "_period_label", "_range_buttons"}
+         "_period_label", "_range_buttons", "_chart_head_block"}
 CONSTANTS = {"_TREND_RANGES", "_TREND_STAGES", "_COMP_BASE_CSS"}
 
 
