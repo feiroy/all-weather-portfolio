@@ -377,6 +377,9 @@ hr{ border-color:var(--line); margin:1.6rem 0; }
 .pf-summary .item b{ font-size:15px; margin-left:4px; }
 .pf-summary .item b.buy{ color:var(--red); }
 .pf-summary .item b.sell{ color:var(--green); }
+.pf-summary b.up{ color:var(--red); }
+.pf-summary b.down{ color:var(--green); }
+.pf-summary .lead b{ font-size:16px; font-variant-numeric:tabular-nums; }
 .pf-summary.quiet{ border-left-color:var(--line-strong); }
 
 /* ========== 按钮 ========== */
@@ -2032,6 +2035,36 @@ _acct_daily, _acct_pos, _acct_cost, _acct_cash, _acct_units = (
     _replay_holdings(acct.get("trades", []), acct.get("capital", 0), acct.get("created"))
     if acct else (pd.DataFrame(), {}, {}, 0.0, 0.0)
 )
+# 代码 → 第一笔成交日（每次重跑重算，别用模块级缓存：录一笔新成交后缓存就过期了）
+_acct_first_trade: dict[str, pd.Timestamp] = {}
+for _t in ((acct or {}).get("trades") or []):
+    if _t.get("side") not in ("买入", "卖出"):
+        continue
+    try:
+        _td = pd.Timestamp(_t["date"])
+    except Exception:  # noqa: BLE001 - 日期写坏就跳过
+        continue
+    _tc = str(_t.get("code") or "")
+    if _tc and (_tc not in _acct_first_trade or _td < _acct_first_trade[_tc]):
+        _acct_first_trade[_tc] = _td
+
+
+def _held_day(code: str, shares: float, px: float, px_prev: float,
+              prev_day=None) -> tuple[float, float | None]:
+    """这只基金的「今日」涨跌（元, %）—— **建仓那天之前的变化不算这笔持仓的收益**。
+
+    `px_prev` 只是净值序列的倒数第二个点，对刚建仓的基金来说那个点还落在建仓之前：
+    000006 是 10/26 按 2.7612 买的，列表却把 10/22→10/26 那 0.0273 的下跌算成「今日 -51」，
+    而同一个面板里的累计盈亏是 0.00 —— 一边亏 51 一边不动，看着就是算错了。
+    建仓日不早于 prev_day 那天时，没有「上一交易日的持仓」可比，今日收益只能是 0。
+    """
+    shares, px, px_prev = float(shares or 0), float(px or 0), float(px_prev or 0)
+    if shares <= 0 or px <= 0:
+        return 0.0, None
+    _f = _acct_first_trade.get(str(code))
+    if _f is not None and prev_day is not None and _f > pd.Timestamp(prev_day):
+        return 0.0, None
+    return (px - px_prev) * shares, ((px / px_prev - 1) * 100 if px_prev > 0 else None)
 _hg_w = HG.slot_weights(w, holdings)            # 目标权重（按我启用的位置归一）
 _hg_last = _hg_panel.index[-1] if len(_hg_panel) else prices.index[-1]
 
@@ -2095,11 +2128,13 @@ def _hg_plan() -> dict:
             sh = float(_acct_pos.get(code, 0) or 0)
             cst = float(_acct_cost.get(code, 0) or 0)
             items.append({"f": f, "x": float(x), "code": code, "px": px, "px_prev": px_prev,
+                          "px_prev_day": (col.index[-2] if len(col) > 1 else None),
                           "shares": sh, "cost": cst, "mv": sh * px,
                           "pl": ((px / cst - 1) if (cst > 0 and px > 0) else None)})
         slot_mv = sum(it["mv"] for it in items)
         mv_total += slot_mv
-        today_pnl += sum((it["px"] - it["px_prev"]) * it["shares"] for it in items)
+        today_pnl += sum(_held_day(it["code"], it["shares"], it["px"], it["px_prev"],
+                                   it.get("px_prev_day"))[0] for it in items)
         slot_w = (slot_mv / asset) if asset else 0.0
         moved = abs(tgt - slot_mv) >= max(1.0, asset * 0.005)
         for i, it in enumerate(items):
@@ -2142,7 +2177,8 @@ def _hg_plan() -> dict:
             continue
         _nv = _nav_of_code(_c)
         if len(_nv) > 1:
-            today_pnl += (float(_nv.iloc[-1]) - float(_nv.iloc[-2])) * float(_sh)
+            today_pnl += _held_day(_c, float(_sh), float(_nv.iloc[-1]), float(_nv.iloc[-2]),
+                                   _nv.index[-2])[0]
     total = mv_total + sum(o["mv"] for o in other) + cash
     # 收益按「份额」算，不按「本金金额差」：units 起于初始资金（记作 1 元 1 份），转入/转出按当时
     # 净值折算份额，所以 equity/units 就是时间加权净值，收益 = 总资产 − 份额本金。
@@ -2326,7 +2362,8 @@ def _hg_other_item(code: str, why: str = "位置已关闭") -> dict:
     _meta = HG.fund_meta(holdings, code)[1] or {}
     return {
         "code": code, "f": _meta, "slot": why, "x": 1.0, "slot_n": 1,
-        "px": px, "px_prev": px_prev, "shares": sh, "cost": cst, "mv": sh * px,
+        "px": px, "px_prev": px_prev, "px_prev_day": (_nav.index[-2] if len(_nav) > 1 else None),
+        "shares": sh, "cost": cst, "mv": sh * px,
         "pl": ((px / cst - 1) if (cst > 0 and px > 0) else None),
         "otc": HG.is_otc(_meta) if _meta else (HG.default_unit(code) == "份额"),
         # 权重按「全账户总资产」算：这些钱不进调仓，但占总资产多少要说得对
@@ -2397,6 +2434,11 @@ def _pf_state_badge(it: dict) -> str:
     return f'<span class="pf-badge {cls}">{text}</span>'
 
 
+def _pf_day(it: dict) -> tuple[float, float | None]:
+    """条目 → 今日涨跌（元, %）。规则见 `_held_day`（列表、详情、头卡共用一份口径）。"""
+    return _held_day(it["code"], it["shares"], it["px"], it["px_prev"], it.get("px_prev_day"))
+
+
 def _pf_row(it: dict) -> dict:
     """一只基金 → 持仓列表的一行。所有显示串在这里算好，组件只负责排版与点击。"""
     code = it["code"]
@@ -2405,8 +2447,7 @@ def _pf_row(it: dict) -> dict:
         tag += f" · 位置内 {it['x'] * 100:.0f}%"
     shares, px, px_prev, cost = it["shares"], it["px"], it["px_prev"], it["cost"]
     held = shares > 0
-    day = (px - px_prev) * shares
-    day_pct = ((px / px_prev - 1) * 100) if (px_prev > 0 and held) else None
+    day, day_pct = _pf_day(it)          # 建仓日之前那段涨跌不属于这笔持仓，见 _pf_day
     hold = it["mv"] - shares * cost
     hold_pct = it["pl"] * 100 if it["pl"] is not None else None
     w_tgt = it.get("w_tgt")            # None = 不在任何启用位置里（没有目标权重）
@@ -3306,9 +3347,9 @@ def _pf_detail(it: dict, inline: bool = False) -> None:
     """
     code = it["code"]
     name = str(it["f"].get("name") or FL.fund_name(code) or code)
-    shares, px, px_prev, cost = it["shares"], it["px"], it["px_prev"], it["cost"]
+    shares, px, cost = it["shares"], it["px"], it["cost"]
     held = shares > 0
-    day = (px - px_prev) * shares
+    day, _ = _pf_day(it)
     hold = it["mv"] - shares * cost
     hold_pct = it["pl"] * 100 if it["pl"] is not None else None
     qty = (f"{shares:,.2f} 份" if it["otc"] else f"{shares:,.0f} 股") if held else "未持有"
@@ -3381,6 +3422,16 @@ def _pf_detail(it: dict, inline: bool = False) -> None:
         # 只要有两个交易日就画 —— 哪怕曲线是一条平的，那也是「这一笔到现在赚了多少」的真实答案，
         # 换成一句「数据太少」反而让人以为没算。
         _pnl = _code_pnl_curve(code)
+        _tr_days = []
+        for _t in ((acct or {}).get("trades") or []):
+            if str(_t.get("code") or "") != code or _t.get("side") not in ("买入", "卖出"):
+                continue
+            try:
+                _tr_days.append(pd.Timestamp(_t["date"]))
+            except Exception:  # noqa: BLE001 - 日期写坏了就跳过这一笔
+                continue
+        _tr_days.sort()
+
         if len(_pnl) > 1:
             # 只有十几天记录时图矮一点：曲线是一条平的，高画布只剩下大片空面积。
             # 画布高度要单独传给图（默认 200），iframe 还得加上页头/控件/状态行那 160px，
@@ -3395,6 +3446,25 @@ def _pf_detail(it: dict, inline: bool = False) -> None:
                        + (f"这只基金目前只有 {len(_pnl)} 个交易日的记录（第一笔 "
                           f"{_pnl.index[0].strftime('%Y/%m/%d')}），曲线会随着持有天数慢慢长起来。"
                           if len(_pnl) <= 5 else ""))
+        elif len(_pnl) == 1 and _tr_days:
+            # 只有一个点。这时说「缺净值」是错的 —— 净值是有的，只是最新那根就停在成交那天，
+            # 再往后还没有新净值。用户看到上面「今日收益 / 成本净值」都有数，自然会问「为啥还是空」。
+            _d0, _v0, _first = _pnl.index[0], float(_pnl.iloc[-1]), _tr_days[0]
+            if len(_ser) and _ser.index[-1] < _first:
+                st.caption(f"累计盈亏还没起算：这只基金的净值最新只到 {_cn_date(_ser.index[-1])}，"
+                           f"比第一笔成交（{_cn_date(_first)}）还早 —— 成交那天的净值还没出来。"
+                           "点右上角「更新数据」拉一次，或等这个净值日出来，曲线就从那天开始。")
+            else:
+                _v_cls = "up" if _v0 > 0.005 else ("down" if _v0 < -0.005 else "")
+                st.markdown(
+                    '<div class="pf-summary quiet">'
+                    f'<span class="lead">累计盈亏 <b class="{_v_cls}">{_pf_num(_v0, 2)}</b></span>'
+                    f'<span class="item">净值最新 {_cn_date(_d0)}</span>'
+                    '<span class="item">只有 1 个净值点，还画不成曲线</span></div>',
+                    unsafe_allow_html=True)
+                st.caption(f"净值停在 {_cn_date(_d0)}（就是第一笔成交那天），之后还没有新的净值 —— "
+                           "下一个净值日出来，曲线才会从这一点往上（或往下）长。"
+                           "所以现在看到的不是一个空图，是「到今天为止只走了这一步」。")
         elif _tr:
             st.caption("累计盈亏要等有净值数据才能画：这只基金缺净值，拉取后自动出现。")
         else:
