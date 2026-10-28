@@ -3513,21 +3513,28 @@ def _slot_config_panel() -> None:
             # 同一个面板里两套提交方式，不说清楚很容易「改完切页就没了」
             st.caption("这张表改完要点右下角「保存修改」才生效；上面的「参与」开关和搜索框是**立即生效**的。")
 
-        _miss = [f'{_c} {FL.fund_name(_c) or ""}'.strip()
-                 for _c in HG.all_codes(holdings)
-                 if _c not in _hg_panel.columns or not len(_hg_panel[_c].dropna())]
+        # 只看「参与中」的位置：关闭的位置既不调仓也不定投，缺净值并不影响任何数字，
+        # 把它们算进来只会让人以为一定要去拉 9 只基金的净值。
+        _miss_codes = [c for c in dict.fromkeys(
+            c for s in HG.active(holdings) for c in HG.codes(holdings[s]))
+            if c not in _hg_panel.columns or not len(_hg_panel[c].dropna())]
+        _off_codes = [c for s in HG.SLOTS if not holdings.get(s, {}).get("on", True)
+                      for c in HG.codes(holdings.get(s, {}))]
+        _miss = [f'{_c} {FL.fund_name(_c) or ""}'.strip() for _c in _miss_codes]
         if _miss:
             st.warning("这些基金还没有净值数据，拉取后建仓/调仓/提醒才能算：" + "；".join(_miss))
             if st.button("拉取缺的净值", key="hg_fetch_missing", type="primary"):
                 st.toast("正在拉取净值…", icon=":material/sync:", duration="long")
-                for _c in HG.all_codes(holdings):
-                    if _c not in _hg_panel.columns or not len(_hg_panel[_c].dropna()):
-                        try:
-                            FL.ensure_fresh(_c)
-                        except Exception:  # noqa: BLE001
-                            pass
+                for _c in _miss_codes:
+                    try:
+                        FL.ensure_fresh(_c)
+                    except Exception:  # noqa: BLE001
+                        pass
                 st.cache_data.clear()
                 st.rerun()
+        elif _off_codes:
+            st.caption(f"另有 {len(set(_off_codes))} 只基金挂在已关闭的位置上，"
+                       "不参与建仓/调仓/定投，缺不缺净值都不用管。")
 
         with st.container(horizontal=True, horizontal_alignment="right", gap="small"):
             if _edited is not None and st.button("保存修改", type="primary", key="hg_save"):
