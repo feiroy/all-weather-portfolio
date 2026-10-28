@@ -336,15 +336,8 @@ hr{ border-color:var(--line); margin:1.6rem 0; }
   padding:10px 14px 12px; gap:.5rem !important;
   box-shadow:inset 3px 0 0 #3B82F6;           /* 和上面那一行「选中」的竖条同宽同色，连成一条 */
 }
-/* 记一笔：标题与类型选项卡同一行，类型不再单独占一行、右边空一大片 */
-.st-key-tr_mode_switch{ align-items:center !important }
-.st-key-tr_mode_switch .sec-head{ margin:0 }
-.st-key-tr_mode_switch .sec-head .t{ white-space:nowrap }
-/* 标题那块的盒子比按钮矮 7px，靠 flex 居中会让字比按钮低半行 —— 给它和按钮一样的高度 */
-.st-key-tr_mode_switch .stMarkdown{
-  height:34px; display:flex; align-items:center;
-}
-.st-key-tr_mode_switch .stMarkdown div{ margin-bottom:0 !important }
+/* 记一笔：标题单独一行，类型（买入 / 卖出）已挪进下面那一行、紧挨日期 */
+.st-key-tr_card .sec-head{ margin:0 0 6px }
 /* 台账头：摘要条铺满整行、紧贴表格，左右两端跟表格对齐 ——
    它原来是跟筛选下拉挤一行的右半格，左边比表格缩进 270px、右边却齐平，看着「前后没对上」 */
 .pf-summary.ledger{
@@ -496,17 +489,17 @@ div[data-testid="stAlert"] p{ color:var(--brand-strong); }
   .st-key-trend_chart iframe,.st-key-trend_chart [data-testid="stElementContainer"]:has(>iframe){height:940px !important;flex-basis:940px !important}
 }
 .st-key-trend_head [data-testid="stHorizontalBlock"]{align-items:center; gap:20px}
-/* 视图切换（单只走势 / 多只对比）、建仓·调仓模式切换、记账类型切换：共用同一套 tab 按钮组样式 */
-.st-key-trend_mode_switch,.st-key-rb_mode_switch,.st-key-tr_mode_switch{margin:0 0 6px}
-.st-key-trend_mode_switch [role="radiogroup"],.st-key-rb_mode_switch [role="radiogroup"],.st-key-tr_mode_switch [role="radiogroup"]{gap:2px;padding:3px;background:var(--bg);
+/* 视图切换（单只走势 / 多只对比）、建仓·调仓模式切换：共用同一套 tab 按钮组样式 */
+.st-key-trend_mode_switch,.st-key-rb_mode_switch{margin:0 0 6px}
+.st-key-trend_mode_switch [role="radiogroup"],.st-key-rb_mode_switch [role="radiogroup"]{gap:2px;padding:3px;background:var(--bg);
   border:1px solid var(--line-strong);border-radius:12px;width:fit-content}
-.st-key-trend_mode_switch button,.st-key-rb_mode_switch button,.st-key-tr_mode_switch button{border:0 !important;border-radius:9px !important;
+.st-key-trend_mode_switch button,.st-key-rb_mode_switch button{border:0 !important;border-radius:9px !important;
   min-height:34px;height:34px;padding:0 14px;background:transparent;color:var(--sub)}
-.st-key-trend_mode_switch button p,.st-key-rb_mode_switch button p,.st-key-tr_mode_switch button p{font-size:13px !important;line-height:1.4;color:inherit}
-.st-key-trend_mode_switch button:hover,.st-key-rb_mode_switch button:hover,.st-key-tr_mode_switch button:hover{color:var(--ink)}
-.st-key-trend_mode_switch button[aria-checked="true"],.st-key-rb_mode_switch button[aria-checked="true"],.st-key-tr_mode_switch button[aria-checked="true"]{background:var(--card) !important;
+.st-key-trend_mode_switch button p,.st-key-rb_mode_switch button p{font-size:13px !important;line-height:1.4;color:inherit}
+.st-key-trend_mode_switch button:hover,.st-key-rb_mode_switch button:hover{color:var(--ink)}
+.st-key-trend_mode_switch button[aria-checked="true"],.st-key-rb_mode_switch button[aria-checked="true"]{background:var(--card) !important;
   box-shadow:0 1px 2px rgba(15,23,42,.08)}
-.st-key-trend_mode_switch button[aria-checked="true"] p,.st-key-rb_mode_switch button[aria-checked="true"] p,.st-key-tr_mode_switch button[aria-checked="true"] p{color:var(--brand) !important;font-weight:600}
+.st-key-trend_mode_switch button[aria-checked="true"] p,.st-key-rb_mode_switch button[aria-checked="true"] p{color:var(--brand) !important;font-weight:600}
 /* 交易记录页：记一笔那块画成卡片（已不用 st.form，控件改动即刷新下面的提示） */
 .st-key-tr_card{background:var(--card); border:1px solid var(--line); border-radius:16px;
   padding:20px !important; margin-bottom:18px}
@@ -5574,37 +5567,29 @@ with tab5:
 
         # ---------------- 记一笔：金额优先，和支付宝「买入 5,000 元」的说法一致 ----------------
         with st.container(key="tr_card"):
-            # 标题和「买入 / 卖出」同一行：类型不单独占一行，也不用推到右边 ——
-            # 推到右边就跟页面上那些筛选器长得一样。
-            with st.container(horizontal=True, horizontal_alignment="left",
-                              vertical_alignment="center", key="tr_mode_switch"):
-                st.markdown('<div class="sec-head"><span class="t">记一笔</span></div>',
-                            unsafe_allow_html=True)
-                tr_side = st.segmented_control(
-                    "类型",
-                    ["买入", "卖出"],
-                    default="买入", key="tr_side",
-                    # 不显标签：跟「记一笔」标题同一行，标签会把标题挤到下面半行去
-                    label_visibility="collapsed",
-                    help="买入 = 账户现金换基金；卖出 = 基金换回现金 —— "
-                         "卖出的钱自动回到现金，不用另外记一笔。",
-                ) or "买入"
+            st.markdown('<div class="sec-head"><span class="t">记一笔</span></div>',
+                        unsafe_allow_html=True)
 
-            # 一套列宽管一行：日期 / 基金 / 金额 / 单价 / 手续费 / 按钮
-            rB = st.columns([1.2, 2.0, 1.2, 1.2, 1.2, 0.8], gap="small",
+            # 一套列宽管一行：日期 / 类型 / 基金 / 金额 / 单价 / 手续费 / 按钮
+            # 类型原来是标题旁边那颗「买入 | 卖出」切换：它离要填的字段太远，眼睛得来回跳两行。
+            # 挪进这一行、紧挨日期之后，读起来就是「哪天 · 买还是卖 · 哪只 · 多少钱」一句话。
+            rB = st.columns([1.15, 0.85, 2.3, 1.15, 1.15, 1.15, 0.8], gap="small",
                             vertical_alignment="bottom")
             tr_date = rB[0].date_input("日期", value=pd.Timestamp(_hg_last).date(),
                                        max_value=date.today(),
                                        format="YYYY/MM/DD", key="tr_date")
-            tr_slot = rB[1].selectbox(
+            # 不给「类型」挂问号：这一格只有 100px 宽，问号会贴在「基金」标签前头，
+            # 看着倒像基金那一栏的说明。买 / 卖各自会发生什么，下面那行灰字已经说清了。
+            tr_side = rB[1].selectbox("类型", ["买入", "卖出"], index=0, key="tr_side")
+            tr_slot = rB[2].selectbox(
                 "基金", _slot_opts, format_func=lambda x: x[2], key="tr_fund",
                 help="这只基金按「股」还是按「份额」记账，由它的代码决定（ETF/LOF 场内按股，"
                      "开放式基金场外按份额）；判错了到「权重与选基」页底把「买卖单位」改成份额 / 股。")
-            tr_amount = rB[2].number_input("金额（元）", min_value=0.0, step=1000.0,
+            tr_amount = rB[3].number_input("金额（元）", min_value=0.0, step=1000.0,
                                            format="%.2f", key="tr_amount")
             _nav_hint = _hg_nav_on(None, tr_date, tr_slot[1])
             _uw1 = _uw(tr_slot[1])
-            tr_nav = rB[3].number_input(
+            tr_nav = rB[4].number_input(
                 f"单价（元/{_uw1}）",
                 min_value=0.0, value=round(float(_nav_hint or 0), 4),
                 step=0.0001, format="%.4f", key=f"tr_nav_{tr_slot[1]}_{tr_date}",
@@ -5612,12 +5597,12 @@ with tab5:
                       if _uw1 == "份" else
                       "默认取这天的收盘价；场内成交价会比净值高一点或低一点（溢价 / 折价），"
                       "按证券账户里实际的成交价填。"))
-            tr_fee = rB[4].number_input("手续费（元）", min_value=0.0, step=1.0,
+            tr_fee = rB[5].number_input("手续费（元）", min_value=0.0, step=1.0,
                                         format="%.2f", key="tr_fee")
             _side_note = (f"买入：现金 → 基金。金额按单价折成{_uw1}数，现金减少。"
                           if tr_side == "买入" else
                           "卖出：基金 → 现金。钱自动回到账户现金里。")
-            _act = rB[5]
+            _act = rB[6]
 
             _sh_new = 0.0
             if tr_nav > 0:
