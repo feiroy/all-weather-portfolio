@@ -2092,17 +2092,24 @@ _hg_last = _hg_panel.index[-1] if len(_hg_panel) else prices.index[-1]
 
 
 def _hg_mv_by_slot():
-    """位置 → 当前市值（按该位置下**每只**持仓基金的净值分别估值后相加）。"""
-    out = {}
+    """位置 → 当前市值（按该位置下**每只**持仓基金的净值分别估值后相加）。
+
+    同一只基金可能被挂在两个位置，但份额只有一份：第二个位置不再重复计入 ——
+    否则 sum(_hg_mv.values()) 会比账户净值多出整整一只，总资产跟着虚高。
+    """
+    out, seen = {}, set()
     for s in HG.active(holdings):
         v = 0.0
         for code in HG.codes(holdings[s]):
+            if code in seen:
+                continue
             sh = float(_acct_pos.get(code, 0) or 0)
             if sh <= 0 or code not in _hg_panel.columns:
                 continue
             col = _hg_panel[code].dropna()
             if len(col):
                 v += sh * float(col.iloc[-1])
+                seen.add(code)
         if v > 0:
             out[s] = v
     return out
@@ -2135,6 +2142,7 @@ def _hg_plan() -> dict:
     asset = float(sum(_hg_mv.values())) + cash
     rows, orders, by_code = [], [], {}
     buy_total = sell_total = mv_total = today_pnl = 0.0
+    _counted: dict[str, str] = {}          # code → 第一次出现的那个位置
     for s in HG.active(holdings):
         funds = HG.funds(holdings[s])
         if not funds:
@@ -2152,11 +2160,17 @@ def _hg_plan() -> dict:
             items.append({"f": f, "x": float(x), "code": code, "px": px, "px_prev": px_prev,
                           "px_prev_day": (col.index[-2] if len(col) > 1 else None),
                           "shares": sh, "cost": cst, "mv": sh * px,
+                          # 同一只基金可以同时挂在两个位置（比如拿它充当两个角色的仓位），
+                          # 但份额只有一份：第二次出现时记下第一次的位置，市值不再重复计
+                          "dup": _counted.get(code),
                           "pl": ((px / cst - 1) if (cst > 0 and px > 0) else None)})
-        slot_mv = sum(it["mv"] for it in items)
+            _counted.setdefault(code, s)
+        # 市值和今日收益按「份额」只算一次。重复累加会让总资产凭空多出整整一只基金，
+        # 跟账户净值曲线（按 code 聚合份额）差出几万块 —— 首页和你看到的走势会互相打架。
+        slot_mv = sum(it["mv"] for it in items if not it["dup"])
         mv_total += slot_mv
         today_pnl += sum(_held_day(it["code"], it["shares"], it["px"], it["px_prev"],
-                                   it.get("px_prev_day"))[0] for it in items)
+                                   it.get("px_prev_day"))[0] for it in items if not it["dup"])
         slot_w = (slot_mv / asset) if asset else 0.0
         moved = abs(tgt - slot_mv) >= max(1.0, asset * 0.005)
         for i, it in enumerate(items):
@@ -2165,6 +2179,9 @@ def _hg_plan() -> dict:
             side, qty, amt, note = "", 0.0, 0.0, ""
             if it["px"] <= 0:
                 note = "缺净值"
+            elif it["dup"]:
+                # 这只基金的钱已经在别的位置里算过了，这里再下一单就会真的重复买卖
+                note = f'已在「{HG.SLOT_LABEL.get(it["dup"], it["dup"])}」计入'
             elif not moved or abs(diff) < 1.0:
                 note = ""
             else:
@@ -2177,7 +2194,7 @@ def _hg_plan() -> dict:
                     side, sell_total = "卖出", sell_total + amt
             it.update({"slot": s, "side": side, "qty": qty, "amount": amt, "note": note,
                        "otc": HG.is_otc(f),
-                       "w_now": (it["mv"] / asset) if asset else 0.0,
+                       "w_now": (0.0 if it["dup"] else it["mv"] / asset) if asset else 0.0,
                        "w_tgt": tgt_w * it["x"],
                        # 位置级偏离只在该位置首行有意义，同位置其余行留 0 不显示
                        "dev": ((slot_w - tgt_w) if i == 0 else 0.0),
@@ -2244,13 +2261,6 @@ def _acct_flows() -> pd.Series:
     return out
 
 
-def _period_perf(freq: str = "Y") -> list[dict]:
-    """账户按年 / 按月切段：赚了多少钱、收益率、期内回撤（口径见 HG.period_performance）。"""
-    if acct is None or len(_acct_daily) == 0:
-        return []
-    return HG.period_performance(_acct_daily, _acct_flows(), freq)
-
-
 def _acct_pnl_series() -> pd.Series:
     """账户累计收益（元）= 总资产 − 累计净投入。
 
@@ -2290,124 +2300,40 @@ def _acct_calendar_payload():
     return _calendar_payload(d["nav"].astype(float), money=day)
 
 
-_PC_CSS = r"""
-#wrap{padding:0}
-.plg{display:flex;gap:18px;align-items:center;font-size:12px;color:#475569;margin:0 0 6px}
-.plg span{display:inline-flex;align-items:center;gap:6px}
-.plg i{width:11px;height:11px;border-radius:2px;display:inline-block}
-.plg i.b{background:#C52828;opacity:.85}
-.plg i.l{height:0;border-top:2px solid #3B82F6;border-radius:0;width:16px}
-#chart{display:block;width:100%}
-#tip{width:172px}
-"""
+def _acct_trend_payload():
+    """账户走势：一条累计收益率(%)、一条累计收益(元)，日 / 月 / 年三种粒度。
 
-
-def _period_chart_html(rows: list[dict], height: int = 300) -> str:
-    """每期收益柱（元，左轴）+ 收益率折线（%，右轴）——上面是「钱」，同一张图上叠「百分比」。
-
-    单纯画净值曲线看不出「这个月到底赚了多少钱」；只画柱子又看不出「这份钱本身的涨跌」。
-    两个都画，才能对上「加了钱 ≠ 赚了钱」这件事。
+    收益率走账户单位净值（建仓日 = 0%），钱走「总资产 − 累计净投入」。
+    这两个数一个答「涨了几个点」、一个答「赚了多少元」，量纲差几个数量级 ——
+    所以前端画成上下两个面板，而不是挤在同一根 Y 轴上（挤一起的结果是 % 被压成一条直线）。
     """
-    data = json.dumps(
-        {"rows": [{"k": r["period"], "pnl": round(float(r["pnl"]), 2),
-                   "ret": round(float(r["ret"]) * 100, 4),
-                   "mdd": round(float(r["mdd"]) * 100, 4),
-                   "flow": round(float(r["flow"]), 2)} for r in reversed(rows)],
-         "height": int(height)}, ensure_ascii=False, allow_nan=False).replace("<", "\\u003c")
-    tpl = r"""<style>
-__BASE_CSS__
-__PC_CSS__
-</style>
-<div id="wrap">
-<div class="plg"><span><i class="b"></i>每期收益（元 · 左轴）</span><span><i class="l"></i>收益率（% · 右轴）</span></div>
-<svg id="chart" role="img" aria-label="每期收益与收益率"></svg>
-<div id="tip"></div>
-</div>
-<script>
-(() => {
-  const D = __PDATA__;
-  const rows = D.rows || [];
-  const wrap = document.getElementById('wrap'), svg = document.getElementById('chart'), tip = document.getElementById('tip');
-  const H = D.height, L = 66, R = 60, T = 16, B = 30;
-  const ok = v => v !== null && v !== undefined && Number.isFinite(v);
-  const col = v => Math.abs(v) < 1e-9 ? '#94A3B8' : (v > 0 ? '#C52828' : '#16703B');
-  const fmtC = v => { const a = Math.abs(v);
-    if (a >= 10000) return (v / 10000).toFixed(a >= 100000 ? 0 : 2) + '万';
-    return v.toFixed(0); };
-  let rdec = 2, W = 0, slot = 0;
-  const fmtP = v => (v > 0 ? '+' : '') + v.toFixed(Math.max(2, rdec)) + '%';
-  const money = v => Math.abs(v).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  function show(r, i) {
-    tip.innerHTML = `<div class="tip-row"><span class="tip-label">${r.k}</span>`
-      + `<b style="color:${col(r.pnl)}">${r.pnl > 0 ? '+' : ''}¥${money(r.pnl)}</b></div>`
-      + `<div class="tip-row"><span class="tip-label">收益率</span><b style="color:${col(r.ret)}">${fmtP(r.ret)}</b></div>`
-      + `<div class="tip-row"><span class="tip-label">期内回撤</span><b>${fmtP(r.mdd)}</b></div>`
-      + `<div class="tip-row"><span class="tip-label">净投入</span><b>¥${money(r.flow)}</b></div>`;
-    const g = document.getElementById('guide');
-    if (g) { const cx = L + slot * (i + .5); g.setAttribute('x1', cx); g.setAttribute('x2', cx); g.setAttribute('visibility', 'visible'); }
-    tip.style.display = 'block';
-    const x = L + slot * (i + .5) + 12;
-    tip.style.left = Math.max(0, Math.min(W - 184, x)) + 'px';
-    tip.style.top = (T + 4) + 'px';
-  }
-  function hide() {
-    tip.style.display = 'none';
-    const g = document.getElementById('guide');
-    if (g) g.setAttribute('visibility', 'hidden');
-  }
-  function draw() {
-    W = wrap.getBoundingClientRect().width;
-    if (W <= L + R + 10) return;
-    const n = rows.length, PW = W - L - R, PH = H - T - B;
-    svg.setAttribute('width', W); svg.setAttribute('height', H);
-    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-    if (!n) { svg.innerHTML = `<text x="${W/2}" y="${H/2}" text-anchor="middle" font-size="12" fill="#94A3B8">还没有完整的收益区间</text>`; return; }
-    let pLo = 0, pHi = 0, rLo = 0, rHi = 0;
-    for (const r of rows) { pLo = Math.min(pLo, r.pnl); pHi = Math.max(pHi, r.pnl); rLo = Math.min(rLo, r.ret); rHi = Math.max(rHi, r.ret); }
-    const padP = (pHi - pLo) * .16 || 1, padR = (rHi - rLo) * .18 || .5;
-    pLo -= padP; pHi += padP; rLo -= padR; rHi += padR;
-    const yP = v => T + (pHi - v) * PH / (pHi - pLo);
-    const yR = v => T + (rHi - v) * PH / (rHi - rLo);
-    rdec = (rHi - rLo) < 0.2 ? 3 : ((rHi - rLo) < 2 ? 2 : 1);
-    slot = PW / n;
-    const bw = Math.min(42, Math.max(2.5, slot * .56)), xc = i => L + slot * (i + .5);
-    let g = '', tx = '', bars = '', dots = '';
-    for (let k = 0; k <= 4; k++) {
-      const y = T + PH * k / 4;
-      g += `<line x1="${L}" y1="${y}" x2="${W-R}" y2="${y}" stroke="#EEF2F7"/>`;
-      tx += `<text x="${L-8}" y="${y+4}" text-anchor="end" font-size="10" fill="#475569">${fmtC(pHi - (pHi-pLo)*k/4)}</text>`;
-      tx += `<text x="${W-R+8}" y="${y+4}" font-size="10" fill="#94A3B8">${(rHi - (rHi-rLo)*k/4).toFixed(rdec)}%</text>`;
-    }
-    if (pLo < 0 && pHi > 0) g += `<line x1="${L}" y1="${yP(0)}" x2="${W-R}" y2="${yP(0)}" stroke="#CBD5E1"/>`;
-    const step = Math.max(1, Math.ceil(n / Math.max(3, Math.floor(PW / 78))));
-    rows.forEach((r, i) => {
-      const y0 = yP(0), y1 = yP(r.pnl);
-      bars += `<rect x="${xc(i)-bw/2}" y="${Math.min(y0,y1)}" width="${bw}" height="${Math.max(1.5, Math.abs(y1-y0))}" rx="2" fill="${col(r.pnl)}" opacity=".8"/>`;
-      if (i % step === 0 || i === n - 1)
-        tx += `<text x="${xc(i)}" y="${H-B+16}" text-anchor="middle" font-size="10" fill="#475569">${r.k}</text>`;
-      if (n <= 36) dots += `<circle cx="${xc(i)}" cy="${yR(r.ret)}" r="2.8" fill="#3B82F6" stroke="#fff" stroke-width="1"/>`;
-    });
-    const pts = rows.map((r, i) => `${xc(i)},${yR(r.ret)}`).join(' ');
-    let zones = '';
-    rows.forEach((r, i) => { zones += `<rect x="${L + slot*i}" y="${T}" width="${slot}" height="${PH}" fill="transparent" style="cursor:crosshair"/>`; });
-    svg.innerHTML = g + bars
-      + `<polyline points="${pts}" fill="none" stroke="#3B82F6" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>`
-      + dots
-      + `<line id="guide" x1="0" y1="${T}" x2="0" y2="${T+PH}" stroke="#CBD5E1" stroke-dasharray="3 3" visibility="hidden"/>`
-      + tx + zones;
-    svg.querySelectorAll('rect[style]').forEach((el, i) => {
-      el.addEventListener('mouseenter', () => show(rows[i], i));
-      el.addEventListener('mouseleave', hide);
-    });
-  }
-  let raf = 0;
-  window.addEventListener('resize', () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; draw(); }); });
-  draw();
-})();
-</script>"""
-    return (tpl.replace("__BASE_CSS__", _COMP_BASE_CSS).replace("__PC_CSS__", _PC_CSS)
-               .replace("__PDATA__", data))
-
+    if acct is None or not len(_acct_daily):
+        return None
+    d = _acct_daily.dropna(subset=["nav", "equity"]).sort_index()
+    if len(d) < 2:
+        return None
+    nav = d["nav"].astype(float)
+    pnl = _acct_pnl_series().reindex(nav.index)
+    hist = {}
+    for period in ("日", "月", "年"):
+        a_nav = _trend_aggregate(nav, period)
+        if len(a_nav) < 2:
+            continue
+        a_pnl = _trend_aggregate(pnl, period).reindex(a_nav.index)
+        wins = {}
+        for label, span in _TREND_RANGES.items():
+            i = _trend_window_start(a_nav, span)
+            wins[label] = {"start": i, "count": len(a_nav) - i}
+        hist[period] = {
+            "labels": [_period_label(t, period) for t in a_nav.index],
+            "dates": [f"{t:%Y/%m/%d}" for t in a_nav.index],
+            "rets": [round((float(v) - 1) * 100, 4) for v in a_nav],
+            "pnl": [None if pd.isna(v) else round(float(v), 2) for v in a_pnl],
+            "windows": wins,
+        }
+    if not hist:
+        return None
+    return {"histories": hist, "defaultRange": "全部"}
 
 
 def _hg_other_item(code: str, why: str = "位置已关闭") -> dict:
@@ -2542,6 +2468,17 @@ _PF_LIST_CSS = r"""
 .tbl{font:13px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Noto Sans SC","Microsoft YaHei",sans-serif;
   color:#0F172A;background:#fff;border:1px solid #E2E8F0;border-radius:14px;
   max-height:462px;overflow:auto}   /* 限高：不展开详情时列表自己滚，别把整页顶长 */
+/* 限高之后、macOS 的滚动条平时是隐形的：16 只只露出 7 行，占比加起来才几个点，
+   看上去就像「跟总金额对不上」。表头报总数，底部再飘一条「下面还有几只」 */
+.hd .cnt{font-weight:400;color:#94A3B8;margin-left:6px}
+.more{position:sticky;bottom:0;height:0;z-index:3;pointer-events:none;
+  display:flex;justify-content:center;align-items:flex-end}
+/* 最后一行是被硬切一半的：先垫一层白到透明的渐变把它淡掉，再压一行小字 */
+.more::before{content:'';position:absolute;left:0;right:0;bottom:0;height:36px;
+  background:linear-gradient(to top,#fff 58%,rgba(255,255,255,0));border-radius:0 0 14px 14px}
+.more i{position:relative;transform:translateY(-8px);font-style:normal;font-size:11.5px;color:#64748B;
+  background:rgba(255,255,255,.96);border:1px solid #E2E8F0;border-radius:999px;
+  padding:3px 12px;box-shadow:0 2px 8px rgba(15,23,42,.07);white-space:nowrap}
 /* 点开一只基金时列表被切成上下两段，详情插在中间 —— 三段拼起来仍是一张卡 */
 .tbl.nocap{max-height:none;overflow:visible}
 .tbl.nohead .hd{display:none}
@@ -2686,11 +2623,34 @@ export default function (c) {
   root.className = ['tbl', D.pos ? 'pos-' + D.pos : '', D.cap === false ? 'nocap' : '',
     D.head === false ? 'nohead' : ''].filter(Boolean).join(' ');
   root.setAttribute('role', 'table');
-  root.innerHTML = '<div class="hd"><div>我的基金</div><div class="r">金额</div>'
+  root.innerHTML = '<div class="hd"><div>我的基金'
+    + (rows.length ? '<span class="cnt">共 ' + rows.length + ' 只</span>' : '') + '</div>'
+    + '<div class="r">金额</div>'
     + '<div class="r c-day">今日收益</div><div class="r c-hold">持有收益</div>'
     + '<div class="r c-w">占比 / 目标</div><div class="r c-badge">状态</div></div>'
     + rows.map(rowHtml).join('');
   parentElement.appendChild(root);
+  // 底部这条提示只在「确实还有行没露出来」时挂上：滚到底就撤掉，不然它自己会谎报还有
+  if (rows.length > 1) {
+    const more = document.createElement('div');
+    more.className = 'more';
+    more.innerHTML = '<i>下面还有 ' + '\u00a0' + '</i>';
+    const syncMore = () => {
+      if (root.scrollHeight - root.clientHeight - root.scrollTop <= 6) {
+        if (more.isConnected) more.remove();   // 滚到底就不该还说「下面还有」
+        return;
+      }
+      const rb = root.getBoundingClientRect();
+      const shown = [...root.querySelectorAll('.rw')].filter(el => {
+        const b = el.getBoundingClientRect();
+        return b.top >= rb.top - 2 && b.bottom <= rb.bottom + 2;
+      }).length;
+      more.firstChild.textContent = '下面还有 ' + Math.max(1, rows.length - shown) + ' 只 · 滚动查看';
+      if (!more.isConnected) root.appendChild(more);
+    };
+    root.addEventListener('scroll', syncMore, { passive: true });
+    requestAnimationFrame(syncMore);
+  }
   root.querySelectorAll('.rw').forEach(el => {
     // 每次点击都带上时间戳：点同一行（收起后再点回来）也要触发重跑，
     // 只回传代码时「值没变 → 不重跑 → 点了没反应」
@@ -3442,6 +3402,14 @@ _CAL_CSS = r"""
 #pick{min-width:128px;text-align:center;text-align-last:center}
 #summary{border-top:1px solid #E2E8F0;margin-top:16px;padding-top:12px}
 .sum-k{font-weight:600;color:#0F172A}
+/* 标题右侧的「收益率 / 金额」：格子里只摆得下一行大数字，想看 % 还是想看钱得让他自己挑 */
+#metric-switch{display:inline-flex;gap:2px;padding:3px;background:#F1F5F9;border-radius:10px}
+#metric-switch[hidden]{display:none}   /* ID 选择器的 display 会盖掉 hidden 的 UA 样式，得显式说一遍 */
+#metric-switch button{font:inherit;font-size:12px;line-height:1.4;border:0;border-radius:8px;
+  background:transparent;color:#475569;padding:4px 12px;cursor:pointer;white-space:nowrap}
+#metric-switch button:hover{color:#0F172A}
+#metric-switch button[aria-pressed="true"]{background:#fff;color:#C52828;font-weight:600;
+  box-shadow:0 1px 2px rgba(15,23,42,.10)}
 @media(max-width:560px){.cal-cell{min-height:52px;padding:6px}.cal-cell .v{font-size:12px}#pick{min-width:110px}}
 """
 
@@ -3520,7 +3488,8 @@ __BASE_CSS__
 __CAL_CSS__
 </style>
 <div id="wrap">
-<div class="heading"><h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v5m8-5v5M4 10h16"/></svg>收益日历</h3></div>
+<div class="heading"><h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v5m8-5v5M4 10h16"/></svg>收益日历</h3>
+<div id="metric-switch" role="group" aria-label="格子里显示什么" hidden><button data-metric="pct" aria-pressed="true">收益率</button><button data-metric="money" aria-pressed="false">金额</button></div></div>
 <div class="controls"><div id="range-controls" role="group" aria-label="粒度">
 <button data-range="日" aria-pressed="true">日</button><button data-range="周" aria-pressed="false">周</button><button data-range="月" aria-pressed="false">月</button><button data-range="年" aria-pressed="false">年</button>
 </div><div id="nav" class="nav"><button id="prev" aria-label="上一期"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M7.5 3l-3 3 3 3"/></svg></button><select id="pick" aria-label="选择期间"></select><button id="next" aria-label="下一期"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M4.5 3l3 3-3 3"/></svg></button></div></div>
@@ -3541,6 +3510,8 @@ __CAL_CSS__
   const color = v => !ok(v) || Math.abs(v) < 1e-10 ? '#475569' : (v > 0 ? '#C52828' : '#16703B');
   const p2 = n => String(n).padStart(2, '0');
   const cls = v => !ok(v) ? 'none' : (v > 1e-10 ? 'up' : (v < -1e-10 ? 'down' : 'flat'));
+  // 金额版涨跌：不到一块钱算平盘（净值换算出来的钱带分位噪声）
+  const mcls = m => !ok(m) ? 'none' : (m > .5 ? 'up' : (m < -.5 ? 'down' : 'flat'));
   // 涨跌幅越大底色越深（热力），颜色与 --red / --green 同值
   const heat = (v, mx) => {
     if (!ok(v) || Math.abs(v) < 1e-10) return '';
@@ -3552,14 +3523,32 @@ __CAL_CSS__
   const MDAY = D.mday || {}, MMO = D.mmonth || {}, MYE = D.myear || {};
   const money = v => !ok(v) ? '' : (v > 0 ? '+' : v < 0 ? '-' : '') + '¥'
     + Math.abs(v).toLocaleString('zh-CN', { maximumFractionDigits: 0 });
-  const cell = (k, v, mx, extra = '', sub = '', title = '', m) =>
-    `<div class="cal-cell ${cls(v)} ${extra}" style="${heat(v, mx)}" title="${title}">`
-    + `<span class="k">${k}${sub ? `<small>${sub}</small>` : ''}</span>`
-    + `<span class="v">${pct(v)}</span>`
-    + (ok(m) ? `<span class="mv">${money(m)}</span>` : '') + '</div>';
+  const cell = (k, v, mx, extra = '', sub = '', title = '', m, mmx) => {
+    const asMoney = HASM && metric === 'money';
+    // 不到一块钱算平盘：净值折出来的钱带分位噪声，别让「+¥0」染成红色
+    const mm = ok(m) && Math.abs(m) < .5 ? 0 : m;
+    const num = asMoney ? (ok(m) ? money(mm) : '—') : pct(v);
+    return `<div class="cal-cell ${asMoney ? mcls(mm) : cls(v)} ${extra}"`
+      + ` style="${asMoney ? heat(mm, mmx) : heat(v, mx)}" title="${title}">`
+      + `<span class="k">${k}${sub ? `<small>${sub}</small>` : ''}</span>`
+      + `<span class="v">${num}</span>`
+      + (ok(m) && !asMoney ? `<span class="mv">${money(mm)}</span>` : '') + '</div>';
+  };
   const item = (k, v) => `<span>${k}</span><b style="color:${color(v)}">${pct(v)}</b>`;
   // 只有拿到金额（账户页）才提「赚了多少钱」；基金检索页没有金额，别拿空映射求和冒充 ¥0
   const HASM = Object.keys(MDAY).length + Object.keys(MMO).length + Object.keys(MYE).length > 0;
+  // 格子里那一行大数字显示 % 还是 ¥：账户页才有得选，基金检索页没有金额，这个切换保持隐藏
+  let metric = 'pct';
+  const mSwitch = document.getElementById('metric-switch');
+  if (HASM) {
+    try { if (localStorage.getItem('awCal.metric') === 'money') metric = 'money'; } catch (e) {}
+    mSwitch.hidden = false;
+  }
+  mSwitch.querySelectorAll('[data-metric]').forEach(b => b.onclick = () => {
+    metric = b.dataset.metric;
+    try { localStorage.setItem('awCal.metric', metric); } catch (e) {}
+    render();
+  });
   const mItem = (k, v) => HASM && ok(v) ? `<span>${k}</span><b style="color:${color(v)}">${money(v)}</b>` : '';
   const sumM = obj => { const ks = Object.keys(obj); return ks.length ? ks.reduce((a, k) => a + (ok(obj[k]) ? obj[k] : 0), 0) : null; };
   const cnt = (k, n, u) => `<span>${k}</span><b>${n} ${u}</b>`;
@@ -3582,60 +3571,81 @@ __CAL_CSS__
   document.querySelectorAll('[data-range]').forEach(b => b.onclick = () => { mode = b.dataset.range; render(); });
   function render() {
     document.querySelectorAll('[data-range]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.range === mode)));
+    mSwitch.querySelectorAll('[data-metric]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.metric === metric)));
     fillPick();
+    // 金额模式下页脚不再重复报「涨跌几个点」和「最好/最差」—— 那一行就只讲钱
+    const MW = HASM && metric === 'money';
+    const th = MW ? .5 : 0;          // 「上涨 / 下跌」的计数阈值跟着度量走，不然会跟格子的颜色打架
+    const rItem = (k, v) => MW ? '' : item(k, v);
     let html = '', s = '';
     if (mode === '日' || mode === '周') {
       const [y, m] = ym, nd = new Date(y, m, 0).getDate(), mv = D.month[`${y}-${p2(m)}`];
       if (mode === '日') {
-        const first = new Date(y, m - 1, 1).getDay(), vals = [];
-        for (let d = 1; d <= nd; d++) { const v = D.day[`${y}/${p2(m)}/${p2(d)}`]; if (ok(v)) vals.push(v); }
-        const mx = maxAbs(vals);
+        const first = new Date(y, m - 1, 1).getDay(), vals = [], mvals = [];
+        for (let d = 1; d <= nd; d++) {
+          const key = `${y}/${p2(m)}/${p2(d)}`;
+          if (ok(D.day[key])) vals.push(D.day[key]);
+          if (ok(MDAY[key])) mvals.push(MDAY[key]);
+        }
+        const mx = maxAbs(vals), mmx = maxAbs(mvals);
         html = ['日', '一', '二', '三', '四', '五', '六'].map(w => `<div class="cal-h">${w}</div>`).join('')
           + '<div class="cal-cell pad"></div>'.repeat(first);
         for (let d = 1; d <= nd; d++) {
           const key = `${y}/${p2(m)}/${p2(d)}`;
-          html += cell(String(d), D.day[key], mx, key === D.today ? 'today' : '', '', key, MDAY[key]);
+          html += cell(String(d), D.day[key], mx, key === D.today ? 'today' : '', '', key,
+                       MDAY[key], mmx);
         }
         grid.style.gridTemplateColumns = 'repeat(7,minmax(0,1fr))';
         // 当月赚的钱 = 这个月每一格的「钱」加起来
         const mk = Object.keys(MDAY).filter(k => k.startsWith(`${y}/${p2(m)}/`));
         const mSum = mk.length ? mk.reduce((a, k) => a + (ok(MDAY[k]) ? MDAY[k] : 0), 0) : null;
-        s = `<span class="sum-k">${y}年${m}月</span>` + item('当月涨跌', mv) + mItem('当月赚了', mSum)
-          + cnt('上涨', vals.filter(v => v > 0).length, '天') + cnt('下跌', vals.filter(v => v < 0).length, '天')
-          + (vals.length ? item('最大单日涨', Math.max(...vals)) + item('最大单日跌', Math.min(...vals)) : '');
+        s = `<span class="sum-k">${y}年${m}月</span>` + rItem('当月涨跌', mv) + mItem('当月赚了', mSum)
+          + cnt('上涨', (MW ? mvals : vals).filter(v => v > th).length, '天')
+          + cnt('下跌', (MW ? mvals : vals).filter(v => v < -th).length, '天')
+          + (MW || !vals.length ? '' : item('最大单日涨', Math.max(...vals)) + item('最大单日跌', Math.min(...vals)));
       } else {
         const ms = `${y}/${p2(m)}/01`, me = `${y}/${p2(m)}/${p2(nd)}`;
-        const wk = D.week.filter(w => w.e >= ms && w.s <= me), mx = maxAbs(wk.map(w => w.v));
-        html = wk.map((w, k) => cell(`第${k + 1}周`, w.v, mx, '', `${w.s.slice(5)} – ${w.e.slice(5)}`, `${w.s} — ${w.e}`, w.m)).join('')
+        const wk = D.week.filter(w => w.e >= ms && w.s <= me);
+        const mx = maxAbs(wk.map(w => w.v)), mmx = maxAbs(wk.map(w => w.m));
+        html = wk.map((w, k) => cell(`第${k + 1}周`, w.v, mx, '', `${w.s.slice(5)} – ${w.e.slice(5)}`,
+                                     `${w.s} — ${w.e}`, w.m, mmx)).join('')
           || '<div class="cal-cell none"><span class="k">本月暂无完整周数据</span><span class="v">—</span></div>';
         grid.style.gridTemplateColumns = 'repeat(auto-fill,minmax(150px,1fr))';
-        s = `<span class="sum-k">${y}年${m}月</span>` + item('当月涨跌', mv)
+        s = `<span class="sum-k">${y}年${m}月</span>` + rItem('当月涨跌', mv)
           + mItem('当月赚了', wk.some(w => ok(w.m)) ? wk.reduce((a, w) => a + (ok(w.m) ? w.m : 0), 0) : null)
           + cnt('共', wk.length, '周')
-          + cnt('上涨', wk.filter(w => w.v > 0).length, '周') + cnt('下跌', wk.filter(w => w.v < 0).length, '周');
+          + cnt('上涨', wk.filter(w => (MW ? (w.m || 0) : w.v) > th).length, '周')
+          + cnt('下跌', wk.filter(w => (MW ? (w.m || 0) : w.v) < -th).length, '周');
       }
     } else if (mode === '月') {
-      const vals = []; for (let k = 1; k <= 12; k++) vals.push(D.month[`${yy}-${p2(k)}`]);
-      const mx = maxAbs(vals);
+      const vals = [], mvals = [];
+      for (let k = 1; k <= 12; k++) {
+        vals.push(D.month[`${yy}-${p2(k)}`]);
+        mvals.push(MMO[`${yy}-${p2(k)}`]);
+      }
+      const mx = maxAbs(vals), mmx = maxAbs(mvals);
       html = vals.map((v, k) => cell(`${k + 1}月`, v, mx, '', '', `${yy}年${k + 1}月`,
-        MMO[`${yy}-${p2(k + 1)}`])).join('');
+        MMO[`${yy}-${p2(k + 1)}`], mmx)).join('');
       grid.style.gridTemplateColumns = 'repeat(6,minmax(0,1fr))';
       const got = vals.map((v, k) => [k + 1, v]).filter(t => ok(t[1]));
       const best = got.reduce((a, t) => !a || t[1] > a[1] ? t : a, null), worst = got.reduce((a, t) => !a || t[1] < a[1] ? t : a, null);
       const mk2 = Object.keys(MMO).filter(k => k.startsWith(`${yy}-`));
       const mSum = mk2.length ? mk2.reduce((a, k) => a + (ok(MMO[k]) ? MMO[k] : 0), 0) : null;
-      s = `<span class="sum-k">${yy}年</span>` + item('全年涨跌', D.year[String(yy)]) + mItem('全年赚了', mSum)
-        + cnt('上涨', got.filter(t => t[1] > 0).length, '个月') + cnt('下跌', got.filter(t => t[1] < 0).length, '个月')
-        + (best ? item(`最好 ${best[0]}月`, best[1]) + item(`最差 ${worst[0]}月`, worst[1]) : '');
+      s = `<span class="sum-k">${yy}年</span>` + rItem('全年涨跌', D.year[String(yy)]) + mItem('全年赚了', mSum)
+        + cnt('上涨', got.filter(t => (MW ? (MMO[`${yy}-${p2(t[0])}`] || 0) : t[1]) > th).length, '个月')
+        + cnt('下跌', got.filter(t => (MW ? (MMO[`${yy}-${p2(t[0])}`] || 0) : t[1]) < -th).length, '个月')
+        + (MW || !best ? '' : item(`最好 ${best[0]}月`, best[1]) + item(`最差 ${worst[0]}月`, worst[1]));
     } else {
-      const ys = Object.keys(D.year).sort(), vals = ys.map(y => D.year[y]), mx = maxAbs(vals);
-      html = ys.map(y => cell(`${y}年`, D.year[y], mx, '', '', `${y}年`, MYE[y])).join('');
+      const ys = Object.keys(D.year).sort(), vals = ys.map(y => D.year[y]);
+      const mx = maxAbs(vals), mmx = maxAbs(ys.map(y => MYE[y]));
+      html = ys.map(y => cell(`${y}年`, D.year[y], mx, '', '', `${y}年`, MYE[y], mmx)).join('');
       grid.style.gridTemplateColumns = 'repeat(6,minmax(0,1fr))';
       const got = ys.map(y => [y, D.year[y]]);
       const best = got.reduce((a, t) => !a || t[1] > a[1] ? t : a, null), worst = got.reduce((a, t) => !a || t[1] < a[1] ? t : a, null);
       s = cnt('共', ys.length, '年') + mItem('合计赚了', sumM(MYE))
-        + cnt('上涨', got.filter(t => t[1] > 0).length, '年') + cnt('下跌', got.filter(t => t[1] < 0).length, '年')
-        + (best ? item(`最好 ${best[0]}年`, best[1]) + item(`最差 ${worst[0]}年`, worst[1]) : '');
+        + cnt('上涨', got.filter(t => (MW ? (MYE[t[0]] || 0) : t[1]) > th).length, '年')
+        + cnt('下跌', got.filter(t => (MW ? (MYE[t[0]] || 0) : t[1]) < -th).length, '年')
+        + (MW || !best ? '' : item(`最好 ${best[0]}年`, best[1]) + item(`最差 ${worst[0]}年`, worst[1]));
     }
     grid.innerHTML = html; sum.innerHTML = s; fit();
   }
@@ -3645,6 +3655,275 @@ __CAL_CSS__
 </script>"""
     return (template.replace("__BASE_CSS__", _COMP_BASE_CSS).replace("__CAL_CSS__", _CAL_CSS)
             .replace("__CAL_DATA__", data))
+
+
+def _acct_trend_html(payload, height=440):
+    """账户收益走势：上下两个面板共用一条时间轴 —— 上面累计收益率(%)，下面累计收益(元)。
+
+    交互和「基金检索 · 走势分析」是同一套：区间 tab、日 / 月 / 年线、滚轮缩放、拖动平移、
+    双击复位、悬停十字线。左右滑动靠拖动和滚轮，不占额外控件的高度。
+
+    为什么分两个面板而不是一根 Y 轴叠两条线：收益率是 0.04% 这个量级、钱是 ¥184 这个量级，
+    同轴要么把 % 压成一条直线、要么让 ¥ 变成锯齿；两条线本来就回答两个问题。
+    """
+    data = json.dumps(dict(payload, height=int(height)),
+                      ensure_ascii=False, allow_nan=False).replace("<", "\\u003c")
+    template = r"""<style>
+__BASE_CSS__
+#chart{display:block;width:100%;touch-action:pan-y;cursor:grab;user-select:none}
+#chart.dragging{cursor:grabbing}
+</style>
+<div id="wrap" aria-busy="false">
+<div class="controls"><div id="range-controls" role="group" aria-label="常用区间">
+__RANGE_BTNS__
+</div><select id="period" aria-label="周期"><option value="日">日线</option><option value="月">月线</option><option value="年">年线</option></select></div>
+<div class="state-line"><span id="selection" aria-live="polite"></span><span class="date-line"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2" fill="none"/><path d="M8 3v5m8-5v5M4 10h16"/></svg><span id="range"></span></span></div>
+<svg id="chart" role="img" aria-label="账户收益走势，可拖动和缩放" tabindex="0"></svg>
+<div id="stats"></div><div id="tip"></div>
+</div>
+<script>
+(() => {
+  const D = __TREND_DATA__;
+  const svg = document.getElementById('chart'), wrap = document.getElementById('wrap');
+  const tip = document.getElementById('tip'), range = document.getElementById('range');
+  const STORE = 'awAcct.trend';
+  const memo = (() => { try { return JSON.parse(localStorage.getItem(STORE) || '{}'); } catch (e) { return {}; } })();
+  const saveMemo = () => { try { localStorage.setItem(STORE, JSON.stringify({period, range: lastRange})); } catch (e) {} };
+  let period = D.histories[memo.period] ? memo.period : '日';
+  let lastRange = (D.histories[period].windows || {})[memo.range] ? memo.range : (D.defaultRange || '全部');
+  let activeRange = lastRange, customDates = null;
+  let P = D.histories[period], n = P.rets.length;
+  const H = D.height, L = 58, R = 14, T = 34, B = 30, GAP = 38;
+  const PANEL = (H - T - B - GAP) / 2, A_TOP = T, B_TOP = T + PANEL + GAP;
+  let initialCount = P.windows[lastRange].count, initialStart = P.windows[lastRange].start;
+  let count = initialCount, start = initialStart, W = 0, PW = 0, frame = 0;
+  let dragging = null, pinned = null;
+  const periodControl = document.getElementById('period');
+  for (const option of periodControl.options) option.disabled = !D.histories[option.value];
+  periodControl.value = period;
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  const valid = v => v !== null && v !== undefined && Number.isFinite(v);
+  const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const pct = v => valid(v) ? (v > 0 ? '+' : '') + v.toFixed(2) + '%' : '—';
+  const money = (v, d) => !valid(v) ? '—'
+    : (v < 0 ? '-' : '+') + '¥' + Math.abs(v).toLocaleString('zh-CN',
+        {minimumFractionDigits: d, maximumFractionDigits: d});
+  const color = v => !valid(v) || Math.abs(v) < 1e-10 ? '#475569' : (v > 0 ? '#C52828' : '#16703B');
+  // 刻度用紧凑写法：账户大了以后「+¥500,343」会把左边的刻度带挤爆
+  const compact = v => {
+    const a = Math.abs(v);
+    const body = a >= 10000 ? (a / 10000).toFixed(a >= 100000 ? 0 : 1) + '万' : String(Math.round(a));
+    return (v < 0 ? '-' : v > 0 ? '+' : '') + '¥' + body;
+  };
+  const x = i => L + (i + .5 - start) * PW / count;
+  const bounds = () => {
+    if (count <= 0) return [0, -1];
+    let first = Math.max(0, Math.ceil(start - .5 + 1e-8));
+    let last = Math.min(n - 1, Math.floor(start + count - .5 - 1e-8));
+    if (last < first) first = last = clamp(Math.round(start + count / 2 - .5), 0, n - 1);
+    return [first, last];
+  };
+  function requestDraw() { if (!frame) frame = requestAnimationFrame(() => { frame = 0; draw(); }); }
+  function update(nextStart, nextCount) {
+    if (!n) return;
+    count = clamp(nextCount, 1, n);
+    start = clamp(nextStart, 0, Math.max(0, n - count));
+    activeRange = Math.abs(count - initialCount) < 1e-6 && Math.abs(start - initialStart) < 1e-6 ? lastRange : null;
+    const b = bounds();
+    customDates = activeRange ? null : [P.dates[b[0]], P.dates[b[1]]];
+    pinned = null; requestDraw();
+  }
+  function useRange(label) {
+    lastRange = activeRange = label; customDates = null;
+    initialCount = P.windows[label].count; initialStart = P.windows[label].start;
+    count = initialCount; start = initialStart; pinned = null;
+    wrap.setAttribute('aria-busy', 'true'); requestDraw(); saveMemo();
+  }
+  document.querySelectorAll('[data-range]').forEach(b => b.onclick = () => useRange(b.dataset.range));
+  periodControl.onchange = () => {
+    const keep = activeRange ? null : customDates;
+    period = periodControl.value; P = D.histories[period]; n = P.rets.length;
+    initialCount = P.windows[lastRange].count; initialStart = P.windows[lastRange].start;
+    if (keep) {
+      const first = P.dates.findIndex(d => d >= keep[0]);
+      let last = P.dates.length - 1;
+      while (last >= 0 && P.dates[last] > keep[1]) last--;
+      start = Math.max(0, first); count = first < 0 || last < first ? 0 : last - first + 1;
+      activeRange = null;
+    } else { start = initialStart; count = initialCount; }
+    pinned = null; wrap.setAttribute('aria-busy', 'true'); requestDraw(); saveMemo();
+  };
+  function zoom(factor, px = L + PW / 2) {
+    if (!PW) return;
+    const f = clamp((px - L) / PW, 0, 1), anchor = start + f * count;
+    const next = clamp(count * factor, 1, n);
+    update(anchor - f * next, next);
+  }
+  function draw() {
+    const width = wrap.getBoundingClientRect().width;
+    if (width <= L + R) return;
+    W = width; PW = W - L - R;
+    svg.setAttribute('width', W); svg.setAttribute('height', H);
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    const b = bounds(), first = b[0], last = b[1];
+    const visibleCount = Math.max(0, last - first + 1);
+    document.querySelectorAll('[data-range]').forEach(el => el.setAttribute('aria-pressed', String(el.dataset.range === activeRange)));
+    const sel = document.getElementById('selection');
+    sel.textContent = `当前：${activeRange || '自选区间'} · ${period}线`;
+    sel.dataset.custom = String(!activeRange);
+    wrap.dataset.range = activeRange || '自选区间';
+    wrap.dataset.firstDate = visibleCount ? P.dates[first] : '';
+    wrap.dataset.lastDate = visibleCount ? P.dates[last] : '';
+    wrap.setAttribute('aria-busy', 'false');
+    if (!visibleCount) {
+      range.textContent = customDates ? customDates.join(' — ') : '暂无有效日期';
+      svg.innerHTML = `<text x="${W / 2}" y="${H / 2}" text-anchor="middle" font-size="12" fill="#94A3B8">这一段还没有净值，换个区间或周期</text>`;
+      document.getElementById('stats').innerHTML = ''; tip.style.display = 'none'; return;
+    }
+    range.textContent = `${P.dates[first]} — ${P.dates[last]}`;
+    let grid = '', line = '', ticks = '';
+    // 一个面板：含 0 的 Y 轴、横向网格、零轴虚线、面积 + 折线 + 末端点
+    function pane(top, title, vals, fmt) {
+      const vis = [];
+      for (let i = first; i <= last; i++) if (valid(vals[i])) vis.push(vals[i]);
+      let lo = vis.length ? Math.min(...vis) : 0, hi = vis.length ? Math.max(...vis) : 1;
+      lo = Math.min(lo, 0); hi = Math.max(hi, 0);
+      const span = (hi - lo) || Math.max(Math.abs(hi) * .1, 1);
+      lo -= span * .12; hi += span * .12;
+      const y = v => top + (hi - v) * PANEL / (hi - lo);
+      ticks += `<text x="${L}" y="${top - 11}" font-size="12" fill="#475569">${title}</text>`;
+      for (let k = 0; k <= 2; k++) {
+        const v = hi - (hi - lo) * k / 2, yy = y(v);
+        grid += `<line x1="${L}" y1="${yy}" x2="${W - R}" y2="${yy}" stroke="#EEF2F7"/>`;
+        ticks += `<text x="${L - 8}" y="${yy + 4}" text-anchor="end" font-size="10" fill="#475569">${fmt(v)}</text>`;
+      }
+      if (lo < 0 && hi > 0) grid += `<line x1="${L}" y1="${y(0)}" x2="${W - R}" y2="${y(0)}" stroke="#CBD5E1" stroke-dasharray="3 3"/>`;
+      const col = color(vals[last]), pts = [];
+      for (let i = first; i <= last; i++) if (valid(vals[i])) pts.push({i: i, px: x(i), py: y(vals[i])});
+      if (pts.length > 1) {
+        const yz = clamp(y(0), top, top + PANEL);
+        line += `<path d="M${pts[0].px},${yz} L` + pts.map(p => `${p.px},${p.py}`).join(' L')
+          + ` L${pts[pts.length - 1].px},${yz} Z" fill="${col}" opacity=".07"/>`;
+      }
+      line += `<polyline points="` + pts.map(p => `${p.px},${p.py}`).join(' ')
+        + `" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+      if (pts.length) {
+        const e = pts[pts.length - 1];
+        line += `<circle cx="${clamp(e.px, L + 3, W - R - 3)}" cy="${e.py}" r="3" fill="${col}"/>`;
+      }
+    }
+    pane(A_TOP, '累计收益率', P.rets, v => pct(v));
+    pane(B_TOP, '累计收益', P.pnl, v => compact(v));
+    // 日期刻度：按实际像素间隔抽稀，两端留在画布内且互不重叠
+    const step = PW / count, spacing = Math.max(1, Math.ceil(74 / step)), ids = [];
+    for (let i = first; i <= last; i += spacing) ids.push(i);
+    if (ids.length > 1 && last - ids[ids.length - 1] < spacing) ids.pop();
+    if (!ids.includes(last)) ids.push(last);
+    const labs = [];
+    for (const i of ids) {
+      const cx = clamp(x(i), L + 40, W - R - 40);
+      while (labs.length && cx - labs[labs.length - 1].cx < 70) labs.pop();
+      labs.push({i: i, cx: cx});
+    }
+    for (const lb of labs) {
+      ticks += `<text x="${lb.cx}" y="${H - 12}" text-anchor="middle" font-size="10" fill="#475569">${esc(P.labels[lb.i])}</text>`;
+    }
+    svg.innerHTML = `<defs><clipPath id="pc"><rect x="${L}" y="${T - 6}" width="${PW}" height="${H - T - B + 12}"/></clipPath></defs>`
+      + grid
+      + `<g clip-path="url(#pc)">${line}<line id="guide" y1="${T}" y2="${H - B}" stroke="#94A3B8" stroke-dasharray="4 4" visibility="hidden"/></g>`
+      + ticks;
+    const rL = P.rets[last], pL = P.pnl[last], rF = P.rets[first];
+    const grown = (valid(rL) && valid(rF) && (1 + rF / 100) !== 0)
+      ? ((1 + rL / 100) / (1 + rF / 100) - 1) * 100 : null;
+    document.getElementById('stats').innerHTML =
+      `<div class="summary-main"><div class="summary-result">`
+      + `<span>累计收益率</span><b style="color:${color(rL)}">${pct(rL)}</b>`
+      + `<span style="margin-left:20px">累计收益</span><b style="color:${color(pL)}">${money(pL, 2)}</b>`
+      + `</div><div class="summary-prices"><span><small>区间</small>`
+      + `<b>${esc(P.dates[first])} — ${esc(P.dates[last])}</b></span></div></div>`
+      + `<div class="amp-row"><span>这一段涨跌</span><b style="color:${color(grown)}">${pct(grown)}</b>`
+      + `<small>建仓日 = 0%；上是收益率、下是同一件事的钱 · 当前 ${visibleCount} 期 / 全历史 ${n} 期</small></div>`;
+    if (pinned !== null) showTip(pinned); else tip.style.display = 'none';
+  }
+  function showTip(i, clientY = null) {
+    const b = bounds(), first = b[0], last = b[1], guide = document.getElementById('guide');
+    if (!Number.isInteger(i) || i < first || i > last) {
+      tip.style.display = 'none'; if (guide) guide.setAttribute('visibility', 'hidden'); return;
+    }
+    if (guide) { guide.setAttribute('x1', x(i)); guide.setAttribute('x2', x(i)); guide.setAttribute('visibility', 'visible'); }
+    tip.dataset.index = String(i);
+    tip.innerHTML = `<b>${esc(P.dates[i])}</b>`
+      + `<div class="tip-row"><span class="tip-label">累计收益率</span><b style="color:${color(P.rets[i])}">${pct(P.rets[i])}</b></div>`
+      + `<div class="tip-row"><span class="tip-label">累计收益</span><b style="color:${color(P.pnl[i])}">${money(P.pnl[i], 2)}</b></div>`
+      + `<small class="tip-label">从建仓日算起${pinned !== null ? ' · 已固定' : ''}</small>`;
+    tip.style.display = 'block';
+    const wrapBox = wrap.getBoundingClientRect(), chartBox = svg.getBoundingClientRect();
+    const chartTop = chartBox.top - wrapBox.top;
+    const screenX = chartBox.left - wrapBox.left + x(i) * chartBox.width / W;
+    tip.style.left = clamp(screenX + 12 + tip.offsetWidth <= wrapBox.width - 4
+      ? screenX + 12 : screenX - tip.offsetWidth - 12, 4,
+      Math.max(4, wrapBox.width - tip.offsetWidth - 4)) + 'px';
+    const cursorY = clientY === null ? null : clientY - chartBox.top;
+    const anchorY = cursorY === null ? chartTop + T + 4 : chartTop + cursorY
+      + (cursorY > chartBox.height / 2 ? -tip.offsetHeight - 14 : 14);
+    let visibleTop = 0, visibleBottom = innerHeight;
+    try {
+      const embed = window.frameElement;
+      if (embed) {
+        const box = embed.getBoundingClientRect();
+        visibleTop = Math.max(0, -box.top);
+        visibleBottom = Math.min(innerHeight, parent.innerHeight - box.top);
+      }
+    } catch (_) { /* 跨源嵌入时按本 iframe 视口限制 */ }
+    const top = Math.max(chartTop + 4, visibleTop - wrapBox.top + 4);
+    const bottom = Math.min(chartBox.bottom - wrapBox.top, visibleBottom - wrapBox.top);
+    tip.style.top = clamp(anchorY, top, Math.max(top, bottom - tip.offsetHeight - 4)) + 'px';
+  }
+  const localX = e => e.clientX - svg.getBoundingClientRect().left;
+  svg.addEventListener('pointerdown', e => {
+    if (e.button !== 0 || !PW || !count || localX(e) < L || localX(e) > W - R) return;
+    dragging = {id: e.pointerId, x: e.clientX, start: start, count: count, moved: false};
+    svg.setPointerCapture(e.pointerId); svg.classList.add('dragging');
+  });
+  svg.addEventListener('pointermove', e => {
+    if (dragging) {
+      const delta = e.clientX - dragging.x;
+      if (Math.abs(delta) > 3) dragging.moved = true;
+      if (dragging.moved) { pinned = null; update(dragging.start - delta * dragging.count / PW, dragging.count); }
+    } else if (pinned === null && PW) {
+      const px = localX(e);
+      if (px < L || px > W - R) { tip.style.display = 'none'; return; }
+      showTip(Math.floor(start + (px - L) * count / PW), e.clientY);
+    }
+  });
+  function release(e) {
+    if (!dragging) return;
+    if (!dragging.moved && e.type === 'pointerup') {
+      const i = Math.floor(start + (localX(e) - L) * count / PW);
+      pinned = pinned === i ? null : i; showTip(pinned, e.clientY);
+    }
+    if (svg.hasPointerCapture(e.pointerId)) svg.releasePointerCapture(e.pointerId);
+    dragging = null; svg.classList.remove('dragging');
+  }
+  svg.addEventListener('pointerup', release); svg.addEventListener('pointercancel', release);
+  svg.addEventListener('pointerleave', () => { if (pinned === null && !dragging) showTip(null); });
+  svg.addEventListener('wheel', e => {
+    if (!PW || !count) return;
+    e.preventDefault(); pinned = null;
+    if (e.ctrlKey || e.metaKey) zoom(Math.exp(clamp(e.deltaY, -400, 400) * .003), localX(e));
+    else {
+      const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      update(start + delta * (e.deltaMode === 1 ? 16 : 1) * count / PW, count);
+    }
+  }, {passive: false});
+  svg.addEventListener('dblclick', () => useRange(lastRange));
+  new ResizeObserver(requestDraw).observe(wrap);
+  requestDraw();
+})();
+</script>"""
+    return (template.replace("__BASE_CSS__", _COMP_BASE_CSS)
+            .replace("__RANGE_BTNS__", _range_buttons(payload.get("defaultRange") or "全部"))
+            .replace("__TREND_DATA__", data))
 
 
 def _pf_detail(it: dict, inline: bool = False) -> None:
@@ -4602,125 +4881,38 @@ def _my_funds_txt(slot: str | None) -> str:
                     for f in fs)
 
 
-def _pct_txt(v: float, digits: int = 2) -> str:
-    """涨跌幅文案：小到 0.00% 以下时自动多留一位，避免「-0.00%」这种看着像出错的写法。"""
-    p = v * 100
-    d = digits + 1 if (p and abs(p) < 10 ** -digits) else digits
-    return ("+" if p > 0 else "") + f"{p:.{d}f}%"
-
-
 def _acct_period_view() -> None:
-    """账户收益：先一条曲线、一本日历回顾，再按年 / 按月对账。
+    """账户收益：一条走势（收益率 + 累计收益）+ 一本日历，就这两块。
 
-    三块各回答一个问题，不重复：
-      曲线  = 一路走过来赚了多少（累计收益）/ 账户大到了多少（总资产）；
-      日历  = 哪一天、哪一周、哪个月赚了或亏了多少（% 和钱并排）；
-      分年表 = 年化、回撤这些只能按段算的数。
+    走势回答「一路走过来赚了几个点、赚了多少钱」，日历回答「哪一天 / 哪一周 / 哪个月」。
+    按年按月对账表删掉了：那两张表里的年化、回撤，在走势上缩到某个区间就看得到，
+    单独摆一张要横向滚的表，等于把同一件事讲第三遍。
     """
     st.markdown(
         '<div class="sec-head"><span class="t">收益 · 账户赚了多少</span>'
-        '<span class="r">曲线看走势 · 日历看每天 / 每周 / 每月 · 分年表看回撤</span></div>',
+        '<span class="r">拖动 / 滚轮看区间 · 下面按天翻日历</span></div>',
         unsafe_allow_html=True,
     )
     if acct is None or len(_acct_equity_series()) <= 1:
         st.info("账户还没有净值曲线：先在「交易记录」补录成交，之后这里自动按天算。")
         return
-    # ① 曲线：累计收益（钱）/ 总资产（钱），一个切换看两条线 —— 一条答「赚了多少」，一条答「有多少」
-    with st.container(key="acct_curve_switch"):
-        _ck = st.segmented_control(
-            "看哪条", ["累计收益", "账户总资产"], default="累计收益", key="acct_curve_kind",
-            label_visibility="collapsed",
-            help="累计收益＝总资产 − 累计净投入（转入转出不算收益），答「我到底赚了多少」；\n\n"
-                 "账户总资产＝持仓市值 + 现金，答「账上现在有多少钱」。转入那天两条线会分开，那正是它们的分工。",
-        ) or "累计收益"
-    with st.container(key="acct_curve"):
-        if _ck == "累计收益":
-            st.iframe(_pnl_chart_html(_acct_pnl_series(), height=240, store="awAcctPnl",
-                                      default_range="全部", heading="",
-                                      sub="建仓以来累计（转入 / 转出不算收益）"),
-                      height=400)
-        else:
-            st.iframe(_pnl_chart_html(_acct_equity_series(), height=240, store="awAcctEq",
-                                      default_range="全部", heading="", area=False,
-                                      sub="持仓市值 + 现金"),
-                      height=400)
-    st.caption("**累计收益 = 总资产 − 累计净投入**：转入那天钱变多了但收益不变，所以这条线在转入日不会跳。"
-               "**总资产**在转入日会跳一格 —— 那个跳不是赚的。两条换着看，就知道「钱变多」有多少是赚的、多少是又打进来的。")
+    # ① 走势：上面累计收益率、下面累计收益 —— 同一段时间的两个单位，共用一条时间轴
+    _trend = _acct_trend_payload()
+    if _trend:
+        st.iframe(_acct_trend_html(_trend), height="content")
+        st.caption("**上是收益率、下是钱**：收益率是尺子（建仓日 = 0%），钱是结果。"
+                   "**拖动**左右平移、**滚轮**缩放、**双击**复位，也可以直接点上面的区间。")
+    else:
+        st.caption("走势要有两个交易日以上的净值才画得出来 —— 现在还不够。")
 
-    # ② 收益日历：日 / 周 / 月 / 年，每格给收益率 + 那份钱
+    # ② 收益日历：日 / 周 / 月 / 年，右上角切「收益率 / 金额」
     _cal = _acct_calendar_payload()
     if _cal:
         st.iframe(_calendar_html(_cal), height="content")
-        st.caption("日历里的 **%** 是账户单位净值的涨跌（转入按当天净值折份额，加钱不会抬高它），"
-                   "**¥** 是这段时间真赚到的钱（已扣掉当天转入转出）。同一个月，钱多的账户同样的 % 会赚得更多。")
+        st.caption("日历右上角能切成**金额** —— 收益率说「涨了几个点」，金额说「赚了多少元」。"
+                   "同一个月，钱多的账户同样的 % 会赚得更多。")
     else:
         st.caption("日历要有两个交易日以上的净值才画得出来 —— 现在还不够。")
-
-    # ③ 按年 / 按月对账（收益、净投入、回撤；环比表看把「又转进来多少钱」剔掉之后的数）
-    st.markdown(
-        '<div class="sec-head"><span class="t">按年 / 按月对账</span>'
-        '<span class="r">收益＝账户多了多少钱；收益率＝这份钱本身涨了几个点</span></div>',
-        unsafe_allow_html=True,
-    )
-    with st.container(key="perf_freq_switch"):
-        _freq = st.segmented_control(
-            "切段", ["按年", "按月"], default="按年", key="perf_freq",
-            label_visibility="collapsed",
-            help="按年＝每年一段；按月＝每月一段（从当月第一个净值日到最后一个）。",
-        ) or "按年"
-    _rows = _period_perf("Y" if _freq == "按年" else "M")
-    if not _rows:
-        st.info("账户还没有可切段的净值曲线：先在「交易记录」补录成交，之后这里自动按月/按年切段。")
-        return
-
-    _show = _rows if _freq == "按年" else _rows[:36]      # 按月最多摆三年，再往前看意义不大
-    st.iframe(_period_chart_html(_show, height=320 if len(_show) >= 4 else 236), height="content")
-
-    _nav_all = _acct_daily["nav"].dropna()
-    _tbl = []
-    for _r in _show:
-        _tbl.append([
-            _r["period"],
-            f'{_r["eq0"]:,.0f}',
-            (_r["flow"] if abs(_r["flow"]) >= 0.5 else None) and
-            f'<span class="{_pf_sign(_r["flow"])}">{_pf_num(_r["flow"], 0)}</span>' or
-            '<span class="muted">—</span>',
-            f'<span class="{_pf_sign(_r["pnl"])}">{_pf_num(_r["pnl"], 2)}</span>',
-            f'<span class="{_pf_sign(_r["ret"])}">{_pct_txt(_r["ret"])}</span>',
-            f'<span class="{_pf_sign(_r["mdd"])}">{_pct_txt(_r["mdd"])}</span>',
-            f'{_r["eq1"]:,.0f}',
-        ])
-    _sum_pnl = sum(r["pnl"] for r in _rows)
-    _sum_flow = sum(r["flow"] for r in _rows)
-    _all_ret = float(_nav_all.iloc[-1]) - 1.0 if len(_nav_all) else 0.0
-    _all_mdd = float((_nav_all / _nav_all.cummax() - 1).min()) if len(_nav_all) else 0.0
-    _render_table(
-        [("期间", "left"), ("期初总资产", "right"), ("净投入", "right"), ("收益(元)", "right"),
-         ("收益率", "right"), ("期内回撤", "right"), ("期末总资产", "right")],
-        _tbl,
-        totals=["合计", "—",
-                f'<span class="{_pf_sign(_sum_flow)}">{_pf_num(_sum_flow, 0)}</span>',
-                f'<span class="{_pf_sign(_sum_pnl)}">{_pf_num(_sum_pnl, 2)}</span>',
-                f'<span class="{_pf_sign(_all_ret)}">{_pct_txt(_all_ret)}</span>',
-                f'<span class="{_pf_sign(_all_mdd)}">{_pct_txt(_all_mdd)}</span>', "—"],
-        min_width=760,
-    )
-    if _freq == "按月" and len(_rows) > len(_show):
-        st.caption(f"上面只摆了最近 {len(_show)} 个月（共 {len(_rows)} 个月），合计行给的是建仓以来的全期数。")
-    _gap = _sum_pnl - float(_plan["pnl"])
-    if abs(_gap) >= 1:
-        st.caption(
-            f"合计比首页「持有收益」多 **¥{_gap:,.2f}** —— 首页按「份额本金」算（转入那天按前一天的净值折份额），"
-            "这里按「逐日资产变化 − 当日净投入」算；转入当天的净值有波动，两个口径就会差一点，"
-            "跟支付宝对账以首页的「持有收益」为准。"
-        )
-    st.caption(
-        "**收益（元）= 期末总资产 − 期初总资产 − 期内净投入**，把「又转进来多少钱」剔掉，剩下的才是赚的；"
-        "**收益率 = 账户单位净值的涨跌**（总资产 ÷ 份额，转入按当时净值折份额，所以加钱不会抬高收益率）。"
-        "两个数对不上是正常的 —— 钱多的时候同样 1% 也是更多的钱。"
-        "期初总资产＝上一段最后一个交易日的总资产，所以每段的「收益」跟上一段的「期末」能接上；"
-        "期内回撤每段重新起算，不把上一年的跌幅带进来。"
-    )
 
 
 def _acct_compare_view() -> None:
@@ -4907,7 +5099,9 @@ with tab3:
 
     # ---- 头卡：全站唯一一处「总金额 / 今日 / 持有收益」----
     _tot = _plan["total"]
-    _n_funds = len([r for r in _plan["rows"] if r["shares"] > 0])
+    # 只数「账上有份额」的：表头那句「16 只基金」和下面列表的「共 N 只」得是同一个数，
+    # 否则用户会以为漏了一只 —— 「位置已关闭 / 不在配置里」的那些钱也还在账上，一样要数
+    _n_funds = len([r for r in _plan["rows"] if r["shares"] > 0]) + len(_plan["other"])
     _head_sub = (f"账户起始 {_cn_date(acct['created'])} · 净值日期 {_cn_date(_hg_last)} · {_n_funds} 只基金"
                  if acct else "还没有账户")
     st.markdown(
