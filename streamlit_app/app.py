@@ -4427,40 +4427,109 @@ def _acct_compare_view() -> None:
                "图上可以拖动缩放、切日/月/年线，和「基金检索」页的用法一致。")
 
 
-def _acct_signal_view() -> None:
-    """账户体检：回撤 / 现金占比 / 单只浮亏 —— 只说「你的账户有没有风险」。
+def _acct_health_view() -> None:
+    """账户体检：只回答「有没有风险、哪一项越线、越线了去哪调」。
 
-    策略信号的清单不在这里重复：那是「模型 · 信号」页的事（同一套判断，那里还有曲线和明细）。
-    这一页原来也印一张信号表，于是同一件事在两页各有一份、还可能不同步，现在只留账户层面。
+    这一页曾经把「累计收益」「与基准差」也列进指标表 —— 那是「收益」和「对比」两页的结论，
+    等于同一件事在三个地方各印一遍，所以看着不伦不类。现在只留账户层面的风险：
+    集中度（一只 / 一个位置吃多少）、现金够不够、回撤深不深、哪只在亏、偏离目标多少。
+    判断阈值写在行里（现状 / 提醒线 / 判断），越线才在结论卡里说一句「该怎么看」。
     """
     st.markdown(
         '<div class="sec-head"><span class="t">体检 · 账户有没有风险</span>'
-        '<span class="r">回撤 / 现金占比 / 单只浮亏 · 策略信号在「模型 · 信号」页</span></div>',
+        '<span class="r">集中度 / 现金 / 回撤 / 单只浮亏 / 偏离目标</span></div>',
         unsafe_allow_html=True,
     )
-    # ---- 账户体检：回撤 / 现金占比 / 单只浮亏，口径全是账户层面 ----
-    _issues = [x for x in _al["体检"] if not str(x.get("text") or "").startswith("累计收益")]
-    if not _issues:
-        st.markdown('<div class="sig calm"><div class="main"><div class="t">账户状态正常</div>'
-                    '<div class="m">没有回撤超 12%、没有现金占比异常、没有单只浮亏超 15%</div>'
-                    '</div></div>', unsafe_allow_html=True)
-    for _x in _issues:
-        st.markdown(_alert_card(_x["level"], _x["text"], _x.get("tip", "")), unsafe_allow_html=True)
+    _rows = [r for r in _plan["rows"] if float(r["shares"] or 0) > 0]
+    if not _rows:
+        st.info("还没有持仓：先到「交易记录」补录成交，这里才有可体检的对象。")
+        return
     _m = _al["指标"]
-    _kv = []
-    for _k, _v in (_m or {}).items():
-        if isinstance(_v, dict):
-            continue
-        if _k == "现金占比":
-            _kv.append([_k, f"{_v*100:.1f}%"])
-        elif _k in ("累计收益", "最大回撤"):
-            _kv.append([_k, f'<span class="{"up" if _v >= 0 else "down"}">{_v*100:+.2f}%</span>'])
-        elif _k.startswith("对比"):
-            _kv.append([_k, f'<span class="{"up" if _v >= 0 else "down"}">{_v*100:+.2f}pp</span>'])
-        else:
-            _kv.append([_k, str(_v)])
-    if _kv:
-        _render_table([("关键指标", "left"), ("数值", "right")], _kv)
+
+    def _nm(_r):
+        return str(_r["f"].get("name") or _r["code"])
+
+    # 集中的风险不在「哪只涨跌多少」，而在「一只 / 一个位置出问题能不能把账户拖下去」
+    _big = max(_rows, key=lambda r: float(r["w_now"] or 0))
+    _slot_w: dict[str, float] = {}
+    for _r in _rows:
+        _slot_w[_r["slot"]] = _slot_w.get(_r["slot"], 0.0) + float(_r["w_now"] or 0)
+    _slot_k, _slot_max = max(_slot_w.items(), key=lambda kv: kv[1]) if _slot_w else ("", 0.0)
+    _worst = min((r for r in _rows if r.get("pl") is not None), key=lambda r: r["pl"], default=None)
+    _dev = max((r for r in _rows if r.get("w_tgt") is not None and r.get("dev") is not None),
+               key=lambda r: abs(float(r["dev"])), default=None)
+    _cash_r = float(_m.get("现金占比") or 0)
+    _mdd = _m.get("最大回撤")
+    _days = len(_acct_daily) if len(_acct_daily) else 0
+
+    # ---- 逐项对阈值：越线的记进 _bad，结论卡只讲这几条 ----
+    _tbl, _bad = [], []
+    _MUT = 'color:var(--muted)'
+    _WRN = 'color:var(--amber)'
+
+    def _row(label, now, line, over, why, advice, bad):
+        """一行检查：现状 / 提醒线 / 判断；越线时把「为什么算越线、去哪处理」攒给结论卡。"""
+        _tbl.append([label, now, line,
+                     f'<span style="{_WRN}">{over}</span>' if bad else f'<span style="{_MUT}">正常</span>'])
+        if bad:
+            _bad.append({"t": f"{label} {now}", "m": f"提醒线 {line}：{why}{advice}"})
+
+    # 一个位置里挂了多只基金时，「单只」和「单一位置」是两个数，分别列；
+    # 只挂一只时两个数一模一样，列两行就是自己抄自己
+    _multi = any(sum(1 for r in _rows if r["slot"] == k) > 1 for k in _slot_w)
+    if _multi:
+        _row("单只最大占比", f"{_big['w_now']*100:.1f}%（{_nm(_big)}）", "25%", "偏高",
+             "一只基金的涨跌就能左右整个账户", "；想分散到「权重与选基」给这个位置再挂一只同类基金",
+             float(_big["w_now"] or 0) > 0.25)
+        _row("单一位置最大占比", f"{_slot_max*100:.1f}%（{HG.SLOT_LABEL.get(_slot_k, _slot_k)}）", "50%", "偏高",
+             "整个位置同涨同跌，相当于半个账户压在一个资产上", "；压不压看「帮你算」给的目标比例",
+             _slot_max > 0.50)
+    else:
+        _row("最大仓位", f"{_slot_max*100:.1f}%（{_nm(_big)} · 位置「{HG.SLOT_LABEL.get(_slot_k, _slot_k)}」）",
+             "25%", "偏高",
+             "一只基金就占了账户这么多，它自己出问题等于账户出问题",
+             "；接受也行（这是策略定的比例），想稳一点就给这个位置再挂一只同类基金分摊",
+             _slot_max > 0.25)
+    _row("现金占比", f"{_cash_r*100:.1f}%", "3% ~ 15%",
+         "偏少" if _cash_r < 0.03 else "偏多",
+         "调仓要先卖后买，现金太少会卡住；太多则拖低收益",
+         "" if 0.03 <= _cash_r <= 0.15 else "；在「交易记录」记一笔转入/转出即可调整",
+         (_cash_r < 0.03 or _cash_r > 0.15))
+    _row("最大回撤",
+         (f"{_mdd*100:.2f}%（账户 {_days} 天）" if _mdd is not None else "—"), "12%", "超线",
+         "净值从最高点回落的最大幅度，越深越考验能不能拿住", "；扛不住就降波动，别硬撑",
+         (_mdd is not None and _mdd <= -0.12))
+    if _worst is not None:
+        _row("单只最大浮亏", f"{_worst['pl']*100:.2f}%（{_nm(_worst)}）", "15%", "超线",
+             "只说明「这一只买贵了」，不等于该卖", "；先判断是整体下跌还是这只自己的问题",
+             float(_worst["pl"]) <= -0.15)
+    if _dev is not None:
+        _row("偏离目标最大", f"{float(_dev['dev'])*100:+.1f}pp（{_nm(_dev)}）", "±5pp", "该调了",
+             "和策略目标已经拉开距离，再放下去就是「凭感觉持仓」", "；调多少看「帮你算」",
+             abs(float(_dev["dev"])) >= 0.05)
+
+    # ---- 结论卡：全正常只报平安，越线才说「越了哪条、去哪处理」 ----
+    if not _bad:
+        # 报平安的话按实际检查到的项目拼，别写死「仓位/现金/回撤」—— 项目数会随数据变
+        st.markdown('<div class="sig calm"><div class="main"><div class="t">账户状态正常</div>'
+                    f'<div class="m">{len(_tbl)} 项都在提醒线内：'
+                    + "、".join(x[0] for x in _tbl) + '</div></div></div>',
+                    unsafe_allow_html=True)
+    else:
+        # 只把第一条展开说透，其余交给下表 —— 每行都再起一张卡，就是同一件事写两遍
+        _more = (f"另外 {len(_bad) - 1} 项也越线："
+                 + "、".join(x["t"].split(" ")[0] for x in _bad[1:]) + "。") if len(_bad) > 1 else ""
+        _title = (f"{len(_bad)} 项越过提醒线 · 最要紧的是这一条" if len(_bad) > 1
+                  else f"{len(_bad)} 项越过提醒线")
+        st.markdown(_alert_card("warn", _title, _bad[0]["m"], _more), unsafe_allow_html=True)
+
+    _render_table([("检查项", "left"), ("现状", "left"), ("提醒线", "left"), ("判断", "left")], _tbl)
+
+    _tail = []
+    if _days and _days < 120:
+        _tail.append(f"账户才 {_days} 天，回撤和浮亏这两个数还说明不了太多，样本长起来才准。")
+    _tail.append("这里的判断只看账户层面；策略该不该触发在「模型 · 信号」，真要动手在「帮你算」。")
+    st.caption("".join(_tail))
 
 
 # ============================================================
@@ -4470,7 +4539,7 @@ with tab3:
     st.subheader("我的账户 · 有什么，赚多少，跑得怎么样")
     st.caption(
         "一页四看：**持仓**＝手里有什么、占多少；**收益**＝按年 / 按月赚了多少钱、收益率多少（不是净值）；"
-        "**对比**＝跟项目默认基金、策略理论各差多少；**体检**＝回撤、现金占比、单只浮亏。"
+        "**对比**＝跟项目默认基金、策略理论各差多少；**体检**＝仓位集不集中、现金够不够、回撤深不深。"
         "逐笔成交在「交易记录」页；该怎么调、调多少在「帮你算」页；策略触发在「模型 · 信号」页。"
     )
 
@@ -4502,7 +4571,7 @@ with tab3:
             "账户视图", ["持仓", "收益", "对比", "体检"], default="持仓", key="acct_view",
             label_visibility="collapsed",
             help="持仓：手里有什么、占多少；收益：按年 / 按月赚了多少钱和收益率；"
-                 "对比：跟项目默认基金、策略理论各差多少；体检：回撤、现金占比、单只浮亏。",
+                 "对比：跟项目默认基金、策略理论各差多少；体检：集中度、现金、回撤、单只浮亏、偏离目标。",
         ) or "持仓"
 
     if _av == "持仓":
@@ -4590,7 +4659,7 @@ with tab3:
     elif _av == "对比":
         _acct_compare_view()
     else:
-        _acct_signal_view()
+        _acct_health_view()
 
 # ============================================================
 # Tab 3: 帮你算 —— 全站唯一给出「该买/卖多少」的地方，只算不写账
