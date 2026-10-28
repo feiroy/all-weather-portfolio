@@ -172,6 +172,14 @@ hr{ border-color:var(--line); margin:1.6rem 0; }
 .st-key-hero_actions [data-testid="stMarkdownContainer"] p{ margin:0; display:flex; }
 .chip .dot{ width:7px; height:7px; border-radius:50%; background:var(--green); }
 .chip .dot.warn{ background:var(--amber); }
+/* 位置卡片里的基金清单：一行一只，代码 / 名称 / 占比三栏，占比右对齐 */
+.flist{ display:flex; flex-direction:column; gap:3px; margin:2px 0 8px; }
+.flist .frow{ display:grid; grid-template-columns:56px minmax(0,1fr) 42px; gap:8px;
+  align-items:baseline; font-size:12px; color:var(--sub); line-height:1.6; }
+.flist .fc{ font-variant-numeric:tabular-nums; color:var(--ink); }
+.flist .fn{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.flist .fp{ text-align:right; font-variant-numeric:tabular-nums; color:var(--ink); font-weight:600; }
+.flist .none{ font-size:12px; color:var(--sub); }
 
 /* ========== 基金详情页头部 ========== */
 .fund-head{
@@ -3418,7 +3426,7 @@ def _slot_config_panel() -> None:
     """给位置挂基金 / 改买卖单位 / 开关位置：低频设置，收在权重页底部一个展开里。"""
     st.divider()
     with st.expander("每个位置挂什么基金（加 / 换 / 移除 · 买卖单位 · 开关位置）",
-                     expanded=not bool(HG.all_codes(holdings))):
+                     expanded=True):
         st.caption(
             "这里回答的是「某个位置**用哪只基金**去实现」，跟上面的目标权重是两件事："
             "权重由策略算（项目自带），挂哪只看你自己。"
@@ -3427,32 +3435,43 @@ def _slot_config_panel() -> None:
         )
         # 加基金后要让搜索框回到空态：key 里带版本号，换号即重建组件（直接 pop 已渲染的 widget key 会报错）
         _add_ver = int(st.session_state.get("hg_add_ver", 0))
-        _slot_cols = st.columns(2, gap="medium")
         _pending_add, _pending_on = {}, {}
-        for _i, _s in enumerate(HG.SLOTS):
-            _h = holdings.get(_s, {})
-            _fs_ = HG.funds(_h)
-            with _slot_cols[_i % 2], st.container(border=True):
-                _c1, _c2 = st.columns([2.4, 1], vertical_alignment="center")
-                _c1.markdown(f"**{HG.SLOT_LABEL[_s]}**")
-                with _c2:
-                    _on_now = bool(_h.get("on", True))
-                    _on_new = st.toggle("参与", value=_on_now, key=f"hg_on_{_s}",
-                                        help="关掉后这个位置不参与建仓/调仓/提醒，权重让给同桶别的位置")
-                    if _on_new != _on_now:
-                        _pending_on[_s] = _on_new
-                if _fs_:
-                    _sh_ = HG.share_of(_h)
-                    st.caption(" · ".join(f'{f["code"]} {f.get("name") or ""} {x*100:.0f}%'
-                                          for f, x in zip(_fs_, _sh_)))
-                else:
-                    st.caption("**未挂基金** — 这个位置不持有")
-                _picked = FS.fund_search(
-                    f"hg_add_{_s}_{_add_ver}", mode="single", default=None,
-                    placeholder="搜索基金，加到这一位置（可多次加不同基金）",
-                )
-                if _picked and str(_picked) not in HG.codes(_h):
-                    _pending_add[_s] = str(_picked)
+        # 一行两个位置、从左到右念。原来按列填（1/3/5/7 在左、2/4/6/8 在右），
+        # 两列卡片高度不一样就互相错开，看着像整页错位
+        _slot_list = list(HG.SLOTS)
+        for _r0 in range(0, len(_slot_list), 2):
+            _row_cols = st.columns(2, gap="medium")
+            for _c, _s in zip(_row_cols, _slot_list[_r0:_r0 + 2]):
+                _h = holdings.get(_s, {})
+                _fs_ = HG.funds(_h)
+                with _c, st.container(border=True):
+                    _c1, _c2 = st.columns([2.4, 1], vertical_alignment="center")
+                    _c1.markdown(f"**{HG.SLOT_LABEL[_s]}**")
+                    with _c2:
+                        _on_now = bool(_h.get("on", True))
+                        _on_new = st.toggle("参与", value=_on_now, key=f"hg_on_{_s}",
+                                            help="关掉后这个位置不参与建仓/调仓/提醒，权重让给同桶别的位置")
+                        if _on_new != _on_now:
+                            _pending_on[_s] = _on_new
+                    if _fs_:
+                        # 一行一只基金：代码 / 名称 / 占比，占比右对齐才扫得动
+                        _sh_ = HG.share_of(_h)
+                        st.markdown(
+                            '<div class="flist">' + "".join(
+                                f'<div class="frow"><span class="fc">{f["code"]}</span>'
+                                f'<span class="fn">{f.get("name") or FL.fund_name(f["code"]) or ""}</span>'
+                                f'<span class="fp">{x * 100:.0f}%</span></div>'
+                                for f, x in zip(_fs_, _sh_)) + '</div>',
+                            unsafe_allow_html=True)
+                    else:
+                        st.markdown('<div class="flist"><span class="none">未挂基金 · 这个位置不持有</span></div>',
+                                    unsafe_allow_html=True)
+                    _picked = FS.fund_search(
+                        f"hg_add_{_s}_{_add_ver}", mode="single", default=None,
+                        placeholder="搜索基金，加到这一位置（可多次加不同基金）",
+                    )
+                    if _picked and str(_picked) not in HG.codes(_h):
+                        _pending_add[_s] = str(_picked)
 
         if _pending_add or _pending_on:
             _new = {s: HG._norm_slot(holdings.get(s)) for s in HG.SLOTS}
@@ -4213,52 +4232,60 @@ with tab5:
 
         # ---------------- 记一笔：金额优先，和支付宝「买入 5,000 元」的说法一致 ----------------
         with st.container(key="tr_card"):
-            st.markdown('<div class="sec-head"><span class="t">记一笔</span></div>',
-                        unsafe_allow_html=True)
-            rA = st.columns([1, 1.15, 1.6], gap="small", vertical_alignment="bottom")
-            tr_date = rA[0].date_input("日期", value=pd.Timestamp(_hg_last).date(),
-                                       max_value=date.today(),
-                                       format="YYYY/MM/DD", key="tr_date")
-            with rA[1]:
-                with st.container(key="tr_mode_switch"):
-                    tr_side = st.segmented_control(
-                        "类型",
-                        ["买入", "卖出", "转入", "转出"],
-                        default="买入", key="tr_side",
-                        help="买入 / 卖出 = 在账户里用现金换基金、或用基金换回现金（钱自动回到现金）。\n\n"
-                             "转入 / 转出 = 钱在这个账户和银行卡之间进出，和具体哪只基金无关。",
-                    ) or "买入"
+            st.markdown(
+                '<div class="sec-head"><span class="t">记一笔</span>'
+                f'<span class="r">账户现金 <b>¥{_cash:,.0f}</b></span></div>',
+                unsafe_allow_html=True)
+            # 类型单独一行：先定「这笔是什么」，下面那行字段才谈得上对齐
+            # （两类字段不同 —— 转入/转出没有基金和单价，混在同一行永远对不齐）
+            with st.container(key="tr_mode_switch"):
+                tr_side = st.segmented_control(
+                    "类型",
+                    ["买入", "卖出", "转入", "转出"],
+                    default="买入", key="tr_side",
+                    help="买入 / 卖出 = 在账户里用现金换基金、或用基金换回现金（钱自动回到现金）。\n\n"
+                         "转入 / 转出 = 钱在这个账户和银行卡之间进出，和具体哪只基金无关。",
+                ) or "买入"
             _is_money = tr_side in _MONEY_SIDES
 
+            # 一套列宽管一行：日期 / 基金 / 金额 / 单价 / 手续费 / 按钮
+            # 金额、单价、手续费给一样的宽度，标签才会落在同一条线上；
+            # 转入/转出没有基金和单价，只用前一列 + 金额 + 按钮，不留空洞
             if _is_money:
-                rB = st.columns([1.6, 1.0, 1.0, 0.8, 0.8], gap="small", vertical_alignment="bottom")
-                tr_amount = rB[0].number_input("金额（元）", min_value=0.0, step=1000.0,
+                rB = st.columns([1.2, 2.0, 0.8], gap="small", vertical_alignment="bottom")
+            else:
+                rB = st.columns([1.2, 2.0, 1.2, 1.2, 1.2, 0.8], gap="small",
+                                vertical_alignment="bottom")
+            tr_date = rB[0].date_input("日期", value=pd.Timestamp(_hg_last).date(),
+                                       max_value=date.today(),
+                                       format="YYYY/MM/DD", key="tr_date")
+            if _is_money:
+                # 转入/转出没有基金：金额直接占基金那一格，不留下一个空洞
+                tr_amount = rB[1].number_input("金额（元）", min_value=0.0, step=1000.0,
                                                format="%.2f", key="tr_amount_money")
                 tr_slot, tr_nav, tr_fee = ("", ""), 0.0, 0.0
                 _side_note = ("银行卡 / 支付宝 → 账户现金：现金变多，本金同步变多，**不算收益**。"
                               if tr_side == "转入" else
                               "账户现金 → 银行卡：现金变少，本金同步变少。卖完基金想取钱才用这个，"
                               "卖出基金本身不会自动取钱。")
-                _act = rB[4]
             else:
-                rB = st.columns([1.6, 1.0, 1.0, 0.8, 0.8], gap="small", vertical_alignment="bottom")
-                tr_slot = rB[0].selectbox("基金", _slot_opts,
+                tr_slot = rB[1].selectbox("基金", _slot_opts,
                                           format_func=lambda x: x[2], key="tr_fund")
-                tr_amount = rB[1].number_input("金额（元）", min_value=0.0, step=1000.0,
+                tr_amount = rB[2].number_input("金额（元）", min_value=0.0, step=1000.0,
                                                format="%.2f", key="tr_amount")
                 _nav_hint = _hg_nav_on(None, tr_date, tr_slot[1])
-                tr_nav = rB[2].number_input(
+                tr_nav = rB[3].number_input(
                     "单价（元/" + ("股" if HG.default_unit(tr_slot[1]) == "股" else "份") + "）",
                     min_value=0.0, value=round(float(_nav_hint or 0), 4),
                     step=0.0001, format="%.4f", key=f"tr_nav_{tr_slot[1]}_{tr_date}",
                     help="默认取这天的净值（场外按当日收盘净值成交）；支付宝里成交价不一样时改这里。")
-                tr_fee = rB[3].number_input("手续费（元）", min_value=0.0, step=1.0,
+                tr_fee = rB[4].number_input("手续费（元）", min_value=0.0, step=1.0,
                                             format="%.2f", key="tr_fee")
                 _unit_word = "股" if HG.default_unit(tr_slot[1]) == "股" else "份"
                 _side_note = (f"买入：现金 → 基金。金额按单价折成{_unit_word}数，现金减少。"
                               if tr_side == "买入" else
                               "卖出：基金 → 现金。钱自动回到账户现金里，**不用再记一笔转入**。")
-                _act = rB[4]
+            _act = rB[2] if _is_money else rB[5]
 
             _sh_new = 0.0
             if _is_money:
@@ -4285,7 +4312,7 @@ with tab5:
                     "或者在「买卖提醒 → 定投一笔」里勾上「同时记一笔转入」，一次就记全。"
                 )
 
-            if _act.button("记一笔", type="primary", key="tr_add"):
+            if _act.button("记一笔", type="primary", key="tr_add", width="stretch"):
                 _t = {"date": str(tr_date), "side": tr_side,
                       "slot": (tr_slot[0] if tr_slot else ""),
                       "code": (tr_slot[1] if tr_slot else ""),
@@ -4319,17 +4346,22 @@ with tab5:
         _pick_map = {"全部基金": ""}
         for _c0 in _ledger_codes:
             _pick_map[f'{_c0} {FL.fund_name(_c0) or ""}'.strip()] = _c0
-        _fc1, _fc2 = st.columns([1, 2.4], gap="medium", vertical_alignment="center")
+        _fc1, _fc2 = st.columns([1.6, 5.0], gap="medium", vertical_alignment="bottom")
         _fcode = _pick_map[_fc1.selectbox("看哪只基金的历史", list(_pick_map),
                                           key="tr_fund_filter")]
         _f_tr = ([t for t in _trades if str(t.get("code") or "") == _fcode]
                  if _fcode else list(_trades))
+        # 摘要跟着筛选走：不选基金时给全账户的，别把右半边留成一片空白
+        _fb = sum(float(t.get("shares") or 0) * float(t.get("nav") or 0)
+                  + float(t.get("fee") or 0) for t in _f_tr if t.get("side") == "买入")
+        _fs = sum(float(t.get("shares") or 0) * float(t.get("nav") or 0)
+                  - float(t.get("fee") or 0) for t in _f_tr if t.get("side") == "卖出")
+        _ff = sum(float(t.get("fee") or 0) for t in _f_tr)
+        _it_html = [f'<span class="item">{len(_f_tr)} 笔</span>',
+                    f'<span class="item">买入 <b class="buy">¥{_fb:,.0f}</b></span>',
+                    f'<span class="item">卖出 <b class="sell">¥{_fs:,.0f}</b></span>',
+                    f'<span class="item">手续费 ¥{_ff:,.2f}</span>']
         if _fcode:
-            _fb = sum(float(t.get("shares") or 0) * float(t.get("nav") or 0)
-                      + float(t.get("fee") or 0) for t in _f_tr if t.get("side") == "买入")
-            _fs = sum(float(t.get("shares") or 0) * float(t.get("nav") or 0)
-                      - float(t.get("fee") or 0) for t in _f_tr if t.get("side") == "卖出")
-            _ff = sum(float(t.get("fee") or 0) for t in _f_tr)
             _fsh = float((_acct_pos or {}).get(_fcode, 0) or 0)
             _funit = "股" if HG.default_unit(_fcode) == "股" else "份"
             _fqty = f"{_fsh:,.0f} 股" if _funit == "股" else f"{_fsh:,.2f} 份"
@@ -4338,20 +4370,16 @@ with tab5:
             _fpnl_s = ("" if _fpnl_v is None else
                        "0" if abs(_fpnl_v) < 0.5 else f"{_fpnl_v:+,.0f}")
             _fpnl_cls = "buy" if (_fpnl_v or 0) > 0.5 else ("sell" if (_fpnl_v or 0) < -0.5 else "")
-            _fc2.markdown(
-                f'<div class="pf-summary quiet"><span class="lead">'
-                f'{FL.fund_name(_fcode) or _fcode}</span>'
-                f'<span class="item">{len(_f_tr)} 笔</span>'
-                f'<span class="item">买入 <b class="buy">¥{_fb:,.0f}</b></span>'
-                f'<span class="item">卖出 <b class="sell">¥{_fs:,.0f}</b></span>'
-                f'<span class="item">手续费 ¥{_ff:,.2f}</span>'
-                f'<span class="item">持有 {_fqty}</span>'
-                + (f'<span class="item">累计盈亏 <b class="{_fpnl_cls}">¥{_fpnl_s}</b></span>'
-                   if _fpnl_v is not None else "")
-                + '</div>', unsafe_allow_html=True)
+            _it_html += [f'<span class="item">持有 {_fqty}</span>']
+            if _fpnl_v is not None:
+                _it_html += [f'<span class="item">累计盈亏 <b class="{_fpnl_cls}">¥{_fpnl_s}</b></span>']
+            _lead = FL.fund_name(_fcode) or _fcode
         else:
-            _fc2.caption("想只看一只基金的全部买卖，就在左边选它 —— 上方会给出它的买入/卖出总额、"
-                         "手续费、当前份额和累计盈亏。")
+            _it_html += [f'<span class="item">涉及 {len(_ledger_codes)} 只基金</span>']
+            _lead = "全部成交"
+        _fc2.markdown(
+            f'<div class="pf-summary quiet"><span class="lead">{_lead}</span>'
+            + "".join(_it_html) + '</div>', unsafe_allow_html=True)
 
         # ---------------- 全部成交：行内改 / 行内删 ----------------
         st.markdown(
