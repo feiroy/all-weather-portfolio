@@ -2327,16 +2327,25 @@ _TRADE_LIST_CSS = r"""
 :host{display:block}
 .wrap{font:13px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Noto Sans SC","Microsoft YaHei",sans-serif;
   color:#0F172A;background:#fff;border:1px solid #E2E8F0;border-radius:14px;overflow:hidden}
-.hd,.rw{display:grid;grid-template-columns:92px 62px minmax(0,1fr) 106px 74px 70px 72px;
-  gap:12px;align-items:center;padding:10px 14px}
+.hd,.rw{display:grid;grid-template-columns:minmax(0,1fr) 104px 86px 112px 72px;
+  gap:12px;align-items:center;padding:9px 14px}
 .hd{background:#F8FAFC;border-bottom:1px solid #E2E8F0;font-size:12px;color:#64748B}
 .hd .r{text-align:right}
 .rw{border-bottom:1px solid #F1F5F9}
 .rw:last-child{border-bottom:0}
 .rw:hover{background:#F8FAFC}
 .rw.on{background:#EFF6FF;box-shadow:inset 3px 0 0 #3B82F6}
+/* 日期分组头：同一天的成交归一组，日期不再每行重复 */
+.grp{display:flex;align-items:baseline;gap:10px;padding:9px 14px 7px;background:#F8FAFC;
+  border-top:1px solid #E2E8F0;font-size:12px;color:#64748B}
+.hd+.grp{border-top:0}
+.grp .gd{font-weight:600;color:#334155;font-variant-numeric:tabular-nums}
+.grp .gm{margin-left:auto;font-variant-numeric:tabular-nums}
 .dt{font-variant-numeric:tabular-nums;color:#334155}
-.nm{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 基金名 + 类型徽标同一行：类型贴着名字，不单独占一列（14 行全「买入」时那样大片是空的） */
+.nm{display:flex;align-items:center;gap:8px;min-width:0}
+.nm .t{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nm .bg{flex:none}
 .sub{font-size:11.5px;color:#94A3B8;font-variant-numeric:tabular-nums;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .num{text-align:right;font-variant-numeric:tabular-nums;font-weight:600;font-size:13px}
@@ -2383,9 +2392,10 @@ _TRADE_LIST_CSS = r"""
 .cf .btns button{height:30px;padding:0 14px;border-radius:8px;font-size:12.5px;cursor:pointer;border:1px solid #FECACA}
 .cf .btns .danger{background:#C52828;border-color:#C52828;color:#fff;font-weight:600}
 .cf .btns .ghost{background:#fff;color:#7F1D1D}
-@media(max-width:900px){   /* 手机上留「日期 / 类型 / 基金 / 操作」，金额与手续费进编辑面板再看 */
-  .hd,.rw{grid-template-columns:84px 54px minmax(0,1fr) 72px;padding:9px 12px;gap:8px}
-  .c-nav,.c-fee,.c-qty{display:none}
+@media(max-width:900px){   /* 手机上留「基金 / 类型 / 金额 / 操作」，单价等细节进编辑面板再看 */
+  .hd,.rw{grid-template-columns:minmax(0,1fr) 96px 72px;padding:9px 12px;gap:8px}
+  .c-nav,.c-qty{display:none}
+  .grp{padding:8px 12px 6px}
   .ed{padding:12px}
   .ed .r1{grid-template-columns:1fr 1fr;gap:8px}
   .ed .r1 label:nth-child(3),.ed .r2{grid-column:1/-1}
@@ -2431,18 +2441,38 @@ export default function (c) {
     return {shares: round2(Math.max(0, raw)), nav: nav, fee: fee};
   }
 
+  // 金额列：买入/转出是钱出去（−），卖出/转入是钱进来（+）；转入转出没有份额和单价
+  function amountHtml(r) {
+    const out = r.side === '买入' || r.side === '转出';
+    return (out ? '−¥' : '+¥') + fmt(Math.abs(Number(r.amount) || 0), 0);
+  }
+
   function rowHtml(r, on) {
+    const money = isMoneySide(r.side);
     return '<div class="rw' + (on ? ' on' : '') + '" data-i="' + esc(r.i) + '" role="row">'
-      + '<div class="dt">' + esc(r.date) + '</div>'
-      + '<div><span class="bg ' + esc(r.cls) + '">' + esc(r.side) + '</span></div>'
-      + '<div><div class="nm">' + esc(r.name) + '</div><div class="sub">' + esc(r.sub) + '</div></div>'
-      + '<div class="num c-qty">' + esc(r.qty) + '</div>'
-      + '<div class="num c-nav">' + esc(r.nav) + '</div>'
-      + '<div class="num c-fee">' + esc(r.fee) + '</div>'
+      + '<div class="fc"><div class="nm"><span class="t">' + esc(r.name) + '</span>'
+      + '<span class="bg ' + esc(r.cls) + '">' + esc(r.side) + '</span></div>'
+      + '<div class="sub">' + esc(r.sub) + '</div></div>'
+      + '<div class="num c-qty">' + (money ? '' : esc(r.qty)) + '</div>'
+      + '<div class="num c-nav">' + (money ? '' : esc(r.nav)) + '</div>'
+      + '<div class="num">' + amountHtml(r) + '</div>'
       + '<div class="ops">'
       + '<button class="op" type="button" data-act="edit" title="修改这一笔" aria-label="修改这一笔">' + SVG.edit + '</button>'
       + '<button class="op del" type="button" data-act="del" title="删除这一笔" aria-label="删除这一笔">' + SVG.del + '</button>'
       + '</div></div>';
+  }
+
+  // 同一天合成一组：日期只在组头出现一次，右侧给当日小计
+  function groupHead(date, same) {
+    const sum = (side) => same.filter((x) => x.side === side)
+      .reduce((s, x) => s + (Number(x.amount) || 0), 0);
+    const bits = [same.length + ' 笔'];
+    [['买入', sum('买入')], ['卖出', sum('卖出')],
+     ['转入', sum('转入')], ['转出', sum('转出')]].forEach(([k, v]) => {
+      if (v > 0.5) bits.push(k + ' ¥' + fmt(v, 0));
+    });
+    return '<div class="grp"><span class="gd">' + esc(date) + '</span>'
+      + '<span class="gm">' + bits.join(' · ') + '</span></div>';
   }
 
   function editorHtml(r) {
@@ -2501,14 +2531,20 @@ export default function (c) {
   }
 
   function render() {
-    const body = rows.map(r => {
-      if (confirmDel === r.i) return rowHtml(r, true) + confirmHtml(r);
-      if (open === r.i) return rowHtml(r, true) + editorHtml(r);
-      return rowHtml(r, false);
-    }).join('');
-    root.innerHTML = '<div class="hd"><div>日期</div><div>类型</div><div>基金 / 说明</div>'
-      + '<div class="r c-qty">数量</div><div class="r c-nav">单价</div><div class="r c-fee">手续费</div>'
-      + '<div class="r">操作</div></div>' + body;
+    let body = '';
+    let last = '';
+    for (const r of rows) {
+      if (r.dateRaw !== last) {
+        body += groupHead(r.date, rows.filter((x) => x.dateRaw === r.dateRaw));
+        last = r.dateRaw;
+      }
+      if (confirmDel === r.i) body += rowHtml(r, true) + confirmHtml(r);
+      else if (open === r.i) body += rowHtml(r, true) + editorHtml(r);
+      else body += rowHtml(r, false);
+    }
+    root.innerHTML = '<div class="hd"><div>基金 / 说明</div>'
+      + '<div class="r c-qty">数量</div><div class="r c-nav">单价</div>'
+      + '<div class="r">金额</div><div class="r">操作</div></div>' + body;
     bind();
     refreshCalc();
   }
@@ -2629,7 +2665,7 @@ def _trade_row(i: int, t: dict) -> dict:
     if money:
         qty, nav_s, code_s, unit = f"¥{shares:,.0f}", "—", "", "元"
         amount = shares
-        sub = side + "到" + ("账户现金" if side == "转入" else "银行卡")
+        sub = "银行卡 → 现金" if side == "转入" else "现金 → 银行卡"
     else:
         unit = ((meta.get("unit") if meta else None) or HG.default_unit(t.get("code", "")))
         qty = f"{shares:,.2f} 份" if unit == "份额" or unit == "份" else f"{shares:,.0f} 股"
@@ -4232,10 +4268,8 @@ with tab5:
 
         # ---------------- 记一笔：金额优先，和支付宝「买入 5,000 元」的说法一致 ----------------
         with st.container(key="tr_card"):
-            st.markdown(
-                '<div class="sec-head"><span class="t">记一笔</span>'
-                f'<span class="r">账户现金 <b>¥{_cash:,.0f}</b></span></div>',
-                unsafe_allow_html=True)
+            st.markdown('<div class="sec-head"><span class="t">记一笔</span></div>',
+                        unsafe_allow_html=True)
             # 类型单独一行：先定「这笔是什么」，下面那行字段才谈得上对齐
             # （两类字段不同 —— 转入/转出没有基金和单价，混在同一行永远对不齐）
             with st.container(key="tr_mode_switch"):
@@ -4337,7 +4371,7 @@ with tab5:
                     st.toast("已记录", icon=":material/check_circle:")
                     st.rerun()
 
-        # ---------------- 按基金查历史：一只基金的买卖全在这里，不用回持仓页翻 ----------------
+        # ---------------- 成交台账：先筛，再看表；最近的在最上面 ----------------
         _ledger_codes = []
         for _t0 in _trades:
             _c0 = str(_t0.get("code") or "")
@@ -4346,6 +4380,13 @@ with tab5:
         _pick_map = {"全部基金": ""}
         for _c0 in _ledger_codes:
             _pick_map[f'{_c0} {FL.fund_name(_c0) or ""}'.strip()] = _c0
+        st.markdown(
+            '<div class="sec-head"><span class="t">成交台账</span>'
+            '<span class="r">最近的在上 · 铅笔就地改，垃圾桶就地删</span></div>',
+            unsafe_allow_html=True,
+        )
+        # 筛选和摘要是台账的头，跟表贴在一起 ——
+        # 夹在「记一笔」和表中间，看着就像凭空多出来的第三个区块
         _fc1, _fc2 = st.columns([1.6, 5.0], gap="medium", vertical_alignment="bottom")
         _fcode = _pick_map[_fc1.selectbox("看哪只基金的历史", list(_pick_map),
                                           key="tr_fund_filter")]
@@ -4381,14 +4422,6 @@ with tab5:
             f'<div class="pf-summary quiet"><span class="lead">{_lead}</span>'
             + "".join(_it_html) + '</div>', unsafe_allow_html=True)
 
-        # ---------------- 全部成交：行内改 / 行内删 ----------------
-        st.markdown(
-            '<div class="sec-head"><span class="t">成交台账</span>'
-            f'<span class="r">{len(_f_tr)} 笔'
-            + (f"（共 {len(_trades)} 笔）" if _fcode else "")
-            + ' · 最近的在上 · 点铅笔就地改，垃圾桶就地删</span></div>',
-            unsafe_allow_html=True,
-        )
         if not _trades:
             st.caption("还没有成交。上面记一笔，或者在「买卖提醒」把那份清单一次登记进来。")
         elif not _f_tr:
