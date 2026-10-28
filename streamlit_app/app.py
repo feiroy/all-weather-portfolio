@@ -299,6 +299,15 @@ hr{ border-color:var(--line); margin:1.6rem 0; }
 .pf-head .pf-grid .v.down{ color:#86EFAC; }
 /* 现金那格多一个小占比：¥12,714 单放着既看不出是多是少，也不知道该不该管 */
 .pf-head .pf-grid .v .s{ font-size:11.5px; font-weight:500; opacity:.72; margin-left:7px }
+/* 头卡下面那一行：这一轮要不要动手、动手去哪看。只说「有没有事」，金额一律留在「帮你算」 */
+.todo-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:-2px 0 12px;
+  padding:10px 14px;border:1px solid var(--line);border-left:3px solid var(--brand);
+  border-radius:10px;background:var(--card);font-size:13px;color:var(--sub)}
+.todo-bar .lead{font-weight:650;color:var(--ink);font-size:13.5px}
+.todo-bar .go{margin-left:auto;color:var(--brand);font-size:12.5px;white-space:nowrap}
+.todo-bar.warn{border-left-color:var(--amber)}
+.todo-bar.calm{border-left-color:#CBD5E1;background:#F8FAFC;color:var(--muted)}
+.todo-bar.calm .lead{color:var(--sub);font-weight:600}
 
 /* 点开一只基金：详情面板（列表点中哪一只，就在下面展开哪一只） */
 .pf-detail{
@@ -2232,6 +2241,44 @@ def _hg_plan() -> dict:
 _plan = _hg_plan()
 
 
+def _plan_status() -> dict:
+    """这一轮到底要不要动手 —— 「我的账户」顶部和「帮你算」顶部共用这一份结论。
+
+    三种情况分开说，因为用户接下来要做的事完全不同：
+      orders  有单要下（买 / 卖多少）    → 去「帮你算」看清单
+      stuck   偏离超标但下不了单          → 一手太大 / 缺口太小，只能等下次一起买
+      calm    都在 0.5% 阈值内            → 什么都不用做
+
+    「没有单」不等于「没偏离」：中间还隔着整手取整、缺净值、重复计入三种「算出来但下不了手」。
+    两处页面各写一遍判断迟早会分叉，所以只留这一份。
+    """
+    if _plan["orders"]:
+        return {"kind": "orders", "n": len(_plan["orders"]),
+                "buy": float(_plan["buy"]), "sell": float(_plan["sell"])}
+    _over = [it for it in _plan["rows"]
+             if it.get("slot_first") and abs(it.get("dev") or 0) >= 0.005]
+    if not _over:
+        return {"kind": "calm"}
+    _over.sort(key=lambda it: -abs(it["dev"]))
+    _w = _over[0]
+    return {"kind": "stuck", "n": len(_over), "max_dev": abs(_w["dev"]),
+            "slots": [it["slot"] for it in _over],
+            "gap": abs(_w["dev"]) * float(_plan["asset"]),
+            "lot": float(_w["px"]) * int(_w["f"].get("lot") or 100),
+            "note": _w.get("note") or ""}
+
+
+def _plan_stuck_tail(st: dict) -> str:
+    """「买不进」时补一句原因 —— 缺口和一手价必须同源，否则拼出来是两只基金的数字。
+
+    一手比缺口还大：买一手就超配、不买就一直欠着，这才是那笔现金闲着的真正原因。
+    只写「不够一手」会被反问「现金明明够买一手」，得把这层说破。
+    """
+    if st.get("note") == "不足一手" and st.get("lot", 0) > 0:
+        return f'一手 ¥{st["lot"]:,.0f} 比缺口 ¥{st["gap"]:,.0f} 还大 —— 买了超、不买欠'
+    return f'缺口 ¥{st.get("gap", 0):,.0f} 不够一手，这一轮下不了单'
+
+
 def _acct_flows() -> pd.Series:
     """日频净入金（正=进钱，负=出钱）：转入/入金为正，转出/出金为负。
 
@@ -3434,14 +3481,6 @@ _CAL_CSS = r"""
 #pick{min-width:128px;text-align:center;text-align-last:center}
 #summary{border-top:1px solid #E2E8F0;margin-top:16px;padding-top:12px}
 .sum-k{font-weight:600;color:#0F172A}
-/* 标题右侧的「收益率 / 金额」：格子里只摆得下一行大数字，想看 % 还是想看钱得让他自己挑 */
-#metric-switch{display:inline-flex;gap:2px;padding:3px;background:#F1F5F9;border-radius:10px}
-#metric-switch[hidden]{display:none}   /* ID 选择器的 display 会盖掉 hidden 的 UA 样式，得显式说一遍 */
-#metric-switch button{font:inherit;font-size:12px;line-height:1.4;border:0;border-radius:8px;
-  background:transparent;color:#475569;padding:4px 12px;cursor:pointer;white-space:nowrap}
-#metric-switch button:hover{color:#0F172A}
-#metric-switch button[aria-pressed="true"]{background:#fff;color:#C52828;font-weight:600;
-  box-shadow:0 1px 2px rgba(15,23,42,.10)}
 @media(max-width:560px){.cal-cell{min-height:52px;padding:6px}.cal-cell .v{font-size:12px}#pick{min-width:110px}}
 """
 
@@ -3520,8 +3559,7 @@ __BASE_CSS__
 __CAL_CSS__
 </style>
 <div id="wrap">
-<div class="heading"><h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v5m8-5v5M4 10h16"/></svg>收益日历</h3>
-<div id="metric-switch" role="group" aria-label="格子里显示什么" hidden><button data-metric="pct" aria-pressed="true">收益率</button><button data-metric="money" aria-pressed="false">金额</button></div></div>
+<div class="heading"><h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v5m8-5v5M4 10h16"/></svg>收益日历</h3></div>
 <div class="controls"><div id="range-controls" role="group" aria-label="粒度">
 <button data-range="日" aria-pressed="true">日</button><button data-range="周" aria-pressed="false">周</button><button data-range="月" aria-pressed="false">月</button><button data-range="年" aria-pressed="false">年</button>
 </div><div id="nav" class="nav"><button id="prev" aria-label="上一期"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M7.5 3l-3 3 3 3"/></svg></button><select id="pick" aria-label="选择期间"></select><button id="next" aria-label="下一期"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M4.5 3l3 3-3 3"/></svg></button></div></div>
@@ -3542,8 +3580,6 @@ __CAL_CSS__
   const color = v => !ok(v) || Math.abs(v) < 1e-10 ? '#475569' : (v > 0 ? '#C52828' : '#16703B');
   const p2 = n => String(n).padStart(2, '0');
   const cls = v => !ok(v) ? 'none' : (v > 1e-10 ? 'up' : (v < -1e-10 ? 'down' : 'flat'));
-  // 金额版涨跌：不到一块钱算平盘（净值换算出来的钱带分位噪声）
-  const mcls = m => !ok(m) ? 'none' : (m > .5 ? 'up' : (m < -.5 ? 'down' : 'flat'));
   // 涨跌幅越大底色越深（热力），颜色与 --red / --green 同值
   const heat = (v, mx) => {
     if (!ok(v) || Math.abs(v) < 1e-10) return '';
@@ -3551,36 +3587,22 @@ __CAL_CSS__
     return v > 0 ? `background:rgba(197,40,40,${a})` : `background:rgba(22,112,59,${a})`;
   };
   const maxAbs = vals => vals.reduce((m, v) => ok(v) ? Math.max(m, Math.abs(v)) : m, 0.01);
-  // 每格的第二行：这段时间赚了多少钱。收益率是百分比、钱是元，两个都要给
+  // 每格两行：大数字是收益率（尺子），下面一行是这段赚了多少钱（结果）。
+  // 两个一起摆，就不用再做「看 % / 看钱」的切换 —— 同一件事没必要让人选两次。
   const MDAY = D.mday || {}, MMO = D.mmonth || {}, MYE = D.myear || {};
   const money = v => !ok(v) ? '' : (v > 0 ? '+' : v < 0 ? '-' : '') + '¥'
     + Math.abs(v).toLocaleString('zh-CN', { maximumFractionDigits: 0 });
-  const cell = (k, v, mx, extra = '', sub = '', title = '', m, mmx) => {
-    const asMoney = HASM && metric === 'money';
-    // 不到一块钱算平盘：净值折出来的钱带分位噪声，别让「+¥0」染成红色
+  const cell = (k, v, mx, extra = '', sub = '', title = '', m) => {
+    // 不到一块钱算平盘：净值折出来的钱带分位噪声，别让「+¥0」看着像赚了
     const mm = ok(m) && Math.abs(m) < .5 ? 0 : m;
-    const num = asMoney ? (ok(m) ? money(mm) : '—') : pct(v);
-    return `<div class="cal-cell ${asMoney ? mcls(mm) : cls(v)} ${extra}"`
-      + ` style="${asMoney ? heat(mm, mmx) : heat(v, mx)}" title="${title}">`
+    return `<div class="cal-cell ${cls(v)} ${extra}" style="${heat(v, mx)}" title="${title}">`
       + `<span class="k">${k}${sub ? `<small>${sub}</small>` : ''}</span>`
-      + `<span class="v">${num}</span>`
-      + (ok(m) && !asMoney ? `<span class="mv">${money(mm)}</span>` : '') + '</div>';
+      + `<span class="v">${pct(v)}</span>`
+      + (ok(m) ? `<span class="mv">${money(mm)}</span>` : '') + '</div>';
   };
   const item = (k, v) => `<span>${k}</span><b style="color:${color(v)}">${pct(v)}</b>`;
   // 只有拿到金额（账户页）才提「赚了多少钱」；基金检索页没有金额，别拿空映射求和冒充 ¥0
   const HASM = Object.keys(MDAY).length + Object.keys(MMO).length + Object.keys(MYE).length > 0;
-  // 格子里那一行大数字显示 % 还是 ¥：账户页才有得选，基金检索页没有金额，这个切换保持隐藏
-  let metric = 'pct';
-  const mSwitch = document.getElementById('metric-switch');
-  if (HASM) {
-    try { if (localStorage.getItem('awCal.metric') === 'money') metric = 'money'; } catch (e) {}
-    mSwitch.hidden = false;
-  }
-  mSwitch.querySelectorAll('[data-metric]').forEach(b => b.onclick = () => {
-    metric = b.dataset.metric;
-    try { localStorage.setItem('awCal.metric', metric); } catch (e) {}
-    render();
-  });
   const mItem = (k, v) => HASM && ok(v) ? `<span>${k}</span><b style="color:${color(v)}">${money(v)}</b>` : '';
   const sumM = obj => { const ks = Object.keys(obj); return ks.length ? ks.reduce((a, k) => a + (ok(obj[k]) ? obj[k] : 0), 0) : null; };
   const cnt = (k, n, u) => `<span>${k}</span><b>${n} ${u}</b>`;
@@ -3603,81 +3625,72 @@ __CAL_CSS__
   document.querySelectorAll('[data-range]').forEach(b => b.onclick = () => { mode = b.dataset.range; render(); });
   function render() {
     document.querySelectorAll('[data-range]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.range === mode)));
-    mSwitch.querySelectorAll('[data-metric]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.metric === metric)));
     fillPick();
-    // 金额模式下页脚不再重复报「涨跌几个点」和「最好/最差」—— 那一行就只讲钱
-    const MW = HASM && metric === 'money';
-    const th = MW ? .5 : 0;          // 「上涨 / 下跌」的计数阈值跟着度量走，不然会跟格子的颜色打架
-    const rItem = (k, v) => MW ? '' : item(k, v);
     let html = '', s = '';
     if (mode === '日' || mode === '周') {
       const [y, m] = ym, nd = new Date(y, m, 0).getDate(), mv = D.month[`${y}-${p2(m)}`];
       if (mode === '日') {
-        const first = new Date(y, m - 1, 1).getDay(), vals = [], mvals = [];
+        const first = new Date(y, m - 1, 1).getDay(), vals = [];
         for (let d = 1; d <= nd; d++) {
           const key = `${y}/${p2(m)}/${p2(d)}`;
           if (ok(D.day[key])) vals.push(D.day[key]);
-          if (ok(MDAY[key])) mvals.push(MDAY[key]);
         }
-        const mx = maxAbs(vals), mmx = maxAbs(mvals);
+        const mx = maxAbs(vals);
         html = ['日', '一', '二', '三', '四', '五', '六'].map(w => `<div class="cal-h">${w}</div>`).join('')
           + '<div class="cal-cell pad"></div>'.repeat(first);
         for (let d = 1; d <= nd; d++) {
           const key = `${y}/${p2(m)}/${p2(d)}`;
           html += cell(String(d), D.day[key], mx, key === D.today ? 'today' : '', '', key,
-                       MDAY[key], mmx);
+                       MDAY[key]);
         }
         grid.style.gridTemplateColumns = 'repeat(7,minmax(0,1fr))';
         // 当月赚的钱 = 这个月每一格的「钱」加起来
         const mk = Object.keys(MDAY).filter(k => k.startsWith(`${y}/${p2(m)}/`));
         const mSum = mk.length ? mk.reduce((a, k) => a + (ok(MDAY[k]) ? MDAY[k] : 0), 0) : null;
-        s = `<span class="sum-k">${y}年${m}月</span>` + rItem('当月涨跌', mv) + mItem('当月赚了', mSum)
-          + cnt('上涨', (MW ? mvals : vals).filter(v => v > th).length, '天')
-          + cnt('下跌', (MW ? mvals : vals).filter(v => v < -th).length, '天')
-          + (MW || !vals.length ? '' : item('最大单日涨', Math.max(...vals)) + item('最大单日跌', Math.min(...vals)));
+        s = `<span class="sum-k">${y}年${m}月</span>` + item('当月涨跌', mv) + mItem('当月赚了', mSum)
+          + cnt('上涨', vals.filter(v => v > 0).length, '天')
+          + cnt('下跌', vals.filter(v => v < 0).length, '天')
+          + (vals.length ? item('最大单日涨', Math.max(...vals)) + item('最大单日跌', Math.min(...vals)) : '');
       } else {
         const ms = `${y}/${p2(m)}/01`, me = `${y}/${p2(m)}/${p2(nd)}`;
         const wk = D.week.filter(w => w.e >= ms && w.s <= me);
-        const mx = maxAbs(wk.map(w => w.v)), mmx = maxAbs(wk.map(w => w.m));
+        const mx = maxAbs(wk.map(w => w.v));
         html = wk.map((w, k) => cell(`第${k + 1}周`, w.v, mx, '', `${w.s.slice(5)} – ${w.e.slice(5)}`,
-                                     `${w.s} — ${w.e}`, w.m, mmx)).join('')
+                                     `${w.s} — ${w.e}`, w.m)).join('')
           || '<div class="cal-cell none"><span class="k">本月暂无完整周数据</span><span class="v">—</span></div>';
         grid.style.gridTemplateColumns = 'repeat(auto-fill,minmax(150px,1fr))';
-        s = `<span class="sum-k">${y}年${m}月</span>` + rItem('当月涨跌', mv)
+        s = `<span class="sum-k">${y}年${m}月</span>` + item('当月涨跌', mv)
           + mItem('当月赚了', wk.some(w => ok(w.m)) ? wk.reduce((a, w) => a + (ok(w.m) ? w.m : 0), 0) : null)
           + cnt('共', wk.length, '周')
-          + cnt('上涨', wk.filter(w => (MW ? (w.m || 0) : w.v) > th).length, '周')
-          + cnt('下跌', wk.filter(w => (MW ? (w.m || 0) : w.v) < -th).length, '周');
+          + cnt('上涨', wk.filter(w => w.v > 0).length, '周')
+          + cnt('下跌', wk.filter(w => w.v < 0).length, '周');
       }
     } else if (mode === '月') {
-      const vals = [], mvals = [];
-      for (let k = 1; k <= 12; k++) {
-        vals.push(D.month[`${yy}-${p2(k)}`]);
-        mvals.push(MMO[`${yy}-${p2(k)}`]);
-      }
-      const mx = maxAbs(vals), mmx = maxAbs(mvals);
+      const vals = [];
+      for (let k = 1; k <= 12; k++) vals.push(D.month[`${yy}-${p2(k)}`]);
+      const mx = maxAbs(vals);
       html = vals.map((v, k) => cell(`${k + 1}月`, v, mx, '', '', `${yy}年${k + 1}月`,
-        MMO[`${yy}-${p2(k + 1)}`], mmx)).join('');
+        MMO[`${yy}-${p2(k + 1)}`])).join('');
       grid.style.gridTemplateColumns = 'repeat(6,minmax(0,1fr))';
       const got = vals.map((v, k) => [k + 1, v]).filter(t => ok(t[1]));
       const best = got.reduce((a, t) => !a || t[1] > a[1] ? t : a, null), worst = got.reduce((a, t) => !a || t[1] < a[1] ? t : a, null);
       const mk2 = Object.keys(MMO).filter(k => k.startsWith(`${yy}-`));
       const mSum = mk2.length ? mk2.reduce((a, k) => a + (ok(MMO[k]) ? MMO[k] : 0), 0) : null;
-      s = `<span class="sum-k">${yy}年</span>` + rItem('全年涨跌', D.year[String(yy)]) + mItem('全年赚了', mSum)
-        + cnt('上涨', got.filter(t => (MW ? (MMO[`${yy}-${p2(t[0])}`] || 0) : t[1]) > th).length, '个月')
-        + cnt('下跌', got.filter(t => (MW ? (MMO[`${yy}-${p2(t[0])}`] || 0) : t[1]) < -th).length, '个月')
-        + (MW || !best ? '' : item(`最好 ${best[0]}月`, best[1]) + item(`最差 ${worst[0]}月`, worst[1]));
+      s = `<span class="sum-k">${yy}年</span>` + item('全年涨跌', D.year[String(yy)]) + mItem('全年赚了', mSum)
+        + cnt('上涨', got.filter(t => t[1] > 0).length, '个月')
+        + cnt('下跌', got.filter(t => t[1] < 0).length, '个月')
+        + (best ? item(`最好 ${best[0]}月`, best[1]) + item(`最差 ${worst[0]}月`, worst[1]) : '');
     } else {
       const ys = Object.keys(D.year).sort(), vals = ys.map(y => D.year[y]);
-      const mx = maxAbs(vals), mmx = maxAbs(ys.map(y => MYE[y]));
-      html = ys.map(y => cell(`${y}年`, D.year[y], mx, '', '', `${y}年`, MYE[y], mmx)).join('');
+      const mx = maxAbs(vals);
+      html = ys.map(y => cell(`${y}年`, D.year[y], mx, '', '', `${y}年`, MYE[y])).join('');
       grid.style.gridTemplateColumns = 'repeat(6,minmax(0,1fr))';
       const got = ys.map(y => [y, D.year[y]]);
       const best = got.reduce((a, t) => !a || t[1] > a[1] ? t : a, null), worst = got.reduce((a, t) => !a || t[1] < a[1] ? t : a, null);
       s = cnt('共', ys.length, '年') + mItem('合计赚了', sumM(MYE))
-        + cnt('上涨', got.filter(t => (MW ? (MYE[t[0]] || 0) : t[1]) > th).length, '年')
-        + cnt('下跌', got.filter(t => (MW ? (MYE[t[0]] || 0) : t[1]) < -th).length, '年')
-        + (MW || !best ? '' : item(`最好 ${best[0]}年`, best[1]) + item(`最差 ${worst[0]}年`, worst[1]));
+        + cnt('上涨', got.filter(t => t[1] > 0).length, '年')
+        + cnt('下跌', got.filter(t => t[1] < 0).length, '年')
+        + (best ? item(`最好 ${best[0]}年`, best[1]) + item(`最差 ${worst[0]}年`, worst[1]) : '');
     }
     grid.innerHTML = html; sum.innerHTML = s; fit();
   }
@@ -4732,12 +4745,12 @@ def _acct_period_view() -> None:
     else:
         st.caption("走势要有两个交易日以上的净值才画得出来 —— 现在还不够。")
 
-    # ② 收益日历：日 / 周 / 月 / 年，右上角切「收益率 / 金额」
+    # ② 收益日历：日 / 周 / 月 / 年，每格「收益率 + 这段赚了多少钱」
     _cal = _acct_calendar_payload()
     if _cal:
         st.iframe(_calendar_html(_cal), height="content")
-        st.caption("日历右上角能切成**金额** —— 收益率说「涨了几个点」，金额说「赚了多少元」。"
-                   "同一个月，钱多的账户同样的 % 会赚得更多。")
+        st.caption("格子里**大写的是收益率、下面小字是这段时间赚的钱**："
+                   "同一个月，本金多的账户同样的 % 会赚得更多，两个一起看才不冤枉。")
     else:
         st.caption("日历要有两个交易日以上的净值才画得出来 —— 现在还不够。")
 
@@ -4953,6 +4966,29 @@ with tab3:
         unsafe_allow_html=True,
     )
 
+    # ---- 头卡下面一行结论：这一轮要不要动手 ----
+    # 只说「有没有事、去哪看」，一个金额都不报 —— 该买该卖多少只存在「帮你算」一处，
+    # 两边各标一遍迟早会打脸（这条是从「提醒」页被删那次的教训里留下的）
+    _st = _plan_status()
+    if _plan["rows"]:
+        if _st["kind"] == "orders":
+            st.markdown(
+                '<div class="todo-bar"><span class="lead">该动手了</span>'
+                f'<span>有 {_st["n"]} 笔要下</span>'
+                '<span class="go">清单在「帮你算 · 存量调仓」→</span></div>',
+                unsafe_allow_html=True)
+        elif _st["kind"] == "stuck":
+            st.markdown(
+                '<div class="todo-bar warn"><span class="lead">偏离超标，但这一轮买不进</span>'
+                f'<span>{_st["n"]} 个位置超过 0.5%，一手就顶掉整个缺口</span>'
+                '<span class="go">为什么在「帮你算 · 存量调仓」→</span></div>',
+                unsafe_allow_html=True)
+        else:
+            st.markdown(
+                '<div class="todo-bar calm"><span class="lead">这一轮不用动</span>'
+                '<span>仓位都在目标附近，不折腾省手续费</span></div>',
+                unsafe_allow_html=True)
+
     # ---- 一页四看：持仓 / 收益 / 对比 / 信号（说的是同一个账户，只是角度不同）----
     with st.container(key="acct_view_switch"):
         _av = st.segmented_control(
@@ -5079,53 +5115,33 @@ def _calc_rebalance() -> None:
         st.warning("还没有挂任何基金：先到「权重与选基」给位置加一只，或点右上角「更新数据」拉取净值。")
     else:
         # ---- 结论：这一轮动不动、买多少卖多少 ----
-        if _plan["orders"]:
+        # 判断只在 _plan_status() 里做一次，「我的账户」顶部那条读的是同一份
+        _st = _plan_status()
+        if _st["kind"] == "orders":
             st.markdown(
                 '<div class="pf-summary">'
-                f'<span class="lead">这一轮要动 {len(_plan["orders"])} 笔</span>'
-                f'<span class="item">买入<b class="buy">¥{_plan["buy"]:,.0f}</b></span>'
-                f'<span class="item">卖出<b class="sell">¥{_plan["sell"]:,.0f}</b></span>'
+                f'<span class="lead">这一轮要动 {_st["n"]} 笔</span>'
+                f'<span class="item">买入<b class="buy">¥{_st["buy"]:,.0f}</b></span>'
+                f'<span class="item">卖出<b class="sell">¥{_st["sell"]:,.0f}</b></span>'
                 f'<span class="item">调仓基数 ¥{_plan["asset"]:,.0f}</span>'
                 '</div>',
                 unsafe_allow_html=True,
             )
+        elif _st["kind"] == "calm":
+            st.markdown(
+                '<div class="pf-summary quiet"><span class="lead">这一轮不用动</span>'
+                '<span class="item">所有位置偏离都在 0.5% 以内</span></div>',
+                unsafe_allow_html=True,
+            )
         else:
-            # 「没有单」其实是两件事：真的都在阈值内，和「偏离超标但一手都买不起」。
-            # 一律写「都在 0.5% 以内」就是在撒谎 —— 30Y 实际差 1.9%，用户会以为仓位是对的，
-            # 同时那笔现金（¥12,714）明明闲着，页面上却没有任何一处说它为什么闲着。
-            _over = [it for it in _plan["rows"]
-                     if it.get("slot_first") and abs(it.get("dev") or 0) >= 0.005]
-            if not _over:
-                st.markdown(
-                    '<div class="pf-summary quiet"><span class="lead">这一轮不用动</span>'
-                    '<span class="item">所有位置偏离都在 0.5% 以内</span></div>',
-                    unsafe_allow_html=True,
-                )
-            else:
-                # 买不进的原因按主要那条说。注意「现金够不够」和「缺口够不够一手」是两件事：
-                # 30Y 缺口 ¥9,507、现金 ¥12,714 明明够，可一手要 ¥11,032 —— 差的是缺口，不是现金。
-                _over.sort(key=lambda it: -abs(it["dev"]))
-                _maxd = abs(_over[0]["dev"]) * 100
-                _lots = [it["px"] * int(it["f"].get("lot") or 100) for it in _over
-                         if it.get("note") == "不足一手" and it["px"] > 0]
-                if _lots:
-                    # 缺口和一手价必须来自同一只，否则「差 ¥9,262、一手 ¥11,087」其实是两只基金的数字
-                    _worst = _over[0]
-                    _gap = abs(_worst["dev"]) * _plan["asset"]
-                    _lot = _worst["px"] * int(_worst["f"].get("lot") or 100)
-                    # 一手比缺口还大：买一手就超配、不买就一直欠着 —— 这才是这笔现金闲着的原因。
-                    # 只写「不够一手」会被反问「现金 ¥12,714 明明够买 ¥11,087 的一手」，得把这层说破
-                    _tail = (f'一手 ¥{_lot:,.0f} 比缺口 ¥{_gap:,.0f} 还大 —— 买了超、不买欠'
-                             if _worst.get("note") == "不足一手" and _lot > 0 else
-                             f'缺口 ¥{_gap:,.0f} 不够一手（一手 ¥{min(_lots):,.0f} 起）')
-                else:
-                    _tail = "偏离的几处这一轮下不了单"
-                st.markdown(
-                    '<div class="pf-summary quiet"><span class="lead">这一轮买不进</span>'
-                    f'<span class="item">{len(_over)} 个位置偏离超标 · 最大 {_maxd:.1f}%</span>'
-                    f'<span class="item">{_tail}</span></div>',
-                    unsafe_allow_html=True,
-                )
+            # 买不进的原因按主要那条说。注意「现金够不够」和「缺口够不够一手」是两件事：
+            # 30Y 缺口 ¥9,507、现金 ¥12,714 明明够，可一手要 ¥11,032 —— 差的是缺口，不是现金。
+            st.markdown(
+                '<div class="pf-summary quiet"><span class="lead">这一轮买不进</span>'
+                f'<span class="item">{_st["n"]} 个位置偏离超标 · 最大 {_st["max_dev"] * 100:.1f}%</span>'
+                f'<span class="item">{_plan_stuck_tail(_st)}</span></div>',
+                unsafe_allow_html=True,
+            )
 
         # ---- 差额清单：当前权重 vs 目标权重 → 该买卖多少 ----
         _rb_rows = []
