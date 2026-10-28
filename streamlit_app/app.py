@@ -345,15 +345,6 @@ hr{ border-color:var(--line); margin:1.6rem 0; }
   height:34px; display:flex; align-items:center;
 }
 .st-key-tr_mode_switch .stMarkdown div{ margin-bottom:0 !important }
-/* 「转入 / 转出 是什么」这句贴在类型右边：那两个字原本灰着排在控件末尾，
-   看着像页面筛选里的选项，没人知道是钱进出现金 —— 这句话把它从没人读到有人读 */
-.tr-tip{ font-size:12px; color:var(--sub); white-space:nowrap }
-/* 顶到卡片右边：贴着控件会把「记一笔」这一行挤得头重脚轻，留一段空白反而清爽 */
-.st-key-tr_mode_switch > [data-testid="stElementContainer"]:last-child{ margin-left:auto }
-@media(max-width:900px){
-  .tr-tip{ display:none }                              /* 窄屏留给控件本身，下面那句提示已经说过一遍 */
-  .st-key-tr_mode_switch > [data-testid="stElementContainer"]:last-child{ margin-left:0 }
-}
 /* 台账头：摘要条铺满整行、紧贴表格，左右两端跟表格对齐 ——
    它原来是跟筛选下拉挤一行的右半格，左边比表格缩进 270px、右边却齐平，看着「前后没对上」 */
 .pf-summary.ledger{
@@ -2894,8 +2885,7 @@ export default function (c) {
     const sum = (side) => same.filter((x) => x.side === side)
       .reduce((s, x) => s + (Number(x.amount) || 0), 0);
     const bits = [same.length + ' 笔'];
-    [['买入', sum('买入')], ['卖出', sum('卖出')],
-     ['转入', sum('转入')], ['转出', sum('转出')]].forEach(([k, v]) => {
+    [['买入', sum('买入')], ['卖出', sum('卖出')]].forEach(([k, v]) => {
       if (v > 0.5) bits.push(k + ' ¥' + fmt(v, 0));
     });
     return '<div class="grp"><span class="gd">' + esc(date) + '</span>'
@@ -2904,29 +2894,19 @@ export default function (c) {
 
   function editorHtml(r) {
     const d = draft;
-    const money = isMoneySide(d.side);
-    const chips = ['买入', '卖出', '转入', '转出'].map(s =>
+    const chips = ['买入', '卖出'].map(s =>
       '<button type="button" data-side="' + s + '" aria-pressed="' + (d.side === s) + '">' + s + '</button>').join('');
-    let third;
-    if (money) {
-      third = '<div class="fld"><span class="lb">钱的来源</span><div class="calc" style="padding:0">'
-        + (d.side === '转入' ? '银行卡 → 账户现金（本金增加，不算收益）' : '账户现金 → 银行卡（本金减少）')
-        + '</div></div>';
-    } else {
-      const opts = funds.map(f => {
-        const key = esc(f.code) + '|' + esc(f.slot);
-        const sel = (f.code === d.code && (!d.slot || f.slot === d.slot)) ? ' selected' : '';
-        return '<option value="' + key + '"' + sel + '>' + esc(f.label) + '</option>';
-      }).join('');
-      third = '<label>基金<select data-f="fund">' + opts + '</select></label>';
-    }
-    const r2 = money
-      ? '<div class="r2 one"><label>金额（元）<input type="number" step="0.01" min="0" data-f="amount" value="' + esc(d.amount) + '"></label></div>'
-      : '<div class="r2">'
-        + '<label>金额（元）<input type="number" step="0.01" min="0" data-f="amount" value="' + esc(d.amount) + '"></label>'
-        + '<label>单价（元/' + (d.unit === '股' ? '股' : '份') + '）<input type="number" step="0.0001" min="0" data-f="nav" value="' + esc(d.nav) + '"></label>'
-        + '<label>手续费（元，可留 0）<input type="number" step="0.01" min="0" data-f="fee" value="' + esc(d.fee) + '"></label>'
-        + '</div>';
+    const opts = funds.map(f => {
+      const key = esc(f.code) + '|' + esc(f.slot);
+      const sel = (f.code === d.code && (!d.slot || f.slot === d.slot)) ? ' selected' : '';
+      return '<option value="' + key + '"' + sel + '>' + esc(f.label) + '</option>';
+    }).join('');
+    const third = '<label>基金<select data-f="fund">' + opts + '</select></label>';
+    const r2 = '<div class="r2">'
+      + '<label>金额（元）<input type="number" step="0.01" min="0" data-f="amount" value="' + esc(d.amount) + '"></label>'
+      + '<label>单价（元/' + (d.unit === '股' ? '股' : '份') + '）<input type="number" step="0.0001" min="0" data-f="nav" value="' + esc(d.nav) + '"></label>'
+      + '<label>手续费（元，可留 0）<input type="number" step="0.01" min="0" data-f="fee" value="' + esc(d.fee) + '"></label>'
+      + '</div>';
     return '<div class="ed" data-i="' + esc(r.i) + '">'
       + '<div class="r1">'
       + '<label>日期<input type="date" data-f="date" value="' + esc(d.date) + '"></label>'
@@ -4875,7 +4855,7 @@ def _acct_health_view() -> None:
     _row("现金占比", f"{_cash_r*100:.1f}%", "3% ~ 15%",
          "偏少" if _cash_r < 0.03 else "偏多",
          "调仓要先卖后买，现金太少会卡住；太多则拖低收益",
-         "" if 0.03 <= _cash_r <= 0.15 else "；到「交易记录」把类型切到「转入」/「转出」记一笔，现金比例就变了",
+         "" if 0.03 <= _cash_r <= 0.15 else "；到「帮你算」按目标比例算一遍，买多少卖多少那里有数",
          (_cash_r < 0.03 or _cash_r > 0.15))
     _row("最大回撤",
          (f"{_mdd*100:.2f}%（账户 {_days} 天）" if _mdd is not None else "—"), "12%", "超线",
@@ -5063,9 +5043,9 @@ def _calc_rebalance() -> None:
     )
 
     if not _plan["has_acct"]:
-        st.info("还没有账户：先到「交易记录」建一个账户（或直接补录一笔转入），之后这里就会按你的真实持仓算买卖。")
+        st.info("还没有账户：先到「交易记录」建一个账户（填一笔初始资金），之后这里就会按你的真实持仓算买卖。")
     elif _plan["total"] <= 0:
-        st.info("账户里还没有钱和持仓：先到「交易记录」补录一笔「转入」，或在支付宝买好后补录买入。")
+        st.info("账户里还没有钱和持仓：先到「交易记录」建账户时填上初始资金，再在支付宝买好后补录买入。")
     elif _plan["asset"] <= 0:
         # 钱都在「位置已关闭 / 配置里已删」的代码上：能算不能动，先告诉人怎么把钱挪出来
         st.warning(
@@ -5172,9 +5152,9 @@ def _calc_dca() -> None:
     )
 
     if not _plan["has_acct"]:
-        st.info("还没有账户：先到「交易记录」建一个账户（或直接补录一笔转入），之后这里才能按目标权重分钱。")
+        st.info("还没有账户：先到「交易记录」建一个账户（填一笔初始资金），之后这里才能按目标权重分钱。")
     elif _plan["total"] <= 0:
-        st.info("账户里还没有钱和持仓：先到「交易记录」补录一笔「转入」，或在支付宝买好后补录买入。")
+        st.info("账户里还没有钱和持仓：先到「交易记录」建账户时填上初始资金，再在支付宝买好后补录买入。")
     elif not _plan["rows"]:
         st.warning("还没有挂任何基金：先到「权重与选基」给位置加一只，或点右上角「更新数据」拉取净值。")
     else:
@@ -5315,9 +5295,8 @@ def _calc_dca() -> None:
                     "建议先点右上角「更新数据」补齐净值，再回来定投。"
                 )
             if _dc_buy > float(_plan["cash"]):
-                st.warning(f"账户现金只有 ¥{_plan['cash']:,.0f}，这笔要买 ¥{_dc_buy:,.0f}。"
-                           "如果这笔钱是新从银行卡进来的，记「交易记录」时先记一笔「转入」再记买入；"
-                           "如果本来就在账户里，把金额调小到现金以内。")
+                st.warning(f"账户现金只有 ¥{_plan['cash']:,.0f}，这笔要买 ¥{_dc_buy:,.0f} —— "
+                           "把这次的金额调小到现金以内再算。")
             st.caption("按最新净值估算；实际成交净值以支付宝确认为准。"
                        "这一页不写账 —— 成交后到「交易记录」逐笔填日期 / 金额 / 单价。")
 
@@ -5352,8 +5331,8 @@ with tab5:
     )
     st.caption("这一页只记「实际做了什么」，每一笔都会立刻重算持仓和收益。"
                "「帮你算」里的那份是策略算出来的计划，记不记、记多少由你。"
-               "四种类型分两类：**买入 / 卖出** 是现金和基金互换（卖出的钱自动回到现金），"
-               "**转入 / 转出** 才是银行卡和账户之间搬钱（动的是本金，不算收益）。")
+               "只有两种类型：**买入** 把现金换成基金，**卖出** 把基金换回现金 —— "
+               "卖出的钱自动回到账户现金里，不用另外记一笔。")
 
     _slot_opts = _hg_slot_options()
     if acct is None:
@@ -5401,85 +5380,61 @@ with tab5:
 
         # ---------------- 记一笔：金额优先，和支付宝「买入 5,000 元」的说法一致 ----------------
         with st.container(key="tr_card"):
-            # 标题和「买入/卖出/转入/转出」同一行：类型不再单独占一行，右边也不用空一大片。
-            # 类型要**紧贴标题**（左对齐），别推到右边 —— 推到右边就跟页面上那些筛选器长得一样，
-            # 用户扫过去只会看见「买入 卖出」，以为没有转入转出。右边那格放一句解释，把那两个字讲明白。
-            # 具体字段在下面那行，两类字段不同（转入/转出没有基金和单价），各自只排自己需要的列。
+            # 标题和「买入 / 卖出」同一行：类型不单独占一行，也不用推到右边 ——
+            # 推到右边就跟页面上那些筛选器长得一样。
             with st.container(horizontal=True, horizontal_alignment="left",
                               vertical_alignment="center", key="tr_mode_switch"):
                 st.markdown('<div class="sec-head"><span class="t">记一笔</span></div>',
                             unsafe_allow_html=True)
                 tr_side = st.segmented_control(
                     "类型",
-                    ["买入", "卖出", "转入", "转出"],
+                    ["买入", "卖出"],
                     default="买入", key="tr_side",
                     # 不显标签：跟「记一笔」标题同一行，标签会把标题挤到下面半行去
                     label_visibility="collapsed",
-                    help="买入 / 卖出 = 在账户里用现金换基金、或用基金换回现金（钱自动回到现金）。\n\n"
-                         "转入 / 转出 = 钱在这个账户和银行卡之间进出，和具体哪只基金无关。",
+                    help="买入 = 账户现金换基金；卖出 = 基金换回现金 —— "
+                         "卖出的钱自动回到现金，不用另外记一笔。",
                 ) or "买入"
-                st.markdown('<span class="tr-tip">转入 / 转出 ＝ 银行卡 ⇄ 账户现金，不动基金</span>',
-                            unsafe_allow_html=True)
-            _is_money = tr_side in _MONEY_SIDES
 
             # 一套列宽管一行：日期 / 基金 / 金额 / 单价 / 手续费 / 按钮
-            # 金额、单价、手续费给一样的宽度，标签才会落在同一条线上；
-            # 转入/转出没有基金和单价，只用前一列 + 金额 + 按钮，不留空洞
-            if _is_money:
-                rB = st.columns([1.2, 2.0, 0.8], gap="small", vertical_alignment="bottom")
-            else:
-                rB = st.columns([1.2, 2.0, 1.2, 1.2, 1.2, 0.8], gap="small",
-                                vertical_alignment="bottom")
+            rB = st.columns([1.2, 2.0, 1.2, 1.2, 1.2, 0.8], gap="small",
+                            vertical_alignment="bottom")
             tr_date = rB[0].date_input("日期", value=pd.Timestamp(_hg_last).date(),
                                        max_value=date.today(),
                                        format="YYYY/MM/DD", key="tr_date")
-            if _is_money:
-                # 转入/转出没有基金：金额直接占基金那一格，不留下一个空洞
-                tr_amount = rB[1].number_input("金额（元）", min_value=0.0, step=1000.0,
-                                               format="%.2f", key="tr_amount_money")
-                tr_slot, tr_nav, tr_fee = ("", ""), 0.0, 0.0
-                _side_note = ("银行卡 / 支付宝 → 账户现金：现金变多，本金同步变多，**不算收益**。"
-                              if tr_side == "转入" else
-                              "账户现金 → 银行卡：现金变少，本金同步变少。卖完基金想取钱才用这个，"
-                              "卖出基金本身不会自动取钱。")
-            else:
-                tr_slot = rB[1].selectbox(
-                    "基金", _slot_opts, format_func=lambda x: x[2], key="tr_fund",
-                    help="这只基金按「股」还是按「份额」记账，由它的代码决定（ETF/LOF 场内按股，"
-                         "开放式基金场外按份额）；判错了到「权重与选基」页底把「买卖单位」改成份额 / 股。")
-                tr_amount = rB[2].number_input("金额（元）", min_value=0.0, step=1000.0,
-                                               format="%.2f", key="tr_amount")
-                _nav_hint = _hg_nav_on(None, tr_date, tr_slot[1])
-                _uw1 = _uw(tr_slot[1])
-                tr_nav = rB[3].number_input(
-                    f"单价（元/{_uw1}）",
-                    min_value=0.0, value=round(float(_nav_hint or 0), 4),
-                    step=0.0001, format="%.4f", key=f"tr_nav_{tr_slot[1]}_{tr_date}",
-                    help=("默认取这天的净值（场外按当日收盘净值成交）；支付宝里确认价不一样时改这里。"
-                          if _uw1 == "份" else
-                          "默认取这天的收盘价；场内成交价会比净值高一点或低一点（溢价 / 折价），"
-                          "按证券账户里实际的成交价填。"))
-                tr_fee = rB[4].number_input("手续费（元）", min_value=0.0, step=1.0,
-                                            format="%.2f", key="tr_fee")
-                _side_note = (f"买入：现金 → 基金。金额按单价折成{_uw1}数，现金减少。"
-                              if tr_side == "买入" else
-                              "卖出：基金 → 现金。钱自动回到账户现金里，**不用再记一笔转入**。")
-            _act = rB[2] if _is_money else rB[5]
+            tr_slot = rB[1].selectbox(
+                "基金", _slot_opts, format_func=lambda x: x[2], key="tr_fund",
+                help="这只基金按「股」还是按「份额」记账，由它的代码决定（ETF/LOF 场内按股，"
+                     "开放式基金场外按份额）；判错了到「权重与选基」页底把「买卖单位」改成份额 / 股。")
+            tr_amount = rB[2].number_input("金额（元）", min_value=0.0, step=1000.0,
+                                           format="%.2f", key="tr_amount")
+            _nav_hint = _hg_nav_on(None, tr_date, tr_slot[1])
+            _uw1 = _uw(tr_slot[1])
+            tr_nav = rB[3].number_input(
+                f"单价（元/{_uw1}）",
+                min_value=0.0, value=round(float(_nav_hint or 0), 4),
+                step=0.0001, format="%.4f", key=f"tr_nav_{tr_slot[1]}_{tr_date}",
+                help=("默认取这天的净值（场外按当日收盘净值成交）；支付宝里确认价不一样时改这里。"
+                      if _uw1 == "份" else
+                      "默认取这天的收盘价；场内成交价会比净值高一点或低一点（溢价 / 折价），"
+                      "按证券账户里实际的成交价填。"))
+            tr_fee = rB[4].number_input("手续费（元）", min_value=0.0, step=1.0,
+                                        format="%.2f", key="tr_fee")
+            _side_note = (f"买入：现金 → 基金。金额按单价折成{_uw1}数，现金减少。"
+                          if tr_side == "买入" else
+                          "卖出：基金 → 现金。钱自动回到账户现金里。")
+            _act = rB[5]
 
             _sh_new = 0.0
-            if _is_money:
-                _sh_new = float(tr_amount)
-            elif tr_nav > 0:
+            if tr_nav > 0:
                 _sh_new = ((float(tr_amount) - float(tr_fee)) / float(tr_nav) if tr_side == "买入"
                            else (float(tr_amount) + float(tr_fee)) / float(tr_nav))
-            # 现金只看「金额」：买入付出去多少、卖出到账多少、转入转出进出多少（手续费已含在金额里）
-            _cash_after = (_cash + float(tr_amount) if tr_side in ("卖出", "转入")
+            # 现金只看「金额」：买入付出去多少、卖出到账多少（手续费已含在金额里）
+            _cash_after = (_cash + float(tr_amount) if tr_side == "卖出"
                            else _cash - float(tr_amount))
             # 先说这只基金按什么成交，再说这笔会发生什么 —— 「我该填股价还是净值」是这个表单最容易填错的地方
-            _hint = _side_note if _is_money else f"**{_mkt(tr_slot[1])}**　{_side_note}"
-            if _is_money and tr_amount > 0:
-                _hint += f"　记完现金 ¥{_cash:,.0f} → ¥{_cash_after:,.0f}"
-            elif not _is_money and tr_amount > 0 and tr_nav > 0:
+            _hint = f"**{_mkt(tr_slot[1])}**　{_side_note}"
+            if tr_amount > 0 and tr_nav > 0:
                 _hint += (f"　≈ {_sh_new:,.2f} {_uw(tr_slot[1])}"
                           f"，现金 ¥{_cash:,.0f} → ¥{_cash_after:,.0f}")
                 # 场内买入只能是整手（100 股），折出零股基本就是金额或单价填错了 —— 顺带给出就近那一手
@@ -5489,22 +5444,10 @@ with tab5:
                               f"（场内买入按整手 100 股；就近是 {_near:,} 股 ≈ ¥{_near * float(tr_nav):,.2f}）")
             st.caption(_hint)
             if _cash_after < -1:
-                if tr_side == "转出":
-                    # 转出不是「少记了转入」，是现金真的不够：现金只在卖出到账后才变多
-                    st.warning(
-                        f"转不出这么多：账户现在现金 ¥{_cash:,.0f}，最多转出这些。"
-                        "现金是卖出基金到账之后才有的钱 —— 想把基金变现，先在类型里选「卖出」记一笔，"
-                        "钱会自己回到现金，再记「转出」取走。"
-                    )
-                elif tr_side == "买入":
-                    # 最常见的一笔记错：钱其实是从银行卡新进来的，只记了「买入」没记「转入」
-                    st.warning(
-                        f"记完现金会变成 ¥{_cash_after:,.0f}（负的）。这笔钱如果是从银行卡新买进来的，"
-                        "说明少记了一笔「转入」：先把类型切到「转入」记一笔，再回来记买入；"
-                        "或者先在「交易记录」记一笔「转入」，再回来记这笔买入。"
-                    )
-                else:
-                    st.warning(f"记完现金会变成 ¥{_cash_after:,.0f}（负的），这笔的金额或类型可能填反了。")
+                st.warning(
+                    f"记完现金会变成 ¥{_cash_after:,.0f}（负的）—— 账户里没有这么多现金。"
+                    "把金额调小到现金以内；如果这只基金之前就有持仓、只是没补录，"
+                    "先把那笔买入补上，现金就够扣了。")
 
             if _act.button("记一笔", type="primary", key="tr_add", width="stretch"):
                 _t = {"date": str(tr_date), "side": tr_side,
@@ -5514,9 +5457,9 @@ with tab5:
                       "nav": float(tr_nav), "fee": float(tr_fee)}
                 if float(tr_amount) <= 0:
                     st.warning("金额要大于 0")
-                elif not _is_money and float(tr_nav) <= 0:
+                elif float(tr_nav) <= 0:
                     st.warning("单价要大于 0 —— 换一天或手工填那天的成交净值")
-                elif (not _is_money and tr_side == "卖出"
+                elif (tr_side == "卖出"
                       and _sh_new > _held_on(_trades, tr_slot[1], tr_date) + 1e-6):
                     # 卖出超过当时持有 = 凭空多出现金，账目直接错；先拦住并说清楚能卖多少
                     _held = _held_on(_trades, tr_slot[1], tr_date)
@@ -5560,20 +5503,9 @@ with tab5:
         _fs = sum(float(t.get("shares") or 0) * float(t.get("nav") or 0)
                   - float(t.get("fee") or 0) for t in _f_tr if t.get("side") == "卖出")
         _ff = sum(float(t.get("fee") or 0) for t in _f_tr)
-        # 转入/转出的金额记在 shares 里（它们没有份额与单价）
-        _fin = sum(float(t.get("shares") or 0) for t in _f_tr
-                   if t.get("side") in ("转入", "入金"))
-        _fout = sum(float(t.get("shares") or 0) for t in _f_tr
-                    if t.get("side") in ("转出", "出金"))
         _it_html = [f'<span class="item">{len(_f_tr)} 笔</span>',
                     f'<span class="item">买入 <b class="buy">¥{_fb:,.0f}</b></span>',
                     f'<span class="item">卖出 <b class="sell">¥{_fs:,.0f}</b></span>']
-        # 这两项只在真有过的时候露头：平时不占地方，有就必须列出来 ——
-        # 这行原来只有买入/卖出，看着就像账户里没有「钱进出银行卡」这回事
-        if _fin > 0.5:
-            _it_html.append(f'<span class="item">转入 <b class="buy">¥{_fin:,.0f}</b></span>')
-        if _fout > 0.5:
-            _it_html.append(f'<span class="item">转出 <b class="sell">¥{_fout:,.0f}</b></span>')
         _it_html.append(f'<span class="item">手续费 ¥{_ff:,.2f}</span>')
         if _fcode:
             _fsh = float((_acct_pos or {}).get(_fcode, 0) or 0)
