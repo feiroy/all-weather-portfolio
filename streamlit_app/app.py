@@ -2131,6 +2131,20 @@ _hg_other_mv = {
 }
 
 
+def _min_order(tgt_amt: float) -> float:
+    """单只基金值不值得单独下一笔：**目标金额**的 5%，至少 1 元。
+
+    位置级门槛（0.5%）只回答「这个位置要不要动」；真动起来之后还要拆到位置内的每只基金，
+    那里原来只挡 1 元以下，于是 8 只均分的位置会一次切出 7 笔「卖出 ¥3」——
+    金额小到连净值都能抹平它，却要多做 7 次赎回。5% 对应位置内均分 8 只时的 0.6%，
+    和位置级那条 0.5% 基本齐平。
+
+    注意传的是「这只基金本该有多少钱」（tgt × 位置内占比），不是差多少 ——
+    拿差额自己乘自己当门槛，`|差| < |差| × 5%` 永远不成立，等于没设。
+    """
+    return max(1.0, abs(tgt_amt) * 0.05)
+
+
 def _hg_plan() -> dict:
     """按策略目标权重算「该买多少 / 该卖多少」—— 全站唯一一份调仓计划。
 
@@ -2180,13 +2194,17 @@ def _hg_plan() -> dict:
         for i, it in enumerate(items):
             f = it["f"]
             diff = (tgt * it["x"] - it["mv"]) if moved else 0.0
+            _floor = _min_order(tgt * it["x"])       # 这只基金目标金额的 5%
             side, qty, amt, note = "", 0.0, 0.0, ""
             if it["px"] <= 0:
                 note = "缺净值"
             elif it["dup"]:
                 # 这只基金的钱已经在别的位置里算过了，这里再下一单就会真的重复买卖
                 note = f'已在「{HG.SLOT_LABEL.get(it["dup"], it["dup"])}」计入'
-            elif not moved or abs(diff) < 1.0:
+            elif not moved or abs(diff) < _floor:
+                # 位置内也要有门槛：位置级只管到 0.5%，一旦「动了」就把每只基金按目标份额
+                # 重算一遍，1 块钱的差也下单 —— 8 只均分的位置会一次冒出 7 笔「卖出 ¥3 · 1.23 份」，
+                # 支付宝里够做，但为了 0.06% 的偏差赎回一次纯属瞎折腾（真跑一遍才看得见）
                 note = ""
             else:
                 qty, amt = HG.order_quantity(f, abs(diff), it["px"])
