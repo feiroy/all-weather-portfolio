@@ -1847,6 +1847,7 @@ _LIVE_ASSETS = {
     "hs300": "hs300",
     "us_sp500": "us_sp500",
     "credit": "bond_credit",
+    "bond_short": "bond_short_etf",
     "bond_10y": "bond_10y_etf",
     "bond_30y": "bond_30y_etf",
     "gold": "gold",
@@ -2097,7 +2098,7 @@ def _migrate_trades(a: dict) -> bool:
 if acct and _migrate_trades(acct):
     st.toast("已把旧的记账（按场内价/资产名）换成按基金代码与份额", icon=":material/autorenew:")
 # 回测资产（项目默认那 8 个），基金检索/对比页的下拉用
-_ACCT_ASSETS = [a for a in ["hs300", "us_sp500", "credit", "bond_10y",
+_ACCT_ASSETS = [a for a in ["hs300", "us_sp500", "credit", "bond_short", "bond_10y",
                             "bond_30y", "gold", "nonferr", "wti"] if a in prices.columns]
 _ASSET_LABEL = {a: f"{ETF_META.get(a, {}).get('name', a)} ({ETF_META.get(a, {}).get('code', '')})"
                 for a in _ACCT_ASSETS}
@@ -6227,7 +6228,7 @@ __VAL_CSS__
 
 
 _CAT = {"hs300": "宽基·A股", "us_sp500": "宽基·美股", "credit": "信用债",
-        "bond_10y": "利率债", "bond_30y": "超长久期", "gold": "商品·黄金",
+        "bond_10y": "利率债", "bond_30y": "超长久期", "bond_short": "债券·短融", "gold": "商品·黄金",
         "nonferr": "商品·有色", "wti": "商品·原油"}
 
 # 搜索框置顶的 8 类回测资产

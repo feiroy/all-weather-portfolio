@@ -42,7 +42,7 @@ CASH_TIERS = [
 # === 8 资产元信息 ===
 # 顺序就是各个表的标准列序
 ASSETS = [
-    "hs300", "us_sp500", "credit",
+    "hs300", "us_sp500", "credit", "bond_short",
     "bond_10y", "bond_30y",
     "gold", "nonferr", "wti",
 ]
@@ -51,6 +51,7 @@ ETF_META = {
     "hs300":     {"code": "510300", "name": "沪深 300 ETF",        "bucket": "增长↑", "role": "A股大盘"},
     "us_sp500":  {"code": "513500", "name": "标普 500 ETF（QDII）", "bucket": "增长↑", "role": "海外权益"},
     "credit":    {"code": "511220", "name": "城投债 ETF",          "bucket": "收益垫", "role": "信用债"},
+    "bond_short": {"code": "511360", "name": "短融 ETF",            "bucket": "收益垫", "role": "短久期利率债"},
     "bond_10y":  {"code": "511260", "name": "10 年国债 ETF",       "bucket": "增长↓10Y", "role": "中久期利率债"},
     "bond_30y":  {"code": "511130", "name": "30 年国债 ETF",       "bucket": "增长↓30Y", "role": "长久期利率债"},
     "gold":      {"code": "518850", "name": "黄金 ETF",            "bucket": "通胀↑", "role": "实物黄金"},
@@ -62,7 +63,7 @@ ETF_META = {
 BUCKETS = {
     "增长↑权益(A股)":  ["hs300"],
     "增长↑权益(海外)": ["us_sp500"],
-    "信用债":          ["credit"],
+    "信用债":          ["credit", "bond_short"],
     "增长↓10Y":       ["bond_10y"],
     "增长↓30Y":       ["bond_30y"],
     "通胀↑黄金":      ["gold"],
@@ -72,7 +73,7 @@ BUCKETS = {
 
 BUCKET_GROUPS = {
     "增长↑":   ["hs300", "us_sp500"],
-    "收益垫":  ["credit"],
+    "收益垫":  ["credit", "bond_short"],
     "增长↓10Y": ["bond_10y"],
     "增长↓30Y": ["bond_30y"],
     "通胀↑":   ["gold", "nonferr", "wti"],
@@ -133,7 +134,7 @@ V3B_RP_ASSETS_NO_WTI = ["hs300", "us_sp500", "credit", "bond_30y", "gold", "nonf
 # === V3-B 保守增强资产/桶 ===
 V3B_CON_BUCKETS = {
     "增长↑":   ["hs300", "us_sp500"],
-    "收益垫":  ["credit"],
+    "收益垫":  ["credit", "bond_short"],
     "增长↓10Y": ["bond_10y"],
     "增长↓30Y": ["bond_30y"],
     "通胀↑":   ["gold", "nonferr", "wti"],

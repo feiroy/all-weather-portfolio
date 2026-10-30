@@ -23,6 +23,7 @@ TARGETS = {
     "bond_30y_etf": ("etf_nav", "511130"),
     "bond_10y_etf": ("etf_nav", "511260"),
     "bond_credit":  ("etf_nav", "511220"),
+    "bond_short_etf": ("etf_nav", "511360"),
     "gold":         ("etf_nav", "518850"),
     "nonferr":      ("etf_nav", "159980"),
     # QDII
@@ -458,6 +459,7 @@ _PRICE_SYMBOLS = {
     "bond_30y":  "511130",
     "bond_10y":  "511260",
     "credit":    "511220",
+    "bond_short": "511360",
     "gold":      "518850",
     "nonferr":   "159980",
     "wti":       "501018",
