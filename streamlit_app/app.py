@@ -3765,7 +3765,7 @@ __CAL_CSS__
     const mm = ok(m) && Math.abs(m) < .5 ? 0 : m;
     // 能点开看明细的日格子带上 data-day（就是 title 里那串日期）
     const dd = /\bpick\b/.test(extra) ? ` data-day="${title}"` : '';
-    return `<div class="cal-cell ${cls(v)} ${extra}"${dd} style="${heat(v, mx)}" title="${title}">`
+    return `<div class="cal-cell ${cls(v)} ${extra}"${dd} title="${title}">`
       + `<span class="k">${k}${sub ? `<small>${sub}</small>` : ''}</span>`
       + `<span class="v">${pct(v)}</span>`
       + (ok(m) ? `<span class="mv">${money(mm)}</span>` : '') + '</div>';
@@ -3821,8 +3821,21 @@ __CAL_CSS__
     document.getElementById('dt-sort').onclick = () => { desc = !desc; renderDetail(); };
   }
   // ---- 周/月/年：把这一期里每只基金的收益按天聚合（金额相加、收益率复利）----
+  function periodDays(v) {
+    if (!v) return [];
+    if (mode === '周') { const [ds, de] = v.split(' — '); return Object.keys(DET).filter(d => d >= ds && d <= de); }
+    if (mode === '月') { const [y, m] = v.split('-'); return Object.keys(DET).filter(d => d.startsWith(`${y}/${m}/`)); }
+    return Object.keys(DET).filter(d => d.startsWith(v.replace('年', '') + '/'));
+  }
   function renderPeriodDetail() {
     grid.querySelectorAll('.cal-cell.sel').forEach(e => e.classList.remove('sel'));
+    // 默认选中最近一期有数据的期间（日/周/月/年打开就直接出结果）
+    if (!sel) {
+      const cells = [...grid.querySelectorAll('.cal-cell.pick')];
+      for (let i = cells.length - 1; i >= 0; i--) {
+        if (periodDays(cells[i].dataset.day).length) { sel = cells[i].dataset.day; break; }
+      }
+    }
     const label = mode === '周' ? sel : (mode === '月' ? (sel || '').replace('-', '年') + '月' : sel);
     if (!sel) {
       detail.innerHTML = '<div class="dt-h"><span class="t">期间收益明细</span></div>'
@@ -3831,10 +3844,7 @@ __CAL_CSS__
     }
     const c = grid.querySelector(`.cal-cell[data-day="${sel}"]`);
     if (c) c.classList.add('sel');
-    let days = [];
-    if (mode === '周') { const [ds, de] = sel.split(' — '); days = Object.keys(DET).filter(d => d >= ds && d <= de); }
-    else if (mode === '月') { const [y, m] = sel.split('-'); days = Object.keys(DET).filter(d => d.startsWith(`${y}/${m}/`)); }
-    else { days = Object.keys(DET).filter(d => d.startsWith(sel.replace('年', '') + '/')); }
+    const days = periodDays(sel);
     if (!days.length) {
       detail.innerHTML = '<div class="dt-h"><span class="t">期间收益明细</span></div>'
         + '<div class="dt-empty">这一期账户还没有持仓收益</div>';
