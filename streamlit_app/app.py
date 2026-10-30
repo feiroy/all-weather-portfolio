@@ -6641,11 +6641,11 @@ def _custom_portfolio_panel():
 with tab8:
     _custom_portfolio_panel()
     st.divider()
-    st.caption("这里是**项目原始策略**的历史回测：三策略对比、调频影响，"
-               "以及最下方「历史调仓」里每月的目标权重和当月收益。"
-               "我自己持仓的收益在「我的账户」看。")
-    from streamlit_app.performance import render_performance
-    render_performance(PROJECT_ROOT)
+    st.caption("三策略对比、调频影响已由上方「策略工厂」覆盖；这里只保留**历史调仓**——"
+               "项目原始策略每月的目标权重、当月收益和触发信号。我自己持仓的收益在「我的账户」看。")
+    from streamlit_app.performance import load_saved_monthly, _render_history_operations
+    _saved = load_saved_monthly(PROJECT_ROOT)
+    _render_history_operations(PROJECT_ROOT, _saved, "月度", pd.Timestamp.today().year)
 
 
 # ============================================================
