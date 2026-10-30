@@ -902,36 +902,36 @@ def _compare_payload(series_map):
     return names, hist
 
 
-def _drawdown_compare_html(series_map, height=300, title="回撤对比"):
-    """多策略回撤（距历史高点）对比图。与净值对比共用 payload/配色/区间按钮。"""
+def _nav_dd_compare_html(series_map, nav_height=380, dd_height=220):
+    """净值 + 回撤 同图联动：共用区间按钮、图例、时间轴和悬停提示。"""
     names, hist = _compare_payload(series_map)
     payload = json.dumps({"names": names, "colors": _CMP_COLORS, "histories": hist,
-                          "height": int(height)}, ensure_ascii=False, allow_nan=False).replace("<", "\u003c")
+                          "navH": int(nav_height), "ddH": int(dd_height)},
+                         ensure_ascii=False, allow_nan=False).replace("<", "\u003c")
     btns = _range_buttons("全部")
     template = r"""<style>
 __BASE_CSS__
 #chart{width:100%;display:block;touch-action:none;user-select:none;cursor:crosshair}
 </style>
 <div id="wrap">
-<div class="heading"><h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4v16h16M7 14l4-5 4 3 5-7"/></svg>__TITLE__</h3></div>
+<div class="heading"><h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4v16h16M7 14l4-5 4 3 5-7"/></svg>净值与回撤对比</h3></div>
 <div class="controls"><div id="range-controls" role="group" aria-label="常用区间">__BTNS__</div></div>
 <div id="legend"></div>
 <div id="notice" role="status"></div>
-<svg id="chart" role="img" aria-label="策略回撤对比"></svg>
+<svg id="chart" role="img" aria-label="策略净值与回撤联动对比"></svg>
 <div id="stats"></div><div id="tip"></div>
 </div>
 <script>
 (() => {
-  const D = __DD_DATA__;
+  const D = __ND_DATA__;
   const names = D.names, COL = D.colors, P = D.histories["日"];
   const svg = document.getElementById('chart'), wrap = document.getElementById('wrap');
   const tip = document.getElementById('tip'), legend = document.getElementById('legend');
   const stats = document.getElementById('stats'), notice = document.getElementById('notice');
-  const H = D.height, L = 56, R = 64, T = 18, B = 30;
+  const L = 56, R = 64, NH = D.navH, DH = D.ddH, T = 16, B = 28, H = NH + DH + 46;
   const col = nm => COL[names.indexOf(nm) % COL.length];
   const pct = v => (v > 0 ? '+' : '') + v.toFixed(2) + '%';
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-  // 各序列净值先归一再算回撤（%）
   const dd = {};
   names.forEach(nm => {
     let peak = -Infinity;
@@ -943,9 +943,6 @@ __BASE_CSS__
   });
   let start = 0;
   const end = P.labels.length - 1;
-  function state() {
-    return {start, end, firstDate: P.dates[start], lastDate: P.dates[end], range: wrap.dataset.range || '全部'};
-  }
   legend.innerHTML = names.map(nm =>
     `<span style="display:inline-flex;align-items:center;gap:5px;margin-right:14px;font-size:12px;color:var(--sub)">`
     + `<span style="width:12px;height:3px;background:${col(nm)};display:inline-block;border-radius:2px"></span>${nm}</span>`).join('');
@@ -953,29 +950,42 @@ __BASE_CSS__
     const n = end - start + 1;
     const w = wrap.clientWidth || 900;
     svg.setAttribute('viewBox', `0 0 ${w} ${H}`);
-    svg.innerHTML = '';
-    let lo = 0;
-    for (const nm of names) for (let i = start; i <= end; i++) {
-      const v = dd[nm][i]; if (v !== null) lo = Math.min(lo, v);
-    }
     if (n < 2) { notice.textContent = '当前区间不足两个数据点'; return; }
     notice.textContent = '';
-    const Y = v => T + (H - T - B) * (0 - v) / (0 - lo * 1.05);
     const X = i => L + (w - L - R) * (i - start) / (n - 1);
-    let html = '';
-    [0, lo / 2, lo].forEach(v => {
-      html += `<line x1="${L}" x2="${w - R}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)"/>`
-            + `<text x="${w - R + 6}" y="${Y(v) + 4}" font-size="11" fill="var(--muted)">${v.toFixed(1)}%</text>`;
+    // 净值轴
+    let lo = Infinity, hi = -Infinity, dlo = 0;
+    for (const nm of names) for (let i = start; i <= end; i++) {
+      const v = P.vals[nm][i];
+      if (v !== null && v !== undefined) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+      const dv = dd[nm][i]; if (dv !== null) dlo = Math.min(dlo, dv);
+    }
+    const NY = v => T + (NH - T) * (hi - v) / (hi - lo || 1);
+    const DY = v => NH + 20 + (DH - 20) * (0 - v) / (0 - dlo * 1.05);
+    let html = `<text x="${L}" y="12" font-size="12" fill="var(--sub)">净值（归一）</text>`
+             + `<text x="${L}" y="${NH + 14}" font-size="12" fill="var(--sub)">回撤（距历史高点，%）</text>`;
+    [lo, hi].forEach(v => {
+      const dy = v === lo ? -6 : 4;  // 低值标签上移，避开下方回撤面板标题
+      html += `<text x="${w - R + 6}" y="${NY(v) + dy}" font-size="11" fill="var(--muted)">${v.toFixed(2)}</text>`;
+    });
+    html += `<line x1="${L}" x2="${w - R}" y1="${NH}" y2="${NH}" stroke="var(--line)"/>`;
+    [0, dlo / 2, dlo].forEach(v => {
+      html += `<line x1="${L}" x2="${w - R}" y1="${DY(v)}" y2="${DY(v)}" stroke="var(--line)" stroke-dasharray="3 3"/>`
+            + `<text x="${w - R + 6}" y="${DY(v) + 4}" font-size="11" fill="var(--muted)">${v.toFixed(1)}%</text>`;
     });
     names.forEach(nm => {
-      let d = '', open = false;
+      let dn = '', ddd = '', on = false, od = false;
       for (let i = start; i <= end; i++) {
-        const v = dd[nm][i];
-        if (v === null) { open = false; continue; }
-        d += (open ? 'L' : 'M') + X(i).toFixed(1) + ',' + Y(v).toFixed(1);
-        open = true;
+        const v = P.vals[nm][i], dv = dd[nm][i];
+        if (v !== null && v !== undefined) {
+          dn += (on ? 'L' : 'M') + X(i).toFixed(1) + ',' + NY(v).toFixed(1); on = true;
+        }
+        if (dv !== null) {
+          ddd += (od ? 'L' : 'M') + X(i).toFixed(1) + ',' + DY(dv).toFixed(1); od = true;
+        }
       }
-      html += `<path d="${d}" fill="none" stroke="${col(nm)}" stroke-width="1.6"/>`;
+      html += `<path d="${dn}" fill="none" stroke="${col(nm)}" stroke-width="1.6"/>`
+            + `<path d="${ddd}" fill="none" stroke="${col(nm)}" stroke-width="1.3" opacity=".85"/>`;
     });
     const ticks = 5;
     for (let k = 0; k <= ticks; k++) {
@@ -993,7 +1003,6 @@ __BASE_CSS__
   wrap.querySelectorAll('button[data-range]').forEach(b => b.addEventListener('click', () => {
     wrap.querySelectorAll('button[data-range]').forEach(x => x.setAttribute('aria-pressed', 'false'));
     b.setAttribute('aria-pressed', 'true');
-    wrap.dataset.range = b.dataset.range;
     start = (P.windows[b.dataset.range] || {start: 0}).start;
     draw();
   }));
@@ -1001,7 +1010,10 @@ __BASE_CSS__
     const r = svg.getBoundingClientRect(), wr = wrap.getBoundingClientRect();
     const w = r.width, n = end - start + 1;
     const i = clamp(Math.round(start + (e.clientX - r.left - L) / (w - L - R) * (n - 1)), start, end);
-    const rows = names.map(nm => `<div><span style="color:${col(nm)}">${nm}</span> ${dd[nm][i] === null ? '—' : pct(dd[nm][i])}</div>`).join('');
+    const rows = names.map(nm => {
+      const v = P.vals[nm][i], dv = dd[nm][i];
+      return `<div><span style="color:${col(nm)}">${nm}</span> 净值 ${v === null || v === undefined ? '—' : v.toFixed(4)} · 回撤 ${dv === null ? '—' : pct(dv)}</div>`;
+    }).join('');
     tip.innerHTML = `<b>${P.dates[i]}</b>${rows}`;
     tip.style.display = 'block';
     const tw = tip.offsetWidth, th = tip.offsetHeight;
@@ -1015,8 +1027,8 @@ __BASE_CSS__
   draw();
 })();
 </script>"""
-    return template.replace("__BASE_CSS__", _COMP_BASE_CSS).replace("__DD_DATA__", payload) \
-        .replace("__BTNS__", btns).replace("__TITLE__", title)
+    return template.replace("__BASE_CSS__", _COMP_BASE_CSS).replace("__ND_DATA__", payload) \
+        .replace("__BTNS__", btns)
 
 
 def _compare_chart_html(series_map, height=560, default_range="近1年", title="走势对比",
@@ -6712,9 +6724,7 @@ def _custom_portfolio_panel():
         _render_table([("策略", "left"), ("年化收益", "right"), ("最大回撤", "right"),
                        ("夏普", "right"), ("卡玛", "right"), ("年化波动", "right"), ("期末净值", "right")],
                       rows, min_width=860)
-        st.iframe(_compare_chart_html(results, default_range="全部",
-                                      title="净值曲线（归一，起点 = 1.0）", pct_mode=False), height="content")
-        st.iframe(_drawdown_compare_html(results, title="回撤曲线（距历史高点，%）"), height="content")
+        st.iframe(_nav_dd_compare_html(results), height="content")
 
         # 逐年收益对比
         yearly = {}
