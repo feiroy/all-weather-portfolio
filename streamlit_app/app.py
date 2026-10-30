@@ -3600,11 +3600,11 @@ _CAL_CSS = r"""
   padding:8px 10px;border-radius:10px;background:#F8FAFC;border:1px solid transparent}
 .cal-cell .k{font-size:13px;color:#475569;line-height:1.35;display:flex;flex-direction:column}
 .cal-cell .k small{font-size:11px;color:#94A3B8;margin-top:2px;font-variant-numeric:tabular-nums}
-.cal-cell .v{font-size:17px;font-weight:700;text-align:right;font-variant-numeric:tabular-nums;letter-spacing:-.2px}
+.cal-cell .v{font-size:16px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums;letter-spacing:-.2px}
 .cal-cell.up .v{color:#C52828}.cal-cell.down .v{color:#16703B}.cal-cell.flat .v{color:#475569}
 /* 第二行「这段时间赚了多少钱」：收益率是百分比、钱是元，两个都要给 ——
    同样 1%，五万的账户和五十万的账户差十倍，只看 % 回顾不出到底赚了多少 */
-.cal-cell .mv{font-size:12px;color:#64748B;text-align:right;font-variant-numeric:tabular-nums;
+.cal-cell .mv{font-size:11.5px;color:#64748B;text-align:right;font-variant-numeric:tabular-nums;
   margin-top:-2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cal-cell.up .mv{color:#C0605F}.cal-cell.down .mv{color:#3F7D57}
 .cal-cell.none{background:#fff;border-color:#F1F5F9}.cal-cell.none .v{color:#CBD5E1;font-weight:400}
@@ -3766,7 +3766,7 @@ __CAL_CSS__
     // 能点开看明细的日格子带上 data-day（就是 title 里那串日期）
     const dd = /\bpick\b/.test(extra) ? ` data-day="${title}"` : '';
     const bg = !ok(v) || Math.abs(v) < 1e-10 ? '' : (v > 0
-      ? 'background:rgba(197,40,40,.20)' : 'background:rgba(22,112,59,.20)');
+      ? 'background:rgba(197,40,40,.13)' : 'background:rgba(22,163,74,.16)');
     return `<div class="cal-cell ${cls(v)} ${extra}"${dd} style="${bg}" title="${title}">`
       + `<span class="k">${k}${sub ? `<small>${sub}</small>` : ''}</span>`
       + `<span class="v">${pct(v)}</span>`
