@@ -295,6 +295,11 @@ def _load_with_index(etf_name: str, idx_name: str, annual_deduct: float = 0.0) -
 
 
 
+def _load_bond_short() -> pd.Series:
+    """短融 ETF 511360 (2020-09+) + 中证短融指数 H11014 (2015+) 拼接。"""
+    return _load_with_index("bond_short_etf", "shortbond_idx", annual_deduct=0.0)
+
+
 def load_panel(include_wti: bool = True, end: str | None = None) -> pd.DataFrame:
     """加载 8 资产收盘价面板（含缝合，对齐到回测期间，前向填充）。
 
@@ -315,6 +320,7 @@ def load_panel(include_wti: bool = True, end: str | None = None) -> pd.DataFrame
     bond_10y = _load_bond_10y()
     s_30y_etf = load_series("bond_30y_etf")
     bond_30y = synthesize_bond_30y(bond_10y, s_30y_etf)
+    bond_short = _load_bond_short()
 
     # nonferr: 沪铜 (2008-2013) → 申万有色指数 (2013-2019) → ETF (2019+)
     nonferr_etf = load_series("nonferr")
@@ -350,6 +356,7 @@ def load_panel(include_wti: bool = True, end: str | None = None) -> pd.DataFrame
         "hs300":    hs300,
         "us_sp500": us_sp500,
         "credit":   credit,
+        "bond_short": bond_short,
         "bond_10y": bond_10y,
         "bond_30y": bond_30y,
         "gold":     gold,

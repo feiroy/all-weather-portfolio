@@ -118,23 +118,23 @@ V3C_ASSETS_NO_WTI = ["hs300", "us_sp500", "credit", "bond_30y", "gold", "nonferr
 # === V3-B 风险平价资产/桶 ===
 V3B_RP_BUCKETS = {
     "增长↑":   ["hs300", "us_sp500"],
-    "收益垫":  ["credit"],
+    "收益垫":  ["credit", "bond_short"],
     "增长↓":   ["bond_30y"],
     "通胀↑":   ["gold", "nonferr", "wti"],
 }
-V3B_RP_ASSETS = ["hs300", "us_sp500", "credit", "bond_30y", "gold", "nonferr", "wti"]
+V3B_RP_ASSETS = ["hs300", "us_sp500", "credit", "bond_short", "bond_30y", "gold", "nonferr", "wti"]
 V3B_RP_BUCKETS_NO_WTI = {
     "增长↑":   ["hs300", "us_sp500"],
-    "收益垫":  ["credit"],
+    "收益垫":  ["credit", "bond_short"],
     "增长↓":   ["bond_30y"],
     "通胀↑":   ["gold", "nonferr"],
 }
-V3B_RP_ASSETS_NO_WTI = ["hs300", "us_sp500", "credit", "bond_30y", "gold", "nonferr"]
+V3B_RP_ASSETS_NO_WTI = ["hs300", "us_sp500", "credit", "bond_short", "bond_30y", "gold", "nonferr"]
 
 # === V3-B 保守增强资产/桶 ===
 V3B_CON_BUCKETS = {
     "增长↑":   ["hs300", "us_sp500"],
-    "收益垫":  ["credit", "bond_short"],
+    "收益垫":  ["credit"],
     "增长↓10Y": ["bond_10y"],
     "增长↓30Y": ["bond_30y"],
     "通胀↑":   ["gold", "nonferr", "wti"],

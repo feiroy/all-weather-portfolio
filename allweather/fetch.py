@@ -24,6 +24,7 @@ TARGETS = {
     "bond_10y_etf": ("etf_nav", "511260"),
     "bond_credit":  ("etf_nav", "511220"),
     "bond_short_etf": ("etf_nav", "511360"),
+    "shortbond_idx":  ("idx_csindex", "H11014"),  # 中证短融指数（511360 上市前 proxy）
     "gold":         ("etf_nav", "518850"),
     "nonferr":      ("etf_nav", "159980"),
     # QDII
@@ -168,6 +169,8 @@ def fetch_one(name, kind, sym, start=DEFAULT_START, end=DEFAULT_END):
                         raise ValueError("数据不足，降级到腾讯")
                 except Exception:
                     df = _fetch_idx_tx(sym)
+            elif kind == "idx_csindex":
+                df = _fetch_idx_csindex(sym, start, end)
             elif kind == "fut_dce":
                 df = _fetch_fut_dce(sym, start, end)
             elif kind == "etf_nav":
@@ -198,6 +201,16 @@ def fetch_one(name, kind, sym, start=DEFAULT_START, end=DEFAULT_END):
                 print(f"    重试 {attempt}/{RETRY_TIMES - 1}，等待 {RETRY_DELAY}s... ({e})", flush=True)
                 time.sleep(RETRY_DELAY)
     raise last_err
+
+
+def _fetch_idx_csindex(sym, start, end):
+    """中证指数官网历史行情（H11014 短融等），全量接口。"""
+    import akshare as ak
+    df = ak.stock_zh_index_hist_csindex(symbol=sym, start_date=start, end_date=end)
+    df["date"] = pd.to_datetime(df["日期"])
+    df["close"] = pd.to_numeric(df["收盘"], errors="coerce")
+    df = df.dropna(subset=["date", "close"])
+    return df[["date", "close"]].sort_values("date")
 
 
 def _fetch_treasury_idx(start, end):
@@ -459,7 +472,7 @@ _PRICE_SYMBOLS = {
     "bond_30y":  "511130",
     "bond_10y":  "511260",
     "credit":    "511220",
-    "bond_short": "511360",
+    "bond_short_etf": "511360",
     "gold":      "518850",
     "nonferr":   "159980",
     "wti":       "501018",
