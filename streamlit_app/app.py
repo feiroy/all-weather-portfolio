@@ -486,7 +486,8 @@ div[data-testid="stAlert"] p{ color:var(--brand-strong); }
 /* ========== 基金检索页：含阶段数字的概览 / 走势分析 ========== */
 /* 基金检索 / 收益日历 / 基金对比 共用同一卡片容器 */
 .st-key-trend_head, .st-key-trend_chart, .st-key-trend_cal, .st-key-cmp_head, .st-key-cmp_chart,
-.st-key-cmp_stage, .st-key-val_head, .st-key-val_table, .st-key-val_chart{
+.st-key-cmp_stage, .st-key-val_head, .st-key-val_table, .st-key-val_chart,
+.st-key-cp_builder, .st-key-cp_compare{
   background:var(--card); border:1px solid var(--line); border-radius:16px;
   padding:24px !important; margin-bottom:24px;
 }
@@ -538,7 +539,7 @@ div[data-testid="stAlert"] p{ color:var(--brand-strong); }
 .stage-return.neutral{color:var(--sub)}
 
 @media(max-width:600px){
-  .st-key-trend_head,.st-key-trend_chart,.st-key-trend_cal,.st-key-cmp_head,.st-key-cmp_chart,.st-key-cmp_stage,.st-key-val_head,.st-key-val_table,.st-key-val_chart{padding:14px !important;margin-bottom:18px}
+  .st-key-trend_head,.st-key-trend_chart,.st-key-trend_cal,.st-key-cmp_head,.st-key-cmp_chart,.st-key-cmp_stage,.st-key-val_head,.st-key-val_table,.st-key-val_chart,.st-key-cp_builder,.st-key-cp_compare{padding:14px !important;margin-bottom:18px}
   .stage-metrics{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px 6px}.stage-return{font-size:16px;letter-spacing:-.4px}
   .stage-label{font-size:11px}
   .fh-price .px{font-size:28px}.fh-price .chg{font-size:14px}
@@ -6518,7 +6519,7 @@ def _custom_portfolio_panel():
                 unsafe_allow_html=True)
     saved = st.session_state.setdefault("cp_saved", {})
 
-    with st.container(border=True):
+    with st.container(key="cp_builder"):
         st.markdown("**新建策略**")
         preset = st.selectbox("从模板开始（选模板自动填资产和模式）",
                               ["空白"] + ["V3-B 风险平价", "V3-B 保守增强", "V3c 多元"],
@@ -6564,48 +6565,51 @@ def _custom_portfolio_panel():
                     st.rerun()
 
     # ---------- 对比区：内置三策略 + 我的策略 ----------
-    st.markdown('<div class="sec-head"><span class="t">策略对比</span>'
-                '<span class="r">内置三策略 + 我的策略</span></div>', unsafe_allow_html=True)
-    _c1, _c2 = st.columns(2)
-    with _c1:
-        start = st.selectbox("回测起点", ["2015-01-01", "2019-01-01", "2021-01-01", "2023-01-01"],
-                             index=1, key="cp_start")
-    with _c2:
-        freq = st.selectbox("自定义策略再平衡", [("每月", "M"), ("每季", "Q"), ("不再平衡", "N")],
-                            format_func=lambda x: x[0], key="cp_freq")
+    with st.container(key="cp_compare"):
+        st.markdown('<div class="sec-head"><span class="t">策略对比</span>'
+                    '<span class="r">内置三策略 + 我的策略</span></div>', unsafe_allow_html=True)
+        _c1, _c2 = st.columns(2)
+        with _c1:
+            start = st.selectbox("回测起点", ["2015-01-01", "2019-01-01", "2021-01-01", "2023-01-01"],
+                                 index=1, key="cp_start")
+        with _c2:
+            freq = st.selectbox("自定义策略再平衡", [("每月", "M"), ("每季", "Q"), ("不再平衡", "N")],
+                                format_func=lambda x: x[0], key="cp_freq")
 
-    panel = load_panel().loc[start:]
-    rets = panel.pct_change().dropna()
-    results = {}
-    from allweather.pipeline import run_strategy_backtest
-    for label, key in [("V3-B 风险平价", "V3-B 风险平价"), ("V3-B 保守增强", "V3-B 保守增强"), ("V3c 多元", "V3c 多元")]:
-        results[label] = run_strategy_backtest(rets, key).nv
-    for nm, cfg in saved.items():
-        c = dict(cfg)
-        c["freq"] = freq[1]
-        results[nm] = _cp_run(rets, c)
+        panel = load_panel().loc[start:]
+        rets = panel.pct_change().dropna()
+        results = {}
+        from allweather.pipeline import run_strategy_backtest
+        for label, key in [("V3-B 风险平价", "V3-B 风险平价"), ("V3-B 保守增强", "V3-B 保守增强"), ("V3c 多元", "V3c 多元")]:
+            results[label] = run_strategy_backtest(rets, key).nv
+        for nm, cfg in saved.items():
+            c = dict(cfg)
+            c["freq"] = freq[1]
+            results[nm] = _cp_run(rets, c)
 
-    rows = []
-    for nm, nv in results.items():
-        m = _cp_metrics(nv)
-        rows.append([nm, f"{m['cagr']:.2%}", f"{m['mdd']:.2%}", f"{m['sharpe']:.2f}",
-                     f"{m['calmar']:.2f}", f"{m['ann_vol']:.2%}", f"{nv.iloc[-1]:.3f}"])
-    _render_table([("策略", "left"), ("年化收益", "right"), ("最大回撤", "right"),
-                   ("夏普", "right"), ("卡玛", "right"), ("年化波动", "right"), ("期末净值", "right")],
-                  rows, min_width=860)
-    st.line_chart(pd.DataFrame(results), height=300)
+        rows = []
+        for nm, nv in results.items():
+            m = _cp_metrics(nv)
+            rows.append([nm, f"{m['cagr']:.2%}", f"{m['mdd']:.2%}", f"{m['sharpe']:.2f}",
+                         f"{m['calmar']:.2f}", f"{m['ann_vol']:.2%}", f"{nv.iloc[-1]:.3f}"])
+        _render_table([("策略", "left"), ("年化收益", "right"), ("最大回撤", "right"),
+                       ("夏普", "right"), ("卡玛", "right"), ("年化波动", "right"), ("期末净值", "right")],
+                      rows, min_width=860)
+        st.iframe(_compare_chart_html(results, default_range="全部",
+                                      title="策略净值对比", pct_mode=True), height="content")
 
-    # 逐年收益对比
-    yearly = {}
-    for nm, nv in results.items():
-        y = nv.resample("YE").last()
-        y = pd.concat([pd.Series([1.0], index=[nv.index[0]]), y]).pct_change().dropna()
-        yearly[nm] = {str(k.year): v for k, v in y.items()}
-    years = sorted({yy for d in yearly.values() for yy in d})
-    yrows = [[yy] + [f"{yearly[nm].get(yy):+.2%}" if yy in yearly[nm] else "—" for nm in results]
-             for yy in years]
-    _render_table([("年份", "left")] + [(nm, "right") for nm in results], yrows,
-                  min_width=max(700, 120 * len(results)))
+        # 逐年收益对比
+        yearly = {}
+        for nm, nv in results.items():
+            y = nv.resample("YE").last()
+            y = pd.concat([pd.Series([1.0], index=[nv.index[0]]), y]).pct_change().dropna()
+            yearly[nm] = {str(k.year): v for k, v in y.items()}
+        years = sorted({yy for d in yearly.values() for yy in d})
+        yrows = [[yy] + [f"{yearly[nm].get(yy):+.2%}" if yy in yearly[nm] else "—" for nm in results]
+                 for yy in years]
+        _render_table([("年份", "left")] + [(nm, "right") for nm in results], yrows,
+                      min_width=max(700, 120 * len(results)))
+        st.markdown('<div class="sec-note">自定义策略按所选模式（等权/自定义权重/逆波动率/HRP）在统一区间回测；内置策略含各自趋势过滤与抄底规则，收益口径为累计净值。</div>', unsafe_allow_html=True)
 
 # ============================================================
 # Tab 8: 三策略比较 / 调频影响（统一月度、年度、多年视图）
