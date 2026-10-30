@@ -3765,7 +3765,9 @@ __CAL_CSS__
     const mm = ok(m) && Math.abs(m) < .5 ? 0 : m;
     // 能点开看明细的日格子带上 data-day（就是 title 里那串日期）
     const dd = /\bpick\b/.test(extra) ? ` data-day="${title}"` : '';
-    return `<div class="cal-cell ${cls(v)} ${extra}"${dd} title="${title}">`
+    const bg = !ok(v) || Math.abs(v) < 1e-10 ? '' : (v > 0
+      ? 'background:rgba(197,40,40,.10)' : 'background:rgba(22,112,59,.10)');
+    return `<div class="cal-cell ${cls(v)} ${extra}"${dd} style="${bg}" title="${title}">`
       + `<span class="k">${k}${sub ? `<small>${sub}</small>` : ''}</span>`
       + `<span class="v">${pct(v)}</span>`
       + (ok(m) ? `<span class="mv">${money(mm)}</span>` : '') + '</div>';
