@@ -3624,8 +3624,8 @@ _CAL_CSS = r"""
 .cal-cell.pick:hover{border-color:#CBD5E1}
 .cal-cell.sel{border-color:transparent;box-shadow:none}
 /* 选中的格子模仿支付宝：实心深底 + 白字 */
-.cal-cell.sel.up{background:#C52828 !important}
-.cal-cell.sel.down{background:#16703B !important}
+.cal-cell.sel.up{background:#D64545 !important}
+.cal-cell.sel.down{background:#2E8B62 !important}
 .cal-cell.sel .k,.cal-cell.sel .k small,.cal-cell.sel .v,.cal-cell.sel .mv{color:#fff !important}
 #detail{margin-top:18px;border-top:1px solid #E2E8F0;padding-top:14px}
 #detail:empty{display:none}
