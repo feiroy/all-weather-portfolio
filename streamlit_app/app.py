@@ -6713,8 +6713,8 @@ def _custom_portfolio_panel():
                        ("夏普", "right"), ("卡玛", "right"), ("年化波动", "right"), ("期末净值", "right")],
                       rows, min_width=860)
         st.iframe(_compare_chart_html(results, default_range="全部",
-                                      title="策略净值对比", pct_mode=True), height="content")
-        st.iframe(_drawdown_compare_html(results, title="策略回撤对比"), height="content")
+                                      title="净值曲线（归一，起点 = 1.0）", pct_mode=False), height="content")
+        st.iframe(_drawdown_compare_html(results, title="回撤曲线（距历史高点，%）"), height="content")
 
         # 逐年收益对比
         yearly = {}
