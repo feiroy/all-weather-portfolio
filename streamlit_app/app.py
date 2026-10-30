@@ -6439,9 +6439,127 @@ with tab7:
                 _render_table([("基金", "left")] + [(f"{_l}", "right") for _l in _TREND_STAGES], _rows,
                               min_width=700)
 # ============================================================
+# 自定义组合回测（自选资产/权重，自动算指标）
+# ============================================================
+def _fixed_weight_backtest(rets: pd.DataFrame, weights: pd.Series, freq: str = "M") -> pd.Series:
+    """固定目标权重 + 定期再平衡的净值。freq: M=月, Q=季, N=不再平衡（买并持有）。"""
+    w = (weights / weights.sum()).values
+    h = w.copy()
+    v = 1.0
+    nv = pd.Series(index=rets.index, dtype=float)
+    nv.iloc[0] = 1.0
+    period = rets.index.to_period(freq) if freq != "N" else None
+    arr = rets.values
+    for i in range(1, len(rets)):
+        r = arr[i]
+        v *= 1 + float(np.dot(h, r))
+        nv.iloc[i] = v
+        h = h * (1 + r)
+        s = h.sum()
+        h = h / s if s > 0 else w.copy()
+        if period is not None and period[i] != period[i - 1]:
+            h = w.copy()
+    return nv
+
+
+def _custom_portfolio_panel():
+    from allweather.data import load_panel
+    from allweather.stats import perf_metrics
+
+    st.markdown('<div class="sec-head"><span class="t">自定义组合</span>'
+                '<span class="r">自选资产、自定权重，自动算收益 / 回撤 / 夏普</span></div>',
+                unsafe_allow_html=True)
+    with st.container(border=True):
+        _names = {a: f"{ETF_META.get(a, {}).get('name', a)}（{ETF_META.get(a, {}).get('code', '')}）"
+                  for a in _ACCT_ASSETS}
+        _c1, _c2, _c3 = st.columns([3.2, 1, 1])
+        with _c1:
+            picked = st.multiselect("组合资产（可多选）", _ACCT_ASSETS, default=_ACCT_ASSETS,
+                                    format_func=lambda a: _names[a], key="cp_assets")
+        with _c2:
+            start = st.selectbox("回测起点", ["2015-01-01", "2019-01-01", "2021-01-01", "2023-01-01"],
+                                 index=1, key="cp_start")
+        with _c3:
+            freq = st.selectbox("再平衡", [("每月", "M"), ("每季", "Q"), ("不再平衡（买并持有）", "N")],
+                                format_func=lambda x: x[0], key="cp_freq")
+        if not picked:
+            st.warning("至少选一只资产")
+            return
+        mode = st.radio("权重方式", ["等权", "自定义百分比"], horizontal=True, key="cp_wmode")
+        if mode == "等权":
+            w = pd.Series(1.0 / len(picked), index=picked)
+        else:
+            cols = st.columns(min(4, len(picked)))
+            vals = {}
+            for i, a in enumerate(picked):
+                with cols[i % len(cols)]:
+                    vals[a] = st.number_input(_names[a], min_value=0.0, max_value=100.0,
+                                              value=round(100.0 / len(picked), 1), step=1.0, key=f"cp_w_{a}")
+            w = pd.Series(vals, dtype=float)
+            if w.sum() <= 0:
+                st.warning("权重合计必须大于 0")
+                return
+        w = w / w.sum()
+        st.caption("实际权重：" + " · ".join(f"{ETF_META.get(a, {}).get('name', a)} {w[a]:.1%}" for a in picked))
+        compare = st.checkbox("叠加 V3-B 风险平价（含短融）作对照", value=False, key="cp_compare")
+
+        panel = load_panel().loc[start:]
+        rets = panel[picked].pct_change().dropna()
+        nv = _fixed_weight_backtest(rets, w[picked], freq[1])
+        m = perf_metrics(nv, rets=nv.pct_change().dropna())
+
+        bench_nv = None
+        if compare:
+            from allweather.pipeline import run_strategy_backtest
+            res = run_strategy_backtest(rets, "V3-B 风险平价")
+            bench_nv = res.nv
+            bm = perf_metrics(bench_nv, rets=bench_nv.pct_change().dropna())
+
+        cols = st.columns(5)
+        for c, label, key in zip(cols, ["年化收益", "最大回撤", "夏普", "卡玛", "年化波动"],
+                                 ["cagr", "mdd", "sharpe", "calmar", "ann_vol"]):
+            v = m.get(key)
+            is_ratio = key in ("sharpe", "calmar")
+            delta = None
+            if bench_nv is not None and key in bm:
+                delta = f"{v - bm[key]:+.2f}" if is_ratio else f"{(v - bm[key]) * 100:+.2f}pp"
+            c.metric(label, f"{v:.2f}" if is_ratio else f"{v:.2%}", delta)
+        st.caption(f"期末净值 {nv.iloc[-1]:.3f} · 区间 {nv.index[0]:%Y/%m/%d} → {nv.index[-1]:%Y/%m/%d}")
+
+        plot_df = pd.DataFrame({"自定义组合": nv})
+        if bench_nv is not None:
+            plot_df["V3-B RP 对照"] = bench_nv
+        st.line_chart(plot_df, height=280)
+        dd = nv / nv.cummax() - 1
+        st.area_chart(pd.DataFrame({"组合回撤": dd}), height=140)
+
+        # 逐年收益
+        y = nv.resample("YE").last()
+        y = pd.concat([pd.Series([1.0], index=[nv.index[0]]), y]).pct_change().dropna()
+        yearly = {str(k.year): f"{v:+.2%}" for k, v in y.items()}
+        if bench_nv is not None:
+            yb = bench_nv.resample("YE").last()
+            yb = pd.concat([pd.Series([1.0], index=[bench_nv.index[0]]), yb]).pct_change().dropna()
+            _rows = [[str(k.year), f"{v:+.2%}", f"{yb.get(k, float('nan')):+.2%}"] for k, v in y.items()]
+            _render_table([("年份", "left"), ("自定义组合", "right"), ("V3-B RP 对照", "right")], _rows)
+        else:
+            _render_table([("年份", "left"), ("收益", "right")], [[k, v] for k, v in yearly.items()])
+
+        # 最大回撤段
+        trough = dd.idxmin()
+        peak = nv.loc[:trough].idxmax()
+        after = nv.loc[trough:]
+        rec = after[after >= nv.loc[peak]]
+        st.caption(f"最大回撤段：{peak:%Y/%m/%d} → {trough:%Y/%m/%d}（{dd.min():.2%}），"
+                   + (f"修复于 {rec.index[0]:%Y/%m/%d}" if len(rec) else "截至区间末尚未修复"))
+
+
+# ============================================================
 # Tab 8: 三策略比较 / 调频影响（统一月度、年度、多年视图）
 # ============================================================
 with tab8:
+    _custom_portfolio_panel()
+    st.divider()
     st.caption("这里是**项目原始策略**的历史回测：三策略对比、调频影响，"
                "以及最下方「历史调仓」里每月的目标权重和当月收益。"
                "我自己持仓的收益在「我的账户」看。")
