@@ -902,6 +902,123 @@ def _compare_payload(series_map):
     return names, hist
 
 
+def _drawdown_compare_html(series_map, height=300, title="回撤对比"):
+    """多策略回撤（距历史高点）对比图。与净值对比共用 payload/配色/区间按钮。"""
+    names, hist = _compare_payload(series_map)
+    payload = json.dumps({"names": names, "colors": _CMP_COLORS, "histories": hist,
+                          "height": int(height)}, ensure_ascii=False, allow_nan=False).replace("<", "\u003c")
+    btns = _range_buttons("全部")
+    template = r"""<style>
+__BASE_CSS__
+#chart{width:100%;display:block;touch-action:none;user-select:none;cursor:crosshair}
+</style>
+<div id="wrap">
+<div class="heading"><h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4v16h16M7 14l4-5 4 3 5-7"/></svg>__TITLE__</h3></div>
+<div class="controls"><div id="range-controls" role="group" aria-label="常用区间">__BTNS__</div></div>
+<div id="legend"></div>
+<div id="notice" role="status"></div>
+<svg id="chart" role="img" aria-label="策略回撤对比"></svg>
+<div id="stats"></div><div id="tip"></div>
+</div>
+<script>
+(() => {
+  const D = __DD_DATA__;
+  const names = D.names, COL = D.colors, P = D.histories["日"];
+  const svg = document.getElementById('chart'), wrap = document.getElementById('wrap');
+  const tip = document.getElementById('tip'), legend = document.getElementById('legend');
+  const stats = document.getElementById('stats'), notice = document.getElementById('notice');
+  const H = D.height, L = 56, R = 64, T = 18, B = 30;
+  const col = nm => COL[names.indexOf(nm) % COL.length];
+  const pct = v => (v > 0 ? '+' : '') + v.toFixed(2) + '%';
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  // 各序列净值先归一再算回撤（%）
+  const dd = {};
+  names.forEach(nm => {
+    let peak = -Infinity;
+    dd[nm] = P.vals[nm].map(v => {
+      if (v === null || v === undefined) return null;
+      peak = Math.max(peak, v);
+      return (v / peak - 1) * 100;
+    });
+  });
+  let start = 0;
+  const end = P.labels.length - 1;
+  function state() {
+    return {start, end, firstDate: P.dates[start], lastDate: P.dates[end], range: wrap.dataset.range || '全部'};
+  }
+  legend.innerHTML = names.map(nm =>
+    `<span style="display:inline-flex;align-items:center;gap:5px;margin-right:14px;font-size:12px;color:var(--sub)">`
+    + `<span style="width:12px;height:3px;background:${col(nm)};display:inline-block;border-radius:2px"></span>${nm}</span>`).join('');
+  function draw() {
+    const n = end - start + 1;
+    const w = wrap.clientWidth || 900;
+    svg.setAttribute('viewBox', `0 0 ${w} ${H}`);
+    svg.innerHTML = '';
+    let lo = 0;
+    for (const nm of names) for (let i = start; i <= end; i++) {
+      const v = dd[nm][i]; if (v !== null) lo = Math.min(lo, v);
+    }
+    if (n < 2) { notice.textContent = '当前区间不足两个数据点'; return; }
+    notice.textContent = '';
+    const Y = v => T + (H - T - B) * (0 - v) / (0 - lo * 1.05);
+    const X = i => L + (w - L - R) * (i - start) / (n - 1);
+    let html = '';
+    [0, lo / 2, lo].forEach(v => {
+      html += `<line x1="${L}" x2="${w - R}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)"/>`
+            + `<text x="${w - R + 6}" y="${Y(v) + 4}" font-size="11" fill="var(--muted)">${v.toFixed(1)}%</text>`;
+    });
+    names.forEach(nm => {
+      let d = '', open = false;
+      for (let i = start; i <= end; i++) {
+        const v = dd[nm][i];
+        if (v === null) { open = false; continue; }
+        d += (open ? 'L' : 'M') + X(i).toFixed(1) + ',' + Y(v).toFixed(1);
+        open = true;
+      }
+      html += `<path d="${d}" fill="none" stroke="${col(nm)}" stroke-width="1.6"/>`;
+    });
+    const ticks = 5;
+    for (let k = 0; k <= ticks; k++) {
+      const i = Math.round(start + (n - 1) * k / ticks);
+      html += `<text x="${X(i)}" y="${H - 8}" font-size="11" fill="var(--muted)" text-anchor="middle">${P.labels[i]}</text>`;
+    }
+    svg.innerHTML = html;
+    const rows = names.map(nm => {
+      let m = 0;
+      for (let i = start; i <= end; i++) { const v = dd[nm][i]; if (v !== null) m = Math.min(m, v); }
+      return `<tr><td style="text-align:left">${nm}</td><td style="color:${col(nm)}">${m.toFixed(2)}%</td></tr>`;
+    }).join('');
+    stats.innerHTML = `<table class="cmp-tbl"><thead><tr><th style="text-align:left">策略</th><th>区间最大回撤</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
+  wrap.querySelectorAll('button[data-range]').forEach(b => b.addEventListener('click', () => {
+    wrap.querySelectorAll('button[data-range]').forEach(x => x.setAttribute('aria-pressed', 'false'));
+    b.setAttribute('aria-pressed', 'true');
+    wrap.dataset.range = b.dataset.range;
+    start = (P.windows[b.dataset.range] || {start: 0}).start;
+    draw();
+  }));
+  svg.addEventListener('pointermove', e => {
+    const r = svg.getBoundingClientRect(), wr = wrap.getBoundingClientRect();
+    const w = r.width, n = end - start + 1;
+    const i = clamp(Math.round(start + (e.clientX - r.left - L) / (w - L - R) * (n - 1)), start, end);
+    const rows = names.map(nm => `<div><span style="color:${col(nm)}">${nm}</span> ${dd[nm][i] === null ? '—' : pct(dd[nm][i])}</div>`).join('');
+    tip.innerHTML = `<b>${P.dates[i]}</b>${rows}`;
+    tip.style.display = 'block';
+    const tw = tip.offsetWidth, th = tip.offsetHeight;
+    let x = e.clientX - wr.left + 14;
+    if (x + tw > wr.width - 4) x = e.clientX - wr.left - tw - 14;
+    tip.style.left = Math.max(4, x) + 'px';
+    tip.style.top = Math.max(4, e.clientY - wr.top - th - 12) + 'px';
+  });
+  svg.addEventListener('pointerleave', () => { tip.style.display = 'none'; });
+  new ResizeObserver(draw).observe(wrap);
+  draw();
+})();
+</script>"""
+    return template.replace("__BASE_CSS__", _COMP_BASE_CSS).replace("__DD_DATA__", payload) \
+        .replace("__BTNS__", btns).replace("__TITLE__", title)
+
+
 def _compare_chart_html(series_map, height=560, default_range="近1年", title="走势对比",
                         pct_mode=False):
     """多序列对比图。
@@ -6597,6 +6714,7 @@ def _custom_portfolio_panel():
                       rows, min_width=860)
         st.iframe(_compare_chart_html(results, default_range="全部",
                                       title="策略净值对比", pct_mode=True), height="content")
+        st.iframe(_drawdown_compare_html(results, title="策略回撤对比"), height="content")
 
         # 逐年收益对比
         yearly = {}
