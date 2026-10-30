@@ -39,3 +39,4 @@ streamlit_app/_fund_names.json
 .wbapp_*.genie
 # 我的持仓配置（每个人买的基金不同）
 data/holdings.json
+.DS_Store
