@@ -6594,8 +6594,8 @@ def _custom_portfolio_panel():
                     '<span class="r">内置三策略 + 我的策略</span></div>', unsafe_allow_html=True)
         _c1, _c2 = st.columns(2)
         with _c1:
-            start = st.selectbox("回测起点", ["2015-01-01", "2019-01-01", "2021-01-01", "2023-01-01"],
-                                 index=1, key="cp_start")
+            start = st.selectbox("回测起点", [f"{y}-01-01" for y in range(2015, pd.Timestamp.today().year + 1)],
+                                 index=4, key="cp_start")
         with _c2:
             freq = st.selectbox("自定义策略再平衡", [("每月", "M"), ("每季", "Q"), ("不再平衡", "N")],
                                 format_func=lambda x: x[0], key="cp_freq")
