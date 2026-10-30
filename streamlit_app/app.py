@@ -3787,7 +3787,8 @@ __CAL_CSS__
   // 这个月里最近一天有明细的日子：换月时默认选它（和支付宝打开就停在「今」一样）
   const lastIn = (y, m) => Object.keys(DET).filter(k => k.startsWith(`${y}/${p2(m)}/`)).sort().pop() || null;
   function renderDetail() {
-    if (!HASD || mode !== '日') { detail.innerHTML = ''; return; }
+    if (!HASD) { detail.innerHTML = ''; return; }
+    if (mode !== '日') { renderPeriodDetail(); return; }
     grid.querySelectorAll('.cal-cell.sel').forEach(e => e.classList.remove('sel'));
     if (!sel || !DET[sel]) {
       detail.innerHTML = '<div class="dt-h"><span class="t">当日收益明细</span></div>'
@@ -3819,6 +3820,53 @@ __CAL_CSS__
         + '</div></div>').join('');
     document.getElementById('dt-sort').onclick = () => { desc = !desc; renderDetail(); };
   }
+  // ---- 周/月/年：把这一期里每只基金的收益按天聚合（金额相加、收益率复利）----
+  function renderPeriodDetail() {
+    grid.querySelectorAll('.cal-cell.sel').forEach(e => e.classList.remove('sel'));
+    const label = mode === '周' ? sel : (mode === '月' ? (sel || '').replace('-', '年') + '月' : sel);
+    if (!sel) {
+      detail.innerHTML = '<div class="dt-h"><span class="t">期间收益明细</span></div>'
+        + '<div class="dt-empty">点一周 / 一月 / 一年的格子，看这一期每只基金赚了多少</div>';
+      return;
+    }
+    const c = grid.querySelector(`.cal-cell[data-day="${sel}"]`);
+    if (c) c.classList.add('sel');
+    let days = [];
+    if (mode === '周') { const [ds, de] = sel.split(' — '); days = Object.keys(DET).filter(d => d >= ds && d <= de); }
+    else if (mode === '月') { const [y, m] = sel.split('-'); days = Object.keys(DET).filter(d => d.startsWith(`${y}/${m}/`)); }
+    else { days = Object.keys(DET).filter(d => d.startsWith(sel.replace('年', '') + '/')); }
+    if (!days.length) {
+      detail.innerHTML = '<div class="dt-h"><span class="t">期间收益明细</span></div>'
+        + '<div class="dt-empty">这一期账户还没有持仓收益</div>';
+      return;
+    }
+    const agg = {};
+    for (const d of days) for (const [i, m, p, st, act] of DET[d]) {
+      const a = agg[i] || (agg[i] = { m: 0, f: 1, acts: new Set() });
+      if (ok(m)) a.m += m;
+      if (ok(p)) a.f *= (1 + p / 100);
+      if (act) a.acts.add(act);
+    }
+    const rows = Object.entries(agg).map(([i, a]) => ({
+      f: FUNDS[i] || ['', '?', ''], m: a.m, p: (a.f - 1) * 100, act: [...a.acts].join('/')
+    }));
+    rows.sort((a, b) => desc ? b.m - a.m : a.m - b.m);
+    const tot = rows.reduce((s, r) => s + r.m, 0);
+    const actCls = { '买入': 'b', '卖出': 'x', '清仓': 'c' };
+    detail.innerHTML =
+      `<div class="dt-h"><span class="t">期间收益明细</span><span class="d">（${label}）</span><span class="sp"></span>`
+      + `<span class="tot">合计<b class="${sgn(tot)}" style="color:${color(tot)}">${yuan(tot)}</b></span>`
+      + `<button id="dt-sort" title="按这一期赚的钱排序">盈亏排序 ${desc ? '↓' : '↑'}</button></div>`
+      + rows.map(r => '<div class="dt-row"><div class="l">'
+        + `<div class="n" title="${esc(r.f[1])}">${esc(r.f[1])}</div>`
+        + `<div class="s"><span>${esc(r.f[0])}</span>`
+        + (r.f[2] ? `<span class="tag">${esc(r.f[2])}</span>` : '')
+        + (r.act ? `<span class="tag">${esc(r.act)}</span>` : '')
+        + '</div></div><div class="r">'
+        + `<div class="m ${sgn(r.m)}">${yuan(r.m)}</div><div class="p ${sgn(r.m)}">${pct(r.p)}</div>`
+        + '</div></div>').join('');
+    document.getElementById('dt-sort').onclick = () => { desc = !desc; renderPeriodDetail(); };
+  }
   grid.addEventListener('click', e => {
     const c = e.target.closest('.cal-cell.pick');
     if (!c) return;
@@ -3837,10 +3885,10 @@ __CAL_CSS__
     const i = pick.selectedIndex;            // 列表倒序：越往后越早
     prevB.disabled = i >= pick.options.length - 1; nextB.disabled = i <= 0;
   }
-  pick.onchange = () => { if (mode === '月') yy = +pick.value; else ym = pick.value.split('-').map(Number); render(); };
+  pick.onchange = () => { if (mode === '月') yy = +pick.value; else ym = pick.value.split('-').map(Number); sel = null; render(); };
   prevB.onclick = () => { const i = pick.selectedIndex; if (i < pick.options.length - 1) { pick.selectedIndex = i + 1; pick.onchange(); } };
   nextB.onclick = () => { const i = pick.selectedIndex; if (i > 0) { pick.selectedIndex = i - 1; pick.onchange(); } };
-  document.querySelectorAll('[data-range]').forEach(b => b.onclick = () => { mode = b.dataset.range; render(); });
+  document.querySelectorAll('[data-range]').forEach(b => b.onclick = () => { mode = b.dataset.range; sel = null; render(); });
   function render() {
     document.querySelectorAll('[data-range]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.range === mode)));
     fillPick();
@@ -3876,7 +3924,7 @@ __CAL_CSS__
         const ms = `${y}/${p2(m)}/01`, me = `${y}/${p2(m)}/${p2(nd)}`;
         const wk = D.week.filter(w => w.e >= ms && w.s <= me);
         const mx = maxAbs(wk.map(w => w.v));
-        html = wk.map((w, k) => cell(`第${k + 1}周`, w.v, mx, '', `${w.s.slice(5)} – ${w.e.slice(5)}`,
+        html = wk.map((w, k) => cell(`第${k + 1}周`, w.v, mx, ' pick', `${w.s.slice(5)} – ${w.e.slice(5)}`,
                                      `${w.s} — ${w.e}`, w.m)).join('')
           || '<div class="cal-cell none"><span class="k">本月暂无完整周数据</span><span class="v">—</span></div>';
         grid.style.gridTemplateColumns = 'repeat(auto-fill,minmax(150px,1fr))';
@@ -3890,7 +3938,7 @@ __CAL_CSS__
       const vals = [];
       for (let k = 1; k <= 12; k++) vals.push(D.month[`${yy}-${p2(k)}`]);
       const mx = maxAbs(vals);
-      html = vals.map((v, k) => cell(`${k + 1}月`, v, mx, '', '', `${yy}年${k + 1}月`,
+      html = vals.map((v, k) => cell(`${k + 1}月`, v, mx, ' pick', '', `${yy}-${p2(k + 1)}`,
         MMO[`${yy}-${p2(k + 1)}`])).join('');
       grid.style.gridTemplateColumns = 'repeat(6,minmax(0,1fr))';
       const got = vals.map((v, k) => [k + 1, v]).filter(t => ok(t[1]));
@@ -3904,7 +3952,7 @@ __CAL_CSS__
     } else {
       const ys = Object.keys(D.year).sort(), vals = ys.map(y => D.year[y]);
       const mx = maxAbs(vals);
-      html = ys.map(y => cell(`${y}年`, D.year[y], mx, '', '', `${y}年`, MYE[y])).join('');
+      html = ys.map(y => cell(`${y}年`, D.year[y], mx, ' pick', '', `${y}年`, MYE[y])).join('');
       grid.style.gridTemplateColumns = 'repeat(6,minmax(0,1fr))';
       const got = ys.map(y => [y, D.year[y]]);
       const best = got.reduce((a, t) => !a || t[1] > a[1] ? t : a, null), worst = got.reduce((a, t) => !a || t[1] < a[1] ? t : a, null);
