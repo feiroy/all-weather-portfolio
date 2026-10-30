@@ -1935,13 +1935,33 @@ def _hg_nav_on(slot, day, code=None):
     return float(sub.iloc[-1]) if len(sub) else None
 
 
-def _replay_holdings(trades, capital, created):
+_raw_dates_memo: dict[str, pd.DatetimeIndex] = {}
+
+
+def _raw_nav_dates(code: str) -> pd.DatetimeIndex:
+    """这只基金**真正公布过净值**的日子（不做 ffill）。每次重跑重新取，别跨重跑缓存：拉完新净值就过期。"""
+    if code not in _raw_dates_memo:
+        try:
+            s = HG.nav_series(code)
+            _raw_dates_memo[code] = pd.DatetimeIndex(s.dropna().index) if len(s) else pd.DatetimeIndex([])
+        except Exception:  # noqa: BLE001 - 取不到就当没净值，不挡账户重放
+            _raw_dates_memo[code] = pd.DatetimeIndex([])
+    return _raw_dates_memo[code]
+
+
+def _replay_holdings(trades, capital, created, by_day: dict | None = None):
     """按份额记账重放成交，得到日度净值/持仓/成本/现金。
 
     与 allweather.sim_account.replay 的差别：
     - 持仓以**基金代码**为键（原来以策略资产 key 为键，换基金就记不进去）；
     - 买入/卖出按份额 × 单位净值成交（场外基金的口径）；
     - 净值 = (持仓市值 + 现金) / units，转入转出按当时净值折算份额，不虚增收益。
+
+    ``by_day``：传一个空 dict 进来，就顺手把「每天每只基金赚了多少」填进去 ——
+    ``{日期: {代码: (收益元, 收益率%, ""/"待更新"/"无净值", 买入/卖出/清仓/"")}}``，
+    给收益日历点开某一天看明细用。
+    单只当天收益 = 收盘市值 − 昨收市值 − 当天净买入（买入含手续费、卖出扣手续费），
+    所以各只加起来**恰好**等于日历格子里那天的「总资产变化 − 转入转出」，两边对得上账。
     """
     idx = _hg_panel.index[_hg_panel.index >= pd.Timestamp(created)] if len(_hg_panel) else pd.DatetimeIndex([])
     if len(idx) == 0:
@@ -1975,7 +1995,9 @@ def _replay_holdings(trades, capital, created):
         sub = col.loc[:pd.Timestamp(day)]
         return float(sub.iloc[-1]) if len(sub) else None
 
+    prev_mv: dict[str, float] = {}          # 昨收：每只基金的市值
     for d in idx:
+        flow: dict[str, float] = {}         # 当天每只基金的净买入（买入为正、卖出回款为负）
         for t in buckets.get(d, []):
             code = str(t.get("code", "") or "")
             sh = float(t.get("shares", 0) or 0)
@@ -1986,6 +2008,7 @@ def _replay_holdings(trades, capital, created):
                 if px <= 0:
                     px = _nav_at(code, d) or 0
                 cash -= sh * px + fee
+                flow[code] = flow.get(code, 0.0) + sh * px + fee
                 prev = pos.get(code, 0.0)
                 cost[code] = ((prev * cost.get(code, 0.0) + sh * px + fee) / (prev + sh)) if (prev + sh) > 0 else px
                 pos[code] = prev + sh
@@ -1993,6 +2016,7 @@ def _replay_holdings(trades, capital, created):
                 if px <= 0:
                     px = _nav_at(code, d) or 0
                 cash += sh * px - fee
+                flow[code] = flow.get(code, 0.0) - (sh * px - fee)
                 pos[code] = pos.get(code, 0.0) - sh
                 if pos[code] <= 1e-9:
                     pos.pop(code, None)
@@ -2006,10 +2030,32 @@ def _replay_holdings(trades, capital, created):
                 units = max(1e-9, units - sh / base)
                 cash -= sh
         mv = 0.0
+        cur_mv: dict[str, float] = {}
         for code, sh in pos.items():
             v = _nav_at(code, d)
             if v:
                 mv += sh * v
+                cur_mv[code] = sh * v
+        if by_day is not None:
+            day: dict[str, tuple] = {}
+            for code in set(prev_mv) | set(cur_mv) | set(flow):
+                if code in pos and code not in cur_mv:
+                    continue                # 有份额却没净值：算不出来就不编
+                a, b, f = prev_mv.get(code, 0.0), cur_mv.get(code, 0.0), flow.get(code, 0.0)
+                pnl = b - a - f
+                # 收益率的分母 = 昨收市值 + 今天新投进去的钱（卖出不加：钱是出去的）
+                base = a + max(f, 0.0)
+                # 当天这只有没有**自己的**净值：得看原始序列 —— `_hg_panel` 做过 ffill，
+                # 拿它判断永远「有」，场外基金净值没拉到时会冒充「今天 0.00」
+                raw = _raw_nav_dates(code)
+                state = ("" if d in raw else
+                         "待更新" if (not len(raw) or d > raw[-1]) else "无净值")
+                # 当天动过这只：买入 / 卖出 / 卖光（清仓）—— 明细里打个标签，免得「怎么多了一行」
+                act = ("" if abs(f) < 1e-9 else "买入" if f > 0
+                       else ("清仓" if code not in pos else "卖出"))
+                day[code] = (pnl, (pnl / base * 100) if base > 0 else None, state, act)
+            by_day[d] = day
+        prev_mv = cur_mv
         eq = cash + mv
         nav = eq / units if units > 0 else 1.0
         last_nav = nav
@@ -2057,8 +2103,11 @@ _ASSET_LABEL = {a: f"{ETF_META.get(a, {}).get('name', a)} ({ETF_META.get(a, {}).
                 for a in _ACCT_ASSETS}
 
 # 账户重放结果（按份额记账）：我的持仓 / 帮你算 / 收益对比 / 持仓详情共用
+# _acct_by_day：每天每只基金的收益（收益日历点开某天的「当日收益明细」）
+_acct_by_day: dict = {}
 _acct_daily, _acct_pos, _acct_cost, _acct_cash, _acct_units = (
-    _replay_holdings(acct.get("trades", []), acct.get("capital", 0), acct.get("created"))
+    _replay_holdings(acct.get("trades", []), acct.get("capital", 0), acct.get("created"),
+                     by_day=_acct_by_day)
     if acct else (pd.DataFrame(), {}, {}, 0.0, 0.0)
 )
 # 代码 → 第一笔成交日（每次重跑重算，别用模块级缓存：录一笔新成交后缓存就过期了）
@@ -2357,7 +2406,52 @@ def _acct_calendar_payload():
     day = d["equity"].astype(float).diff() - fl
     if len(day):
         day.iloc[0] = float("nan")          # 第一天没有「昨天」可比，不编一个 0 出来
-    return _calendar_payload(d["nav"].astype(float), money=day)
+    out = _calendar_payload(d["nav"].astype(float), money=day)
+    if out is not None:
+        out.update(_acct_day_detail(d.index[1:]))
+    return out
+
+
+def _acct_day_detail(days) -> dict:
+    """收益日历「当日收益明细」：选中那天，每只持仓赚了多少钱、涨了百分之几。
+
+    和支付宝「收益明细」那页同一个意思。数据来自 `_replay_holdings` 顺手记下的 `_acct_by_day`，
+    各只加起来等于格子里那天的金额（同一次重放、同一个口径，不另算一遍）。
+
+    返回 ``{"funds": [[代码, 名称, 位置], ...], "detail": {"2026/10/28": [[序号, 元, %, 状态, 动作], ...]}}``，
+    状态：``""`` 正常 / ``"待更新"`` 这只的净值还没拉到这一天 / ``"无净值"`` 前后都有、偏偏这天没有（休市）。
+    基金名单单独一张表、明细里只放序号 —— 一年 250 天 × 十几只，重复写名字会把组件撑大好几倍。
+    """
+    if not _acct_by_day:
+        return {}
+    meta: dict[str, tuple[str, str]] = {}
+    for it in _plan.get("rows", []):
+        c = str(it.get("code") or "")
+        if c and c not in meta:              # 一只挂两个位置：按第一个位置报，和持仓页 first-win 一致
+            meta[c] = (str(it["f"].get("name") or FL.fund_name(c) or c),
+                       HG.SLOT_LABEL.get(it.get("slot"), it.get("slot") or ""))
+    funds: list[list] = []
+    pos_of: dict[str, int] = {}
+    detail: dict[str, list] = {}
+    for d in days:
+        rows = _acct_by_day.get(d) or {}
+        if not rows:
+            continue
+        out = []
+        for c, (pnl, pct, state, act) in rows.items():
+            if c not in pos_of:
+                nm, sl = meta.get(c) or (FL.fund_name(c) or c, "已不在配置里")
+                pos_of[c] = len(funds)
+                funds.append([c, nm, sl])
+            # 当天没自己的净值：钱是 0、可也不是「平盘」，标出来别冒充没涨没跌。
+            # 但那天买卖过它就照实报数 —— 场内成交价和收盘价的差是真金白银
+            if act:
+                state = ""
+            out.append([pos_of[c], round(float(pnl), 2),
+                        None if pct is None or not np.isfinite(pct) else round(float(pct), 4),
+                        state, act])
+        detail[f"{d:%Y/%m/%d}"] = out
+    return {"funds": funds, "detail": detail}
 
 
 def _acct_trend_payload():
@@ -3499,6 +3593,35 @@ _CAL_CSS = r"""
 #pick{min-width:128px;text-align:center;text-align-last:center}
 #summary{border-top:1px solid #E2E8F0;margin-top:16px;padding-top:12px}
 .sum-k{font-weight:600;color:#0F172A}
+/* 点开某一天：这一天每只持仓各赚了多少（支付宝「当日收益明细」）。只有账户页有数据才出现 */
+.cal-cell.pick{cursor:pointer}
+.cal-cell.pick:hover{border-color:#CBD5E1}
+.cal-cell.sel{border-color:#0F172A;box-shadow:inset 0 0 0 1px #0F172A}
+#detail{margin-top:18px;border-top:1px solid #E2E8F0;padding-top:14px}
+#detail:empty{display:none}
+.dt-h{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px}
+.dt-h .t{font-size:15px;font-weight:600;color:#0F172A}
+.dt-h .d{font-size:12px;color:#94A3B8;font-variant-numeric:tabular-nums}
+.dt-h .tot{font-size:13px;color:#475569;font-variant-numeric:tabular-nums}
+.dt-h .tot b{font-weight:600;margin-left:4px}
+.dt-h .sp{flex:1}
+.dt-h button{border:1px solid #E2E8F0;background:#fff;border-radius:10px;height:30px;padding:0 10px;
+  font-size:12px;color:#475569;cursor:pointer;display:inline-flex;align-items:center;gap:4px}
+.dt-h button:hover{border-color:#CBD5E1;color:#0F172A}
+.dt-row{display:flex;align-items:center;gap:12px;padding:12px 2px;border-bottom:1px solid #F1F5F9}
+.dt-row:last-child{border-bottom:0}
+.dt-row .l{flex:1;min-width:0}
+.dt-row .n{font-size:14px;color:#0F172A;line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dt-row .s{font-size:11.5px;color:#94A3B8;margin-top:3px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.dt-row .tag{font-size:11px;padding:1px 6px;border-radius:5px;background:#EFF6FF;color:#2563EB}
+.dt-row .tag.b{background:#FEF2F2;color:#C52828}.dt-row .tag.x{background:#F0FDF4;color:#16703B}
+.dt-row .tag.c{background:#F1F5F9;color:#475569}
+.dt-row .r{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.dt-row .m{font-size:15px;font-weight:600}
+.dt-row .p{font-size:12px;margin-top:2px}
+.dt-row .up{color:#C52828}.dt-row .down{color:#16703B}.dt-row .flat{color:#475569}
+.dt-row .wait{font-size:13px;color:#94A3B8}
+.dt-empty{font-size:13px;color:#94A3B8;padding:10px 2px}
 @media(max-width:560px){.cal-cell{min-height:52px;padding:6px}.cal-cell .v{font-size:12px}#pick{min-width:110px}}
 """
 
@@ -3583,6 +3706,7 @@ __CAL_CSS__
 </div><div id="nav" class="nav"><button id="prev" aria-label="上一期"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M7.5 3l-3 3 3 3"/></svg></button><select id="pick" aria-label="选择期间"></select><button id="next" aria-label="下一期"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M4.5 3l3 3-3 3"/></svg></button></div></div>
 <div id="grid" class="cal-grid"></div>
 <div id="summary" class="amp-row"></div>
+<div id="detail"></div>
 </div>
 <script>
 (() => {
@@ -3613,7 +3737,9 @@ __CAL_CSS__
   const cell = (k, v, mx, extra = '', sub = '', title = '', m) => {
     // 不到一块钱算平盘：净值折出来的钱带分位噪声，别让「+¥0」看着像赚了
     const mm = ok(m) && Math.abs(m) < .5 ? 0 : m;
-    return `<div class="cal-cell ${cls(v)} ${extra}" style="${heat(v, mx)}" title="${title}">`
+    // 能点开看明细的日格子带上 data-day（就是 title 里那串日期）
+    const dd = /\bpick\b/.test(extra) ? ` data-day="${title}"` : '';
+    return `<div class="cal-cell ${cls(v)} ${extra}"${dd} style="${heat(v, mx)}" title="${title}">`
       + `<span class="k">${k}${sub ? `<small>${sub}</small>` : ''}</span>`
       + `<span class="v">${pct(v)}</span>`
       + (ok(m) ? `<span class="mv">${money(mm)}</span>` : '') + '</div>';
@@ -3624,6 +3750,54 @@ __CAL_CSS__
   const mItem = (k, v) => HASM && ok(v) ? `<span>${k}</span><b style="color:${color(v)}">${money(v)}</b>` : '';
   const sumM = obj => { const ks = Object.keys(obj); return ks.length ? ks.reduce((a, k) => a + (ok(obj[k]) ? obj[k] : 0), 0) : null; };
   const cnt = (k, n, u) => `<span>${k}</span><b>${n} ${u}</b>`;
+  // ---- 当日收益明细：点日历上的某一天，列出那天每只持仓赚了多少 ----
+  const DET = D.detail || {}, FUNDS = D.funds || [], HASD = Object.keys(DET).length > 0;
+  const detail = document.getElementById('detail');
+  const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const yuan = v => !ok(v) ? '—' : (v > 0 ? '+' : v < 0 ? '-' : '')
+    + Math.abs(v).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const sgn = v => !ok(v) || Math.abs(v) < .005 ? 'flat' : (v > 0 ? 'up' : 'down');
+  let sel = null, desc = true;
+  // 这个月里最近一天有明细的日子：换月时默认选它（和支付宝打开就停在「今」一样）
+  const lastIn = (y, m) => Object.keys(DET).filter(k => k.startsWith(`${y}/${p2(m)}/`)).sort().pop() || null;
+  function renderDetail() {
+    if (!HASD || mode !== '日') { detail.innerHTML = ''; return; }
+    grid.querySelectorAll('.cal-cell.sel').forEach(e => e.classList.remove('sel'));
+    if (!sel || !DET[sel]) {
+      detail.innerHTML = '<div class="dt-h"><span class="t">当日收益明细</span></div>'
+        + '<div class="dt-empty">这个月账户还没有持仓收益，点有数字的那天看明细</div>';
+      return;
+    }
+    const c = grid.querySelector(`.cal-cell[data-day="${sel}"]`);
+    if (c) c.classList.add('sel');
+    const rows = DET[sel].map(([i, m, p, st, act]) => ({ f: FUNDS[i] || ['', '?', ''], m, p, st, act }));
+    // 有数的按盈亏排，待更新 / 无净值的沉底（支付宝也是这么放）
+    rows.sort((a, b) => (!!a.st - !!b.st) || (desc ? b.m - a.m : a.m - b.m));
+    // 合计把每一行都加上：和日历格子里那天的金额同一个数（重放时就是这么拆的）
+    const tot = rows.reduce((s, r) => s + (ok(r.m) ? r.m : 0), 0);
+    const actCls = { '买入': 'b', '卖出': 'x', '清仓': 'c' };
+    detail.innerHTML =
+      '<div class="dt-h"><span class="t">当日收益明细</span>'
+      + `<span class="d">（${sel}）</span><span class="sp"></span>`
+      + `<span class="tot">合计<b class="${sgn(tot)}" style="color:${color(tot)}">${yuan(tot)}</b></span>`
+      + `<button id="dt-sort" title="按当天赚的钱排序">盈亏排序 ${desc ? '↓' : '↑'}</button></div>`
+      + rows.map(r => '<div class="dt-row"><div class="l">'
+        + `<div class="n" title="${esc(r.f[1])}">${esc(r.f[1])}</div>`
+        + `<div class="s"><span>${esc(r.f[0])}</span>`
+        + (r.f[2] ? `<span class="tag">${esc(r.f[2])}</span>` : '')
+        + (r.act ? `<span class="tag ${actCls[r.act] || ''}">${esc(r.act)}</span>` : '')
+        + '</div></div><div class="r">'
+        + (r.st ? `<div class="wait">${esc(r.st)}</div>`
+          : `<div class="m ${sgn(r.m)}">${yuan(r.m)}</div>`
+            + `<div class="p ${sgn(r.m)}">${ok(r.p) ? pct(r.p) : '—'}</div>`)
+        + '</div></div>').join('');
+    document.getElementById('dt-sort').onclick = () => { desc = !desc; renderDetail(); };
+  }
+  grid.addEventListener('click', e => {
+    const c = e.target.closest('.cal-cell.pick');
+    if (!c) return;
+    sel = c.dataset.day; renderDetail();
+  });
   function fillPick() {
     if (mode === '年') { nav.style.visibility = 'hidden'; return; }
     nav.style.visibility = 'visible';
@@ -3658,9 +3832,12 @@ __CAL_CSS__
           + '<div class="cal-cell pad"></div>'.repeat(first);
         for (let d = 1; d <= nd; d++) {
           const key = `${y}/${p2(m)}/${p2(d)}`;
-          html += cell(String(d), D.day[key], mx, key === D.today ? 'today' : '', '', key,
+          html += cell(String(d), D.day[key], mx,
+                       (key === D.today ? 'today' : '') + (DET[key] ? ' pick' : ''), '', key,
                        MDAY[key]);
         }
+        // 选中的那天不在这个月（刚翻月 / 第一次打开）：停在这个月最近有明细的一天
+        if (HASD && (!sel || !sel.startsWith(`${y}/${p2(m)}/`))) sel = lastIn(y, m);
         grid.style.gridTemplateColumns = 'repeat(7,minmax(0,1fr))';
         // 当月赚的钱 = 这个月每一格的「钱」加起来
         const mk = Object.keys(MDAY).filter(k => k.startsWith(`${y}/${p2(m)}/`));
@@ -3710,7 +3887,7 @@ __CAL_CSS__
         + cnt('下跌', got.filter(t => t[1] < 0).length, '年')
         + (best ? item(`最好 ${best[0]}年`, best[1]) + item(`最差 ${worst[0]}年`, worst[1]) : '');
     }
-    grid.innerHTML = html; sum.innerHTML = s; fit();
+    grid.innerHTML = html; sum.innerHTML = s; renderDetail(); fit();
   }
   function fit() {}   // 高度由 st.iframe(height="content") 自动测量，组件内不再改 iframe 尺寸
   render();
