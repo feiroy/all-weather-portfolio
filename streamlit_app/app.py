@@ -6508,12 +6508,18 @@ def _custom_portfolio_panel():
         nv = _fixed_weight_backtest(rets, w[picked], freq[1])
         m = perf_metrics(nv, rets=nv.pct_change().dropna())
 
+        nv_rets = nv.pct_change().dropna()
+        m = perf_metrics(nv, rets=nv_rets)
+        m["ann_vol"] = float(nv_rets.std() * np.sqrt(252))  # perf_metrics 无此键，单独补
+
         bench_nv = None
+        bm = {}
         if compare:
             from allweather.pipeline import run_strategy_backtest
             res = run_strategy_backtest(rets, "V3-B 风险平价")
             bench_nv = res.nv
             bm = perf_metrics(bench_nv, rets=bench_nv.pct_change().dropna())
+            bm["ann_vol"] = float(bench_nv.pct_change().dropna().std() * np.sqrt(252))
 
         cols = st.columns(5)
         for c, label, key in zip(cols, ["年化收益", "最大回撤", "夏普", "卡玛", "年化波动"],
@@ -6521,7 +6527,10 @@ def _custom_portfolio_panel():
             v = m.get(key)
             is_ratio = key in ("sharpe", "calmar")
             delta = None
-            if bench_nv is not None and key in bm:
+            if v is None:
+                c.metric(label, "—")
+                continue
+            if bench_nv is not None and bm.get(key) is not None:
                 delta = f"{v - bm[key]:+.2f}" if is_ratio else f"{(v - bm[key]) * 100:+.2f}pp"
             c.metric(label, f"{v:.2f}" if is_ratio else f"{v:.2%}", delta)
         st.caption(f"期末净值 {nv.iloc[-1]:.3f} · 区间 {nv.index[0]:%Y/%m/%d} → {nv.index[-1]:%Y/%m/%d}")
