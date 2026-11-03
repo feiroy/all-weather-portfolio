@@ -67,9 +67,30 @@ def _fetch_idx_em(sym):
 
 
 def _fetch_etf_nav(code, start, end):
-    """策略用：累计净值（LJJZ）序列，列 date/close。口径沿用历史回测，不在此改动。"""
+    """策略用：累计净值（LJJZ）序列，列 date/close。口径沿用历史回测，不在此改动。
+
+    例外见 `_NAV_FIELD`：个别基金的 LJJZ 不能当收益序列用，改取单位净值。
+    """
     df = _fetch_etf_nav_full(code, start, end)
-    return df[["date", "close"]] if not df.empty else pd.DataFrame(columns=["date", "close"])
+    if df.empty:
+        return pd.DataFrame(columns=["date", "close"])
+    field = _NAV_FIELD.get(str(code))
+    if field:
+        df = df.loc[df["date"] >= pd.Timestamp(field[1])].copy()
+        df["close"] = df[field[0]]
+    return df[["date", "close"]]
+
+
+# 个别基金不能用 LJJZ 当收益序列：代码 -> (改用的列, 从哪天起)
+#
+# 511360 短融ETF：2020-08-28 上市前做过 1:100 份额折算 —— 单位净值从 1.0008 跳到 100.0832，
+# 东财的 LJJZ 却停在折算前的 1.x 口径、只给 4 位小数（1.1412）。精度 0.009%，
+# 比它一天的波动（0.001%–0.003%）还粗，一多半日子会变成 0、再隔几天跳一格。
+# 折算之后从没分过红（单位净值 / LJJZ 恒为 100），单位净值就是全收益，从折算日起用它。
+# 也正是这个口径差，让增量拉取撞上「偏离 -99%」被拒（老数据是 ~114 的场内收盘价）。
+_NAV_FIELD = {
+    "511360": ("unit_nav", "2020-08-28"),
+}
 
 
 def _fetch_etf_nav_full(code, start, end):
@@ -436,14 +457,32 @@ def update_nav_detail(force: bool = False, end: str | None = None):
             continue
         path = NAV_DETAIL_DIR / f"{name}.csv"
         old = pd.read_csv(path, parse_dates=["date"]) if path.exists() and not force else None
-        start = DEFAULT_START if old is None or old.empty else (old["date"].max() + pd.Timedelta(days=1)).strftime("%Y%m%d")
-        if pd.Timestamp(start) > pd.Timestamp(end):
+        # 增量从「已有最后一天」起拉（含这一天），多出来的这一行用来对口径，见下
+        start = DEFAULT_START if old is None or old.empty else old["date"].max().strftime("%Y%m%d")
+        if old is not None and not old.empty and old["date"].max() >= pd.Timestamp(end):
             continue
         try:
             df = _fetch_etf_nav_full(sym, start, end)
             if df.empty:
                 continue
             df = df.rename(columns={"close": "acc_nav"})[["date", "unit_nav", "acc_nav", "daily_chg"]]
+            # 口径闸：接口给的「已有最后一天」必须和本地存的同一个数，否则老数据和新数据不是一个来源。
+            # 不能像 fetch_all 那样看首值跳了多少 —— 单位净值碰上份额拆分 / 折算本来就会跳
+            # （hs300 2012、gold 2020、us_sp500 2022 都跳过 >15%），按跳幅拦会把真拆分永远卡住。
+            # 511360 就是反例：老数据是场内收盘价 114.124，接口那天的净值是 114.1075，一对就露馅。
+            if old is not None and not old.empty:
+                _d0 = old["date"].max()
+                _mine = pd.to_numeric(old.loc[old["date"] == _d0, "unit_nav"], errors="coerce").iloc[-1]
+                _api = df.loc[df["date"] == _d0, "unit_nav"]
+                # 本地这行本来就是从同一个接口抄下来的，4 位小数应当一模一样，差半个末位就算不一致。
+                # 别用相对阈值：511360 折溢价中位才 0.0073%，收盘价冒充净值的日子用 1e-4 也拦不住
+                if len(_api) and _mine > 0 and abs(float(_api.iloc[0]) - float(_mine)) > 5e-5:
+                    errs.append(f"{name} 净值明细: {_d0:%Y-%m-%d} 本地 {float(_mine):.4f} ≠ 接口 {float(_api.iloc[0]):.4f}，"
+                                "老数据口径不一致，已拒绝写入（用 force=True 全量重建）")
+                    continue
+                df = df[df["date"] > _d0]
+                if df.empty:
+                    continue
             out = df if old is None or old.empty else pd.concat([old, df], ignore_index=True)
             out = out.drop_duplicates(subset="date", keep="last").sort_values("date")
             out["date"] = pd.to_datetime(out["date"]).dt.strftime("%Y-%m-%d")
