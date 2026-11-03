@@ -378,6 +378,8 @@ hr{ border-color:var(--line); margin:1.6rem 0; }
 .pf-badge.sell{ background:#F0FDF4; color:var(--green); border-color:#BBF7D0; }
 .pf-badge.hold{ background:var(--bg); color:var(--muted); border-color:var(--line); font-weight:500; }
 .pf-badge.warn{ background:#FFFBEB; color:var(--amber); border-color:#FDE68A; font-weight:500; }
+/* 清仓：这笔卖出后份额归零，和「卖出 ¥683」那种减仓不是一回事，灰底贴在做卖标记后面 */
+.pf-badge.close{ background:#F1F5F9; color:#475569; border-color:#E2E8F0; font-weight:500; margin-left:5px; }
 
 /* 调仓页顶部的结论条：这一轮该不该动、买多少卖多少，一行说完 */
 .pf-summary{
@@ -1754,13 +1756,6 @@ strat_key = st.sidebar.radio(
     format_func=lambda k: _strat_display[k],
     label_visibility="collapsed",
 )
-st.sidebar.markdown('<div class="sb-label">现金档位</div>', unsafe_allow_html=True)
-tier = st.sidebar.radio(
-    "现金档位",
-    ["100", "85", "70"],
-    format_func=lambda t: f"{t}% RP",
-    label_visibility="collapsed",
-)
 st.sidebar.markdown('<div class="sb-divider"></div>', unsafe_allow_html=True)
 
 def _fetch_everything():
@@ -1909,7 +1904,11 @@ if missing:
     st.error(f"缺少数据: {missing}")
     st.stop()
 
-cash_ratio = 1 - int(tier) / 100
+# 现金档位（100% / 85% / 70% RP）已经从侧边栏撤掉：`compute_target_weights` 乘上
+# (1-cash_ratio) 之后，`apply_signal_overrides` 末尾 `w / w.sum()` 又归一化回 1.0，
+# 三档算出来的目标权重一模一样（实测最大差 0.00e+00），只有页头那行字在变 —— 一个假开关。
+# 三档对比本身仍有意义（证明降杠杆不改善 Sharpe：V3c 1.58/1.58/1.58），留在回测报告里。
+cash_ratio = 0.0
 
 # ============================================================
 # 计算权重
@@ -2271,6 +2270,7 @@ def _hg_plan() -> dict:
             diff = (tgt * it["x"] - it["mv"]) if moved else 0.0
             _floor = _min_order(tgt * it["x"])       # 这只基金目标金额的 5%
             side, qty, amt, note = "", 0.0, 0.0, ""
+            liq = False      # 这一笔卖出会不会把份额卖光 —— 清仓和减仓是两回事，要单独标
             if it["px"] <= 0:
                 note = "缺净值"
             elif it["dup"]:
@@ -2289,8 +2289,11 @@ def _hg_plan() -> dict:
                     side, buy_total = "买入", buy_total + amt
                 else:
                     side, sell_total = "卖出", sell_total + amt
+                    # 卖出量 ≥ 手上份额 = 清仓。留着 0.1% 的余量给场外「金额÷净值」的舍入，
+                    # 但场内卖不掉的零股（份额不是整手）不算清仓 —— 那确实还剩几股在账上
+                    liq = bool(it["shares"] > 0 and qty >= it["shares"] * (1 - 1e-9))
             it.update({"slot": s, "side": side, "qty": qty, "amount": amt, "note": note,
-                       "otc": HG.is_otc(f),
+                       "liq": liq, "otc": HG.is_otc(f),
                        "w_now": (0.0 if it["dup"] else it["mv"] / asset) if asset else 0.0,
                        "w_tgt": tgt_w * it["x"],
                        # 位置级偏离只在该位置首行有意义，同位置其余行留 0 不显示
@@ -2300,7 +2303,7 @@ def _hg_plan() -> dict:
             if side:
                 orders.append({"date": _hg_last.strftime("%Y-%m-%d"), "slot": s, "code": it["code"],
                                "side": side, "shares": round(float(qty), 4),
-                               "nav": round(it["px"], 4), "fee": 0.0})
+                               "nav": round(it["px"], 4), "fee": 0.0, "liq": liq})
                 by_code[it["code"]] = {"side": side, "amount": amt, "qty": qty}
             rows.append(it)
     # 不在启用位置里、但账上还留着份额的代码：占着总资产却不在目标权重里
@@ -2344,10 +2347,18 @@ def _plan_status() -> dict:
 
     「没有单」不等于「没偏离」：中间还隔着整手取整、缺净值、重复计入三种「算出来但下不了手」。
     两处页面各写一遍判断迟早会分叉，所以只留这一份。
+
+    orders 里另带 `liq` / `liq_amt`：这一轮有几笔是把份额卖光的（清仓），金额多少。
+    清仓和减仓在清单上原本长得一样，只有这一处先把它们分开数。
     """
     if _plan["orders"]:
+        # 清仓要单独数一眼：一轮清单里混进一两笔「全卖」，和十几笔微调完全是两种性质的操作
+        _liq = [o for o in _plan["orders"] if o.get("liq")]
         return {"kind": "orders", "n": len(_plan["orders"]),
-                "buy": float(_plan["buy"]), "sell": float(_plan["sell"])}
+                "buy": float(_plan["buy"]), "sell": float(_plan["sell"]),
+                "liq": len(_liq),
+                "liq_amt": sum(float(o.get("shares") or 0) * float(o.get("nav") or 0)
+                               for o in _liq)}
     _over = [it for it in _plan["rows"]
              if it.get("slot_first") and abs(it.get("dev") or 0) >= 0.005]
     if not _over:
@@ -2576,9 +2587,17 @@ def _pf_badge_parts(it: dict, with_qty: bool = False) -> tuple[str, str]:
 
 
 def _pf_badge(it: dict, with_qty: bool = False) -> str:
-    """买卖标记 —— 一行只看最右就知道这一轮该买还是该卖。"""
+    """买卖标记 —— 一行只看最右就知道这一轮该买还是该卖。
+
+    把份额卖光的那些再挂一个「清仓」：清单上「卖出 ¥121,975 · 900 股」和「卖出 ¥683 · 457 份」
+    长得一模一样，只有拿份额去比才知道前者是把 10Y 整个清掉。清仓是一次性决定
+    （这个位置还要不要），减仓只是把比例压回来，两件事不该共用一种标法。
+    """
     text, cls = _pf_badge_parts(it, with_qty)
-    return f'<span class="pf-badge {cls}">{text}</span>'
+    out = f'<span class="pf-badge {cls}">{text}</span>'
+    if it.get("liq"):
+        out += '<span class="pf-badge close">清仓</span>'
+    return out
 
 
 def _pf_state_parts(it: dict) -> tuple[str, str]:
@@ -4430,7 +4449,7 @@ with _hero_cols[0]:
         f"""<div class="hero">
           <div>
             <div class="hero-title">全天候再平衡</div>
-            <div class="hero-sub">数据截止 {_cn_date(last_date)} · {cfg['name']} · {tier}% 风险平价</div>
+            <div class="hero-sub">数据截止 {_cn_date(last_date)} · {cfg['name']}</div>
           </div>
         </div>""",
         unsafe_allow_html=True,
@@ -4947,7 +4966,7 @@ with tab2:
         "下一半是**我实际挂的基金**——这就是你在支付宝里买的那几只。"
         "平时只看不动；换基金、加基金、开关位置都在页底展开里。"
     )
-    st.markdown(f"**目标权重 · {cfg['name']} — {tier}% RP**")
+    st.markdown(f"**目标权重 · {cfg['name']}**")
 
     rows = []
     for a in cfg["assets"]:
@@ -5259,7 +5278,8 @@ with tab3:
         if _st["kind"] == "orders":
             st.markdown(
                 '<div class="todo-bar"><span class="lead">该动手了</span>'
-                f'<span>有 {_st["n"]} 笔要下</span>'
+                f'<span>有 {_st["n"]} 笔要下'
+                + (f'，其中 {_st["liq"]} 笔是清仓' if _st.get("liq") else '') + '</span>'
                 '<span class="go">清单在「帮你算 · 存量调仓」→</span></div>',
                 unsafe_allow_html=True)
         elif _st["kind"] == "stuck":
@@ -5408,7 +5428,9 @@ def _calc_rebalance() -> None:
                 f'<span class="lead">这一轮要动 {_st["n"]} 笔</span>'
                 f'<span class="item">买入<b class="buy">¥{_st["buy"]:,.0f}</b></span>'
                 f'<span class="item">卖出<b class="sell">¥{_st["sell"]:,.0f}</b></span>'
-                f'<span class="item">调仓基数 ¥{_plan["asset"]:,.0f}</span>'
+                + (f'<span class="item">其中清仓 {_st["liq"]} 笔'
+                   f'<b class="sell">¥{_st["liq_amt"]:,.0f}</b></span>' if _st.get("liq") else '')
+                + f'<span class="item">调仓基数 ¥{_plan["asset"]:,.0f}</span>'
                 '</div>',
                 unsafe_allow_html=True,
             )
