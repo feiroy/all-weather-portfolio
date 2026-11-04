@@ -297,21 +297,27 @@ hr{ border-color:var(--line); margin:1.6rem 0; }
 .pf-head .pf-grid .v.up{ color:#FCA5A5; }    /* 蓝底上用浅红/浅绿，保持红涨绿跌语义 */
 .pf-head .pf-grid .v.down{ color:#86EFAC; }
 /* 头卡上半：左总金额、右月度小柱图（窄屏换行到下面） */
-.pf-head .pf-top{ display:flex; justify-content:space-between; align-items:flex-end; gap:16px 28px; flex-wrap:wrap; }
-.pf-curve{ width:300px; max-width:100%; cursor:default; }
-.pf-ch{ display:flex; align-items:baseline; justify-content:flex-end; gap:8px; font-size:11.5px; }
-.pf-ch span{ opacity:.78; }
+/* 有曲线时：左「金额 + 四个指标」、右曲线占满整高 —— 原来曲线和金额并排在上半截，
+   曲线比金额块高，左上角空出一行 */
+.pf-head.has-curve{ display:grid; grid-template-columns:minmax(0,1fr) minmax(300px,400px); gap:18px 30px; align-items:stretch; }
+.pf-head.has-curve .pf-grid{ grid-template-columns:repeat(2,minmax(0,1fr)); row-gap:12px; }
+@media(min-width:1180px){ .pf-head.has-curve .pf-grid{ grid-template-columns:repeat(4,minmax(0,1fr)); } }
+.pf-curve{ min-width:0; display:flex; flex-direction:column; padding-left:22px;
+  border-left:1px solid rgba(255,255,255,.18); }
+.pf-ch{ display:flex; align-items:baseline; gap:8px; font-size:11.5px; flex-wrap:wrap; }
+.pf-ch span{ opacity:.8; }
 .pf-ch b{ font-size:16px; font-weight:700; font-variant-numeric:tabular-nums; letter-spacing:-.3px; }
 .pf-ch b.pos{ color:#FCA5A5; } .pf-ch b.neg{ color:#86EFAC; } .pf-ch b.flat{ color:#fff; }
 .pf-ch .m{ font-variant-numeric:tabular-nums; }
-.pf-cv{ position:relative; height:74px; margin-top:6px; }
+.pf-ch .r{ margin-left:auto; font-size:10.5px; opacity:.6; font-variant-numeric:tabular-nums; }
+.pf-cv{ flex:1; margin-top:6px; min-height:140px; }
 .pf-cv svg{ display:block; width:100%; height:100%; overflow:visible; }
-.pf-cv .dot{ position:absolute; width:8px; height:8px; margin:-4px 0 0 -4px; border-radius:50%;
-  border:2px solid #1E40AF; box-shadow:0 0 0 3px rgba(255,255,255,.18); }
-.pf-cv .dot.pos{ background:#FCA5A5; } .pf-cv .dot.neg{ background:#86EFAC; } .pf-cv .dot.flat{ background:#fff; }
-.pf-cd{ display:flex; justify-content:space-between; font-size:10.5px; opacity:.62; margin-top:3px;
-  font-variant-numeric:tabular-nums; }
-@media(max-width:640px){ .pf-curve{ width:100%; } .pf-ch{ justify-content:flex-start; } }
+.pf-cv svg .ax text{ font-size:10px; fill:rgba(255,255,255,.62); font-variant-numeric:tabular-nums; }
+.pf-cv svg rect:hover{ fill:rgba(255,255,255,.06); }
+@media(max-width:900px){
+  .pf-head.has-curve{ grid-template-columns:1fr; }
+  .pf-curve{ padding-left:0; border-left:0; border-top:1px solid rgba(255,255,255,.18); padding-top:12px; }
+}
 /* 现金那格多一个小占比：¥12,714 单放着既看不出是多是少，也不知道该不该管 */
 .pf-head .pf-grid .v .s{ font-size:11.5px; font-weight:500; opacity:.72; margin-left:7px }
 /* 头卡下面那一行：这一轮要不要动手、动手去哪看。只说「有没有事」，金额一律留在「帮你算」 */
@@ -5317,13 +5323,23 @@ def _acct_health_view() -> None:
     st.caption("".join(_tail))
 
 
-def _head_month_curve_html() -> str:
-    """头卡右侧：近一个月的累计收益曲线 —— 不用点进「收益」就看得到最近这一个月怎么走的。
+def _nice_ticks(lo: float, hi: float, want: int = 4) -> list[float]:
+    """纵轴刻度：取 0.05/0.1/0.2/0.25/0.5/1/2/5 … 里让刻度数最接近 want 的步长，并且一定包含 0。"""
+    span = max(hi - lo, 1e-6)
+    steps = [b * 10 ** e for e in range(-2, 3) for b in (1, 2, 2.5, 5)]
+    step = min(steps, key=lambda x: abs(span / x - want))
+    k0, k1 = int(np.floor(lo / step)), int(np.ceil(hi / step))
+    return [round(k * step, 6) for k in range(k0, k1 + 1)]
 
-    起点 = 一个月前那天收盘（记 0），之后每天：
+
+def _head_month_curve_html() -> str:
+    """头卡右侧：近一个月累计收益率走势，带横纵坐标 —— 不用点进「收益」就看得到最近一个月怎么走的。
+
+    起点 = 一个月前最后一个交易日（记 0），之后每天：
       收益率 = nav / 起点 nav − 1（账户净值已扣掉转入转出）
-      收益额 = 累计收益(元) − 起点累计收益（同「收益」页走势下面那条线的口径）
-    账户还不到一个月就从建仓日画起。线色跟着区间涨跌走：涨浅红、跌浅绿（蓝底上的红涨绿跌）。
+      收益额 = 累计收益(元) − 起点累计收益
+    纵轴 = 收益率（%），刻度含 0、0% 那条加粗；横轴 = 日期，取 5 个左右等距刻度。
+    每个交易日一条透明竖条，悬停给「日期 收益率 · 金额」。线色跟区间涨跌：涨浅红、跌浅绿。
     """
     if acct is None or len(_acct_daily) < 2:
         return ""
@@ -5334,41 +5350,65 @@ def _head_month_curve_html() -> str:
     end = nav.index[-1]
     i0 = int(nav.index.searchsorted(end - pd.DateOffset(months=1), side="right")) - 1
     i0 = max(0, min(i0, len(nav) - 2))
-    seg, pseg = nav.iloc[i0:], pnl.iloc[i0:]
+    seg, pseg = nav.iloc[i0:], pnl.iloc[i0:].ffill().fillna(0.0)
     ret = (seg / float(seg.iloc[0]) - 1) * 100
-    money = float(pseg.iloc[-1] - pseg.iloc[0]) if pseg.notna().all() else 0.0
-    last = float(ret.iloc[-1])
-    W, H, PX, PY = 300, 74, 4, 8
-    lo, hi = min(0.0, float(ret.min())), max(0.0, float(ret.max()))
-    span = (hi - lo) or 1e-6
+    mon = pseg - float(pseg.iloc[0])
+    last, money = float(ret.iloc[-1]), float(mon.iloc[-1])
+
+    W, H = 400, 168
+    L, R, T, B = 46, 10, 10, 22                      # 左边留给纵轴刻度，底下留给日期
+    pw, ph = W - L - R, H - T - B
+    ticks = _nice_ticks(min(0.0, float(ret.min())), max(0.0, float(ret.max())))
+    lo, hi = ticks[0], ticks[-1]
     n = len(ret)
-    xs = [PX + (W - 2 * PX) * k / (n - 1) for k in range(n)]
-    ys = [PY + (H - 2 * PY) * (hi - float(v)) / span for v in ret]
-    y0 = PY + (H - 2 * PY) * hi / span                     # 0% 那条线
-    line = " ".join(f"{x:.1f},{y:.1f}" for x, y in zip(xs, ys))
-    area = f"{xs[0]:.1f},{y0:.1f} {line} {xs[-1]:.1f},{y0:.1f}"
+    X = lambda k: L + pw * k / (n - 1)
+    Y = lambda v: T + ph * (hi - v) / ((hi - lo) or 1e-6)
+    xs, ys = [X(k) for k in range(n)], [Y(float(v)) for v in ret]
     cls = "pos" if last >= 0.005 else ("neg" if last <= -0.005 else "flat")
     col = {"pos": "#FCA5A5", "neg": "#86EFAC", "flat": "#E2E8F0"}[cls]
-    svg = (f'<svg viewBox="0 0 {W} {H}" preserveAspectRatio="none" aria-hidden="true">'
+    # 小数位跟着步长走：步长 0.25 就得两位，按区间宽度定会把 −0.75 写成 −0.8
+    _st = (ticks[1] - ticks[0]) if len(ticks) > 1 else 1.0
+    _dec = next((d for d in range(0, 4) if abs(round(_st, d) - _st) < 1e-9), 3)
+    g = []
+    for v in ticks:                                   # 纵轴：网格线 + 刻度
+        y = Y(v)
+        z = abs(v) < 1e-9
+        g.append(f'<line x1="{L}" x2="{W - R}" y1="{y:.1f}" y2="{y:.1f}" '
+                 f'stroke="rgba(255,255,255,{".42" if z else ".12"})"'
+                 f'{"" if z else " stroke-dasharray=\"2 3\""}/>')
+        g.append(f'<text x="{L - 7}" y="{y + 3.5:.1f}" text-anchor="end">'
+                 f'{"0" if z else f"{v:+.{_dec}f}"}%</text>')
+    _xi = sorted({round(k * (n - 1) / 4) for k in range(5)})   # 横轴：5 个等距日期
+    for k in _xi:
+        d = ret.index[k]
+        anc = "start" if k == 0 else ("end" if k == n - 1 else "middle")
+        g.append(f'<line x1="{xs[k]:.1f}" x2="{xs[k]:.1f}" y1="{H - B}" y2="{H - B + 4}" '
+                 'stroke="rgba(255,255,255,.35)"/>')
+        g.append(f'<text x="{xs[k]:.1f}" y="{H - 5}" text-anchor="{anc}">{d.month}/{d.day}</text>')
+    line = " ".join(f"{x:.1f},{y:.1f}" for x, y in zip(xs, ys))
+    y0 = Y(0.0)
+    area = f"{xs[0]:.1f},{y0:.1f} {line} {xs[-1]:.1f},{y0:.1f}"
+    bw = pw / max(n - 1, 1)
+    hov = "".join(                                   # 悬停：每个交易日一条透明竖条
+        f'<rect x="{x - bw / 2:.1f}" y="{T}" width="{bw:.1f}" height="{ph}" fill="transparent">'
+        f'<title>{d:%Y/%m/%d}　{_pf_num(float(r), 2)}% · {_pf_num(float(m), 0)} 元</title></rect>'
+        for x, d, r, m in zip(xs, ret.index, ret, mon))
+    svg = (f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="近一个月收益走势">'
            f'<defs><linearGradient id="pfmg" x1="0" x2="0" y1="0" y2="1">'
-           f'<stop offset="0" stop-color="{col}" stop-opacity=".38"/>'
+           f'<stop offset="0" stop-color="{col}" stop-opacity=".34"/>'
            f'<stop offset="1" stop-color="{col}" stop-opacity="0"/></linearGradient></defs>'
-           f'<line x1="0" x2="{W}" y1="{y0:.1f}" y2="{y0:.1f}" stroke="rgba(255,255,255,.28)" '
-           f'stroke-dasharray="3 3" vector-effect="non-scaling-stroke"/>'
+           f'<g class="ax">{"".join(g)}</g>'
+           f'<line x1="{L}" x2="{W - R}" y1="{H - B}" y2="{H - B}" stroke="rgba(255,255,255,.3)"/>'
            f'<polygon points="{area}" fill="url(#pfmg)"/>'
            f'<polyline points="{line}" fill="none" stroke="{col}" stroke-width="2" '
-           f'stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>'
-           '</svg>')
-    d0, d1 = seg.index[0], seg.index[-1]
-    return ('<div class="pf-curve" title="'
-            f'{_cn_date(d0)} → {_cn_date(d1)}：{_pf_num(last, 2)}% · {_pf_num(money, 2)} 元'
-            '（起点记 0，已扣除转入转出）">'
-            f'<div class="pf-ch"><span>近一个月</span><b class="{cls}">{_pf_num(last, 2)}%</b>'
-            f'<span class="m">{_pf_num(money, 0)} 元</span></div>'
-            f'<div class="pf-cv">{svg}<i class="dot {cls}" style="left:{xs[-1] / W * 100:.2f}%;'
-            f'top:{ys[-1] / H * 100:.2f}%"></i></div>'
-            f'<div class="pf-cd"><span>{d0.month}/{d0.day}</span><span>{d1.month}/{d1.day}</span></div>'
-            '</div>')
+           'stroke-linejoin="round" stroke-linecap="round"/>'
+           f'<circle cx="{xs[-1]:.1f}" cy="{ys[-1]:.1f}" r="3.6" fill="{col}" stroke="#1E40AF" stroke-width="2"/>'
+           f'{hov}</svg>')
+    return ('<div class="pf-curve">'
+            f'<div class="pf-ch"><span>近一个月收益</span><b class="{cls}">{_pf_num(last, 2)}%</b>'
+            f'<span class="m">{_pf_num(money, 0)} 元</span>'
+            f'<span class="r">{_cn_date(seg.index[0])} → {_cn_date(seg.index[-1])}</span></div>'
+            f'<div class="pf-cv">{svg}</div></div>')
 
 
 # ============================================================
@@ -5385,15 +5425,19 @@ with tab3:
     _n_funds = len([r for r in _plan["rows"] if r["shares"] > 0]) + len(_plan["other"])
     _head_sub = (f"账户起始 {_cn_date(acct['created'])} · 净值日期 {_cn_date(_hg_last)} · {_n_funds} 只基金"
                  if acct else "还没有账户")
+    _curve = _head_month_curve_html()
+    _prev_tot = _tot - float(_plan["today"])
+    _today_pct = (float(_plan["today"]) / _prev_tot * 100) if _prev_tot > 0 else 0.0
     st.markdown(
-        '<div class="pf-head"><div class="pf-top"><div>'
+        f'<div class="pf-head{" has-curve" if _curve else ""}"><div class="pf-main">'
         '<div class="pf-k">总金额（元）</div>'
         f'<div class="pf-amt">¥{_tot:,.2f}</div>'
         f'<div class="pf-sub">{_head_sub}</div>'
-        f'</div>{_head_month_curve_html()}</div>'
         '<div class="pf-grid">'
+        # 今日收益带上收益率：分母 = 昨收总资产（今天总资产 − 今天赚的）
         f'<div><div class="k">今日收益</div><div class="v {_pf_sign(_plan["today"])}">'
-        f'{_pf_num(_plan["today"], 2)}</div></div>'
+        f'{_pf_num(_plan["today"], 2)}'
+        f'<span class="s">{_pf_num(_today_pct, 2)}%</span></div></div>'
         f'<div><div class="k">持有收益</div><div class="v {_pf_sign(_plan["pnl"])}">'
         f'{_pf_num(_plan["pnl"], 2)}</div></div>'
         f'<div><div class="k">持有收益率</div><div class="v {_pf_sign(_plan["pnl_pct"])}">'
@@ -5404,7 +5448,8 @@ with tab3:
         f'<div class="k">现金</div><div class="v">¥{_plan["cash"]:,.0f}'
         f'<span class="s">{(_plan["cash"] / _tot * 100) if _tot else 0:.1f}%</span>'
         '</div></div>'
-        '</div></div>',
+        f'</div></div>{_curve}'
+        '</div>',
         unsafe_allow_html=True,
     )
 
