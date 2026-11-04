@@ -75,6 +75,40 @@ class HoldingsConfig(unittest.TestCase):
         out = HG.slot_weights(w, h)
         self.assertAlmostEqual(out["hs300"], 0.5)
 
+    def test_slot_weights_unplaced_asset_goes_to_same_bucket(self):
+        """B-RP 的短融没有位置：20% 只能并进同桶的信用债，不能摊到股票、黄金上。"""
+        h = make_holdings()
+        w = {"hs300": .2, "us_sp500": .1, "credit": .2, "bond_short": .2,
+             "bond_30y": .2, "gold": .05, "nonferr": .0, "wti": .05}
+        out = HG.slot_weights(w, h)
+        self.assertAlmostEqual(out["credit"], .4)
+        self.assertAlmostEqual(out["hs300"], .2)       # 别的位置一分不多
+        self.assertAlmostEqual(out["bond_10y"], 0.0)   # 策略没有 10Y：目标就是 0
+        self.assertAlmostEqual(sum(out.values()), 1.0)
+
+    def test_slot_weights_closed_slot_goes_to_same_bucket(self):
+        h = make_holdings()
+        h["wti"]["on"] = False
+        w = {"hs300": .3, "us_sp500": .1, "credit": .3, "bond_10y": .1,
+             "bond_30y": .0, "gold": .1, "nonferr": .0, "wti": .1}
+        out = HG.slot_weights(w, h)
+        self.assertAlmostEqual(out["gold"], .2)        # 原油那 10% 给同桶的黄金
+        self.assertAlmostEqual(out["nonferr"], 0.0)    # 有色被趋势过滤清成 0，不能借此复活
+        self.assertAlmostEqual(out["hs300"], .3)
+
+    def test_slot_weights_bucket_cannot_absorb_falls_back_global(self):
+        h = make_holdings()
+        h["wti"]["on"] = False
+        w = {"hs300": .5, "credit": .4, "wti": .1}      # 通胀桶全是 0，接不住
+        out = HG.slot_weights(w, h)
+        self.assertAlmostEqual(sum(out.values()), 1.0)
+        self.assertAlmostEqual(out["hs300"] / out["credit"], .5 / .4)
+
+    def test_unplaced_assets_describes_destination(self):
+        h = make_holdings()
+        w = {"credit": .3, "bond_short": .2, "hs300": .5}
+        self.assertIn("收益垫", HG.unplaced_assets(w, h)["bond_short"])
+
     def test_every_slot_has_a_bucket(self):
         for s in HG.SLOTS:
             self.assertIn(s, HG.SLOT_BUCKET)

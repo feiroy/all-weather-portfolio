@@ -179,7 +179,7 @@ def compute_target_weights(strat_key, prices, cash_ratio=0.0):
     return w * (1 - cash_ratio)
 
 
-def apply_signal_overrides(strat_key, w, signals, prices=None):
+def apply_signal_overrides(strat_key, w, signals, prices=None, persist=True):
     """按策略应用各风控措施到目标权重。
 
     Args:
@@ -187,9 +187,13 @@ def apply_signal_overrides(strat_key, w, signals, prices=None):
         w: 目标权重 Series
         signals: 信号状态 dict
         prices: 价格 DataFrame（可选，用于 boost 状态判断）
+        persist: True（命令行月度调仓）读写 rebalance_state，同月只 boost 一次；
+            False（网页）纯函数：不读不写状态，满足条件就 boost。网页每次重绘都从头算 w，
+            不存在「叠加两次」；反倒是读了状态，同月第二次打开页面 boost 就凭空消失了，
+            而且一次算三个策略会把另外两个也标成「本月已 boost」。
     """
     w = w.copy()
-    state = _load_rebalance_state()
+    state = _load_rebalance_state() if persist else {}
     strat_state = state.setdefault(strat_key, {"gold_boost_month": None, "hs300_boost_month": None})
     this_month = prices.index[-1].strftime("%Y-%m") if prices is not None else None
 
@@ -228,7 +232,8 @@ def apply_signal_overrides(strat_key, w, signals, prices=None):
     elif hs300_already_boosted:
         pass  # 本月已 boost，跳过
 
-    _save_rebalance_state(state)
+    if persist:
+        _save_rebalance_state(state)
     return w / w.sum()  # renormalize to 1.0
 
 

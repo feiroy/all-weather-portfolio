@@ -14,7 +14,6 @@ import streamlit as st
 import pandas as pd
 from datetime import date
 import numpy as np
-import altair as alt
 
 from allweather.rebalance import (
     compute_signal_states,
@@ -397,6 +396,16 @@ hr{ border-color:var(--line); margin:1.6rem 0; }
 .pf-summary .lead b{ font-size:16px; font-variant-numeric:tabular-nums; }
 .pf-summary.quiet{ border-left-color:var(--line-strong); }
 
+/* 换账户策略：当前说明 + 换之前的后果预览（琥珀边：提醒，不是报错） */
+.sw-note{ font-size:13px; color:var(--sub); padding:0 0 9px; line-height:1.6; }
+.sw-preview{ background:#FFFBEB; border:1px solid #FDE68A; border-left:4px solid var(--amber);
+  border-radius:12px; padding:12px 16px; margin:4px 0 10px; font-size:13px; color:var(--sub); line-height:1.75; }
+.sw-preview .h{ font-weight:650; color:var(--ink); font-size:14px; margin-bottom:2px; }
+.sw-preview b{ color:var(--ink); }
+.sw-preview b.sell{ color:var(--green); }
+/* 目标权重表：信号改过的格子下面一行小字 */
+.wnote{ font-size:11.5px; color:var(--amber); font-weight:500; }
+
 /* ========== 按钮 ========== */
 .stButton>button, .stDownloadButton>button{
   border-radius:10px; border:1px solid var(--line); font-weight:500; font-size:14px;
@@ -457,6 +466,10 @@ div[data-testid="stAlert"] p{ color:var(--brand-strong); }
 }
 .sb-brand .mark svg{ width:18px; height:18px; }
 .sb-label{ font-size:11px; color:var(--muted); letter-spacing:1px; margin:20px 0 5px; text-transform:uppercase; }
+/* 账户跟随的策略：只读展示，换策略在「权重与选基」（要先看预览，不能一点就换） */
+.sb-strat{ font-size:14.5px; font-weight:650; color:var(--ink); padding:9px 12px; border-radius:10px;
+  background:#EEF2FF; border:1px solid #DBE3FB; }
+.sb-hint{ font-size:11.5px; color:var(--muted); margin:6px 2px 0; }
 .sb-divider{ border-top:1px solid var(--line); margin:18px 0 12px; }
 /* 数据拉取失败提示 */
 .sb-fetch-err{
@@ -1573,38 +1586,6 @@ __RANGE_BTNS__
             .replace("__CHART_DATA__", payload))
 
 
-def _sparkline(series, height=58):
-    """迷你净值走势（无坐标轴）。"""
-    if series is None or len(series) < 2:
-        return None
-    d = series.tail(120).rename("nav").reset_index()
-    d.columns = ["date", "nav"]
-    base = d["nav"].iloc[0]
-    d["ret"] = d["nav"] / base - 1
-    color = _UP if d["ret"].iloc[-1] >= 0 else _DOWN
-    area = (
-        alt.Chart(d)
-        .mark_area(
-            line={"color": color, "strokeWidth": 2},
-            color=alt.Gradient(
-                gradient="linear",
-                stops=[
-                    alt.GradientStop(color="rgba(255,255,255,0)", offset=0),
-                    alt.GradientStop(color=color, offset=1),
-                ],
-                x1=1, x2=1, y1=1, y2=0,
-            ),
-            opacity=0.18,
-        )
-        .encode(
-            x=alt.X("date:T", axis=None),
-            y=alt.Y("ret:Q", axis=None, scale=alt.Scale(zero=False)),
-        )
-        .properties(height=height)
-    )
-    return area
-
-
 def _render_table(columns, rows, totals=None, min_width=None):
     """渲染 HTML 表格。columns: [(标题, 对齐)]，rows: list[list[str]]。
 
@@ -1749,13 +1730,21 @@ st.sidebar.markdown(
 )
 
 _strat_display = {"B-Con": "V3-B 保守增强", "B-RP": "V3-B 风险平价", "V3c": "V3c 多元"}
-st.sidebar.markdown('<div class="sb-label">策略</div>', unsafe_allow_html=True)
-strat_key = st.sidebar.radio(
-    "策略",
-    ["B-Con", "B-RP", "V3c"],
-    format_func=lambda k: _strat_display[k],
-    label_visibility="collapsed",
-)
+_STRAT_KEYS = ["B-Con", "B-RP", "V3c"]
+
+# 账户跟随的策略 —— 全站唯一来源，存在账户文件里。
+# 原来侧边栏有个三选一，刷新回默认、不落盘，账户里另存一个 strategy 只给对比页用：
+# 两个字段各说各的（账户存 V3c、持仓按 B-Con 配、侧边栏默认 B-Con），
+# 误点一下清单就从「12 笔卖 5.7 万」变成「14 笔卖 20.3 万含 3 笔清仓」，还没有任何提示。
+# 现在：跟账户有关的一切只读这里；换策略到「权重与选基」，先看预览再确认写盘；
+# 只想看别的策略长什么样，「模型 · 信号 / 回测」和目标权重表三个策略本来就并排摆着。
+ACCT_FILE = DATA_DIR / "sim_account.json"
+acct = load_acct(ACCT_FILE)
+strat_key = (acct or {}).get("strategy") if (acct or {}).get("strategy") in _STRAT_KEYS else "B-Con"
+st.sidebar.markdown('<div class="sb-label">账户跟随</div>'
+                    f'<div class="sb-strat">{_strat_display[strat_key]}</div>'
+                    '<div class="sb-hint">在「权重与选基」里换</div>',
+                    unsafe_allow_html=True)
 st.sidebar.markdown('<div class="sb-divider"></div>', unsafe_allow_html=True)
 
 def _fetch_everything():
@@ -1899,7 +1888,7 @@ prices, signals = _load_prices_and_signals()
 last_date = prices.index[-1].strftime("%Y-%m-%d")
 st.sidebar.caption(f"数据截止：{_cn_date(last_date)}")
 
-missing = [a for a in STRATEGIES[strat_key]["assets"] if a not in prices.columns]
+missing = sorted({a for k in _STRAT_KEYS for a in STRATEGIES[k]["assets"] if a not in prices.columns})
 if missing:
     st.error(f"缺少数据: {missing}")
     st.stop()
@@ -1913,8 +1902,13 @@ cash_ratio = 0.0
 # ============================================================
 # 计算权重
 # ============================================================
-w0 = compute_target_weights(strat_key, prices, cash_ratio)
-w = apply_signal_overrides(strat_key, w0, signals, prices)
+# 三个策略一次算完：账户只用其中一个，但「权重与选基」的目标权重表、换策略预览、
+# 「模型 · 信号」都是三个并排看。persist=False → 纯函数，不碰 rebalance_state。
+_W0_ALL = {k: compute_target_weights(k, prices, cash_ratio) for k in _STRAT_KEYS}
+_W_ALL = {k: apply_signal_overrides(k, _W0_ALL[k], signals, prices, persist=False)
+          for k in _STRAT_KEYS}
+w0 = _W0_ALL[strat_key]
+w = _W_ALL[strat_key]
 cfg = STRATEGIES[strat_key]
 
 # ============================================================
@@ -2090,8 +2084,7 @@ def _replay_holdings(trades, capital, created, by_day: dict | None = None):
 
 
 _hg_panel = HG.nav_panel(holdings)
-ACCT_FILE = DATA_DIR / "sim_account.json"
-acct = load_acct(ACCT_FILE)
+# ACCT_FILE / acct 已在侧边栏处加载：账户策略决定目标权重，得在算权重之前读到
 
 
 def _migrate_trades(a: dict) -> bool:
@@ -2219,8 +2212,10 @@ def _min_order(tgt_amt: float) -> float:
     return max(1.0, abs(tgt_amt) * 0.05)
 
 
-def _hg_plan() -> dict:
+def _hg_plan(tgt_by_slot: dict | None = None) -> dict:
     """按策略目标权重算「该买多少 / 该卖多少」—— 全站唯一一份调仓计划。
+
+    tgt_by_slot：换一套位置目标权重算（「权重与选基」换策略前的预览），缺省用账户跟随的策略。
 
     「我的账户」的持仓表、「帮你算」的两份清单都读这一份，
     两处不再各算一遍，避免数字对不上。
@@ -2239,7 +2234,8 @@ def _hg_plan() -> dict:
         funds = HG.funds(holdings[s])
         if not funds:
             continue
-        tgt_w = float(_hg_w.get(s, 0) or 0)
+        # 别叫 slot_w：循环里下面就有个 slot_w（位置当前权重），第二轮会被覆盖成 float
+        tgt_w = float((_hg_w if tgt_by_slot is None else tgt_by_slot).get(s, 0) or 0)
         tgt = tgt_w * asset
         items = []
         for f, x in zip(funds, HG.share_of(holdings[s])):
@@ -4449,7 +4445,7 @@ with _hero_cols[0]:
         f"""<div class="hero">
           <div>
             <div class="hero-title">全天候再平衡</div>
-            <div class="hero-sub">数据截止 {_cn_date(last_date)} · {cfg['name']}</div>
+            <div class="hero-sub">数据截止 {_cn_date(last_date)} · 账户跟随 {cfg['name']}</div>
           </div>
         </div>""",
         unsafe_allow_html=True,
@@ -4559,7 +4555,7 @@ def _alerts_compute() -> dict:
         _bd = BM.replay_target(w, acct.get("created"), nav_getter=HG.nav_series)
         if len(_bd) > 1:
             _bench["项目默认基金"] = _bd
-        _bs = BM.strategy_curve(_BENCH_COL.get(acct.get("strategy"), ""), start=acct.get("created"))
+        _bs = BM.strategy_curve(_BENCH_COL.get(strat_key, ""), start=acct.get("created"))
         if _bs is not None and len(_bs) > 1:
             _bench["策略理论"] = _bs
 
@@ -4811,72 +4807,44 @@ tab3, tab5, tab_calc, tab7, tab2, tab1, tab8, tab10 = st.tabs(
 with tab1:
     st.caption("这一页是**项目自带策略模型**算出来的信号（估值分位、宏观季节、趋势过滤），"
                "跟你自己买了什么无关；你的钱这一轮该不该动，看「帮你算」页。")
-    # 策略净值迷你走势归入仪表盘内，不再占据首页顶部
-    _bench_full = _bench_curve(strat_key)
-    if _bench_full is not None and len(_bench_full) > 30:
-        _seg = _bench_full.tail(120)
-        _seg_ret = float(_seg.iloc[-1] / _seg.iloc[0] - 1)
-        with st.container(border=True):
-            _c_sp, _c_meta = st.columns([4.2, 1], vertical_alignment="center")
-            with _c_sp:
-                st.markdown(
-                    f'<div class="mini-title">策略净值 · {_strat_display[strat_key]} · 近 120 个交易日</div>',
-                    unsafe_allow_html=True,
-                )
-                st.altair_chart(_sparkline(_seg, height=72))
-            with _c_meta:
-                st.metric("区间涨跌", f"{_seg_ret*100:+.2f}%")
-                st.caption(f"{_seg.index[0]:%Y/%m/%d} → {_seg.index[-1]:%Y/%m/%d}")
-    triggered = []
-    calm = []
-    not_applicable = []
+    # ---- ① 三个策略的回测净值同图：原来只画侧边栏选的那一条，现在并排 ----
+    _bm = {_strat_display[k]: c for k in _STRAT_KEYS
+           if (c := _bench_curve(k)) is not None and len(c) > 30}
+    if _bm:
+        st.iframe(_compare_chart_html(_bm, height=300, default_range="近6月",
+                                      title="三个策略的回测净值", pct_mode=True), height="content")
 
+    # ---- ② 信号 × 策略矩阵：一个信号对三个策略各是什么状态，一张表看完 ----
+    # 原来按侧边栏策略分「已触发 / 未触发 / 不适用」三段，换个策略整页重排；
+    # 账户跟的那个策略单独数一句，其余照实摆。
+    _acc_hit = [sa for sa in SIGNAL_ACTIONS
+                if sa["condition"](signals) and strat_key in sa["strategies"]]
+    _head = (f'账户跟随的 <b>{_strat_display[strat_key]}</b>：'
+             + (f'这一轮有 <b>{len(_acc_hit)}</b> 个信号生效' if _acc_hit else '这一轮没有信号生效'))
+    st.markdown('<div class="sec-head"><span class="t">信号 · 三个策略各自生不生效</span>'
+                f'<span class="r">{_head}</span></div>', unsafe_allow_html=True)
+    _srows = []
     for sa in SIGNAL_ACTIONS:
-        active = sa["condition"](signals)
-        applies = strat_key in sa["strategies"]
-        if active and applies:
-            triggered.append(sa)
-        elif not applies:
-            not_applicable.append(sa)
-        else:
-            calm.append(sa)
-
-    if triggered:
-        st.subheader(f"已触发信号 · {len(triggered)} 项")
-        cards = "".join(
-            f'<div class="sig"><div class="main">'
-            f'<div class="t">{sa["desc"]}</div><div class="m">{sa["type"]}</div></div>'
-            f'<div class="side"><b>卖出</b>{sa["sell"]}</div>'
-            f'<div class="side"><b>买入</b>{sa["buy"]}</div></div>'
-            for sa in triggered
-        )
-        st.markdown(cards, unsafe_allow_html=True)
-    else:
-        st.markdown(
-            '<div class="sig calm"><div class="main">'
-            '<div class="t">当前无触发信号</div>'
-            '<div class="m">所有资产按目标权重正常配置，月末检查即可</div>'
-            '</div></div>',
-            unsafe_allow_html=True,
-        )
-
-    with st.expander(f"未触发信号（{len(calm)} 项，适用本策略）"):
-        if calm:
-            st.markdown("".join(
-                f'<div class="sig off"><div class="main"><div class="t">{sa["desc"]}</div>'
-                f'<div class="m">{sa["type"]}</div></div></div>' for sa in calm
-            ), unsafe_allow_html=True)
-        else:
-            st.caption("无")
-
-    with st.expander(f"不适用本策略（{len(not_applicable)} 项）"):
-        if not_applicable:
-            st.markdown("".join(
-                f'<div class="sig off"><div class="main"><div class="t">{sa["desc"]}</div>'
-                f'<div class="m">{sa["type"]}</div></div></div>' for sa in not_applicable
-            ), unsafe_allow_html=True)
-        else:
-            st.caption("无")
+        _on = bool(sa["condition"](signals))
+        _row = [f'{sa["desc"]}<br><span class="muted">{sa["type"]} · 卖 {sa["sell"]} → 买 {sa["buy"]}</span>',
+                ('<span class="pf-badge warn">触发</span>' if _on
+                 else '<span class="pf-badge hold">未触发</span>')]
+        for k in _STRAT_KEYS:
+            if k not in sa["strategies"]:
+                _row.append('<span class="muted">不适用</span>')
+            elif _on:
+                _row.append('<span class="pf-badge sell">生效</span>')
+            else:
+                _row.append('<span class="muted">—</span>')
+        _srows.append(_row)
+    _render_table([("信号", "left"), ("市场状态", "left")]
+                  + [(_strat_display[k] + (" · 账户" if k == strat_key else ""), "left")
+                     for k in _STRAT_KEYS],
+                  _srows, min_width=860)
+    st.markdown('<div class="sec-note">「触发」是市场状态（三个策略看的是同一份行情）；'
+                '「生效」是这个策略的规则里有这一条、而且这一轮用上了 —— 比如黄金、标普的趋势过滤，'
+                '保守增强回测否决过，所以对它「不适用」。生效的信号已经算进「权重与选基」的目标权重里。</div>',
+                unsafe_allow_html=True)
 
     st.divider()
     st.subheader("估值分位")
@@ -4959,51 +4927,124 @@ with tab1:
 # ============================================================
 # Tab 2: 权重与选基 —— 上半是策略给的目标权重，下半是我的基金配置
 # ============================================================
+def _weight_note(k: str, a: str) -> str:
+    """某策略下某资产这一轮被信号改了什么 —— 直接拿「改前 / 改后」两份权重比，不再手抄一遍规则。
+
+    原来按 strat_key 和 signals 再写一遍「B-RP/V3c 才有黄金过滤」，跟 apply_signal_overrides
+    是两份规则，改一处忘一处就会标错；比权重差值永远跟实际算出来的一致。
+    """
+    s0 = _W0_ALL[k]
+    s0 = s0 / s0.sum() if float(s0.sum()) > 0 else s0
+    b, f = float(s0.get(a, 0) or 0), float(_W_ALL[k].get(a, 0) or 0)
+    if b > 0 and f <= 1e-9:
+        return "趋势过滤 → 0"
+    if a == "hs300" and f > b * 1.05:
+        return "抄底加仓"
+    if f > b * 1.05 + 1e-4:
+        return f"接收 +{(f - b) * 100:.1f}pp"
+    return ""
+
+
+def _strategy_switch_panel() -> None:
+    """账户跟随哪个策略：选 → 预览后果 → 确认写盘。
+
+    这个选择决定「帮你算」整张清单，所以不能一点就生效：先把「会清掉哪些位置、
+    哪部分权重在你这儿没位置放、清单变成几笔、要卖多少」摆出来，确认了才写进账户。
+    """
+    if acct is None:
+        st.caption("还没建账户：建账户时在「交易记录」里选跟随的策略。")
+        return
+    _cur = strat_key
+    with st.container(key="strat_switch"):
+        _c1, _c2 = st.columns([1.2, 2.8], vertical_alignment="bottom")
+        _pick = _c1.selectbox("账户跟随的策略", _STRAT_KEYS, index=_STRAT_KEYS.index(_cur),
+                              format_func=lambda k: _strat_display[k] + ("（当前）" if k == _cur else ""),
+                              key="strat_pick")
+        if _pick == _cur:
+            _c2.markdown(
+                f'<div class="sw-note">「帮你算」、状态条、体检的偏离目标、对比页的两条基准，'
+                f'都按 <b>{_strat_display[_cur]}</b> 算。换策略前会先给预览。</div>',
+                unsafe_allow_html=True)
+            return
+        # ---- 预览：换过去之后这一轮的清单 ----
+        _sw = HG.slot_weights(_W_ALL[_pick], holdings)
+        _pv = _hg_plan(_sw)
+        _liq = [o for o in _pv["orders"] if o.get("liq")]
+        _liq_amt = sum(float(o["shares"]) * float(o["nav"]) for o in _liq)
+        _zero = [s for s in HG.active(holdings)
+                 if float(_sw.get(s, 0) or 0) <= 0 and s not in STRATEGIES[_pick]["assets"]]
+        _unp = HG.unplaced_assets(_W_ALL[_pick], holdings)
+        _lines = [
+            f'<b>这一轮清单</b>：{len(_plan["orders"])} 笔 → <b>{len(_pv["orders"])} 笔</b>，'
+            f'买 ¥{_pv["buy"]:,.0f} / 卖 ¥{_pv["sell"]:,.0f}'
+            + (f'，其中<b class="sell">清仓 {len(_liq)} 笔 ¥{_liq_amt:,.0f}</b>' if _liq else "")
+        ]
+        if _zero:
+            _lines.append("<b>资产池里没有</b>：" + "、".join(HG.SLOT_LABEL[s] for s in _zero)
+                          + " —— 这些位置目标是 0，手上的会进清单全部卖掉；不想卖就先在下面把位置关掉"
+                            "（关掉的位置不进调仓，份额留在账上）")
+        for _a, _to in _unp.items():
+            _lines.append(f'<b>你没有位置</b>：{ETF_META.get(_a, {}).get("name", _a)} '
+                          f'{float(_W_ALL[_pick].get(_a, 0)) * 100:.1f}% → {_to}')
+        if _liq:
+            _lines.append("清仓明细：" + "、".join(
+                f'{FL.fund_name(o["code"]) or o["code"]} ¥{float(o["shares"]) * float(o["nav"]):,.0f}'
+                for o in _liq))
+        st.markdown('<div class="sw-preview"><div class="h">换成 '
+                    f'{_strat_display[_pick]} 会怎样</div>'
+                    + "".join(f'<div class="l">{x}</div>' for x in _lines) + '</div>',
+                    unsafe_allow_html=True)
+        _b1, _b2, _ = st.columns([1.3, 1, 4])
+        if _b1.button(f"改为跟随 {_strat_display[_pick]}", type="primary", key="strat_apply"):
+            _a2 = dict(acct)
+            _a2["strategy"] = _pick
+            save_acct(_a2, ACCT_FILE)
+            st.session_state.pop("strat_pick", None)
+            st.toast(f"账户已改为跟随 {_strat_display[_pick]}", icon=":material/check_circle:")
+            st.rerun()
+        if _b2.button("不换了", key="strat_cancel"):
+            st.session_state.pop("strat_pick", None)
+            st.rerun()
+
+
 with tab2:
     st.subheader("权重与选基 · 每个位置该占多少、我拿哪只基金去实现")
     st.caption(
-        "上一半是**策略算的目标权重**（项目自带模型，跟你的账户无关）；"
-        "下一半是**我实际挂的基金**——这就是你在支付宝里买的那几只。"
-        "平时只看不动；换基金、加基金、开关位置都在页底展开里。"
+        "最上面是**账户跟随哪个策略**；中间是**三个策略各自算的目标权重**（并排看，不用切）；"
+        "下面是**我实际挂的基金**——就是你在支付宝里买的那几只。"
     )
-    st.markdown(f"**目标权重 · {cfg['name']}**")
+    _strategy_switch_panel()
 
-    rows = []
-    for a in cfg["assets"]:
+    # ---- 三个策略的目标权重并排：账户跟随的那列标出来 ----
+    _assets = [a for a in ETF_META if any(a in STRATEGIES[k]["assets"] for k in _STRAT_KEYS)]
+    _act = set(HG.active(holdings))
+    _wrows = []
+    for a in _assets:
         meta = ETF_META.get(a, {"code": "", "name": a})
-        pct = w.get(a, 0)
-        status_parts = []
-
-        if a == "nonferr" and signals.get("nonferr_below_sma75") and pct == 0:
-            status_parts.append("趋势过滤→已清仓")
-        if a == "gold" and strat_key in ("B-RP", "V3c") and signals.get("gold_below_sma75") and pct == 0:
-            status_parts.append("趋势过滤→已清仓")
-        if a == "us_sp500" and strat_key in ("B-RP", "V3c") and signals.get("sp500_below_sma75") and pct == 0:
-            status_parts.append("趋势过滤→已清仓")
-        if a == "hs300" and signals.get("hs300_dip_ready") and pct > 0:
-            status_parts.append("AND抄底×1.8")
-        if a == "credit":
-            incoming = []
-            if signals.get("nonferr_below_sma75"):
-                incoming.append("有色")
-            if strat_key in ("B-RP", "V3c") and signals.get("sp500_below_sma75"):
-                incoming.append("标普")
-            if strat_key in ("B-RP", "V3c") and signals.get("gold_below_sma75"):
-                incoming.append("黄金")
-            if incoming:
-                status_parts.append(f"接收{'/'.join(incoming)}")
-
-        rows.append({
-            "资产": meta["name"],
-            "代码": meta["code"],
-            "权重": f"{pct*100:.1f}%",
-            "状态": " / ".join(status_parts) if status_parts else "—",
-        })
-
-    st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
-
-    if any(signals.get(k, False) for k in ["nonferr_below_sma75", "gold_below_sma75", "sp500_below_sma75"]):
-        st.info("趋势过滤触发 → 对应资产已清仓，权重转入城投债ETF (511220)")
+        _mine = (HG.SLOT_LABEL.get(a, "") if a in _act
+                 else '<span class="muted">没有这个位置</span>')
+        _cells = []
+        for k in _STRAT_KEYS:
+            if a not in STRATEGIES[k]["assets"]:
+                _cells.append('<span class="muted">不在资产池</span>')
+                continue
+            _v = float(_W_ALL[k].get(a, 0) or 0)
+            _n = _weight_note(k, a)
+            _txt = f'{_v * 100:.1f}%'
+            if k == strat_key:
+                _txt = f'<b>{_txt}</b>'
+            _cells.append(_txt + (f'<br><span class="wnote">{_n}</span>' if _n else ""))
+        _wrows.append([f'{meta["name"]}<br><span class="muted">{meta["code"]}</span>', _mine] + _cells)
+    st.markdown('<div class="sec-head"><span class="t">目标权重 · 三个策略并排</span>'
+                f'<span class="r">粗体那列是账户在跟的（{_strat_display[strat_key]}）</span></div>',
+                unsafe_allow_html=True)
+    _render_table(
+        [("资产", "left"), ("我的位置", "left")]
+        + [(_strat_display[k] + (" · 账户" if k == strat_key else ""), "right") for k in _STRAT_KEYS],
+        _wrows, min_width=820)
+    st.markdown('<div class="sec-note">「趋势过滤 → 0」＝资产跌破均线，这一轮权重清零、转给城投债（「接收 +x pp」那格）；'
+                '「不在资产池」＝这个策略本来就不配它。资产池跟你 8 个位置对不上的部分怎么处理，'
+                '换策略时的预览里会写清楚。</div>', unsafe_allow_html=True)
 
     # ---- 下半：我的基金配置（原来挂在「我的持仓」页底，用户看不出它是干嘛的）----
     _slot_config_panel()
@@ -5066,17 +5107,18 @@ def _acct_compare_view() -> None:
     净值绝对值不能这么比：账户是「份额 × 净值 + 现金」除出来的、两个基准各自从 1.0 起，
     三条线本来就不同量纲，只有换算成 % 才有可比性。
     """
-    _acct_strat = _strat_display.get(acct.get("strategy"), acct.get("strategy") or "—") if acct else "—"
+    _acct_strat = _strat_display.get(strat_key, strat_key)
     st.markdown(
         '<div class="sec-head"><span class="t">对比 · 我的账户 vs 项目默认基金 vs 策略理论</span>'
         '<span class="r">都以建仓日为 0%，比的是收益率</span></div>',
         unsafe_allow_html=True,
     )
     st.caption(
-        "**项目默认基金**＝拿项目自带那 8 个代码、按你**此刻侧边栏选的策略**和同样的再平衡节奏重放一遍，"
+        f"两条基准都按账户跟随的策略（**{_acct_strat}**）算。"
+        "**项目默认基金**＝拿项目自带那 8 个代码、按同样的目标权重和再平衡节奏重放一遍，"
         "和它的差基本就是「换基金」带来的；"
-        f"**策略理论**＝账户**建仓时选的策略**（{_acct_strat}）的回测曲线，切侧边栏不会改它 —— "
-        "和它的差还含调仓时点、申赎费用，以及回测按累计净值、实盘按单位净值的口径差。"
+        "**策略理论**＝这个策略的回测曲线，和它的差还含调仓时点、申赎费用，"
+        "以及回测按累计净值、实盘按单位净值的口径差。"
     )
     _mine = _acct_daily["nav"].dropna() if (acct is not None and len(_acct_daily)) else pd.Series(dtype=float)
     if acct is None or len(_mine) <= 1:
@@ -5089,7 +5131,7 @@ def _acct_compare_view() -> None:
     if _bench_def is not None and len(_bench_def.dropna()) > 1:
         _bd = _bench_def.dropna()
         _curves["项目默认基金"] = _bd / float(_bd.iloc[0])
-    _bench_strat = BM.strategy_curve(_BENCH_COL.get(acct.get("strategy"), ""),
+    _bench_strat = BM.strategy_curve(_BENCH_COL.get(strat_key, ""),
                                      start=acct.get("created"))
     if _bench_strat is not None and len(_bench_strat.dropna()) > 1:
         _bs = _bench_strat.dropna()
@@ -5717,8 +5759,10 @@ with tab5:
         st.caption("账户就是一笔本金 + 一串成交记录；建完再逐笔补录（也可以在支付宝买完后回来补录）。")
         with st.container(key="tr_card"):
             c1, c2, c3 = st.columns(3, gap="small", vertical_alignment="bottom")
-            s_init = c1.selectbox("跟随策略", list(STRATEGIES),
-                                  format_func=lambda k: STRATEGIES[k]["name"])
+            # 默认保守增强：只有它的资产池跟 8 个位置一一对上（B-RP 有短融没 10Y、V3c 没 10Y）
+            s_init = c1.selectbox("跟随策略", _STRAT_KEYS, index=0,
+                                  format_func=lambda k: STRATEGIES[k]["name"],
+                                  help="决定「帮你算」按哪套目标权重给清单；建好后可在「权重与选基」里换（会先给预览）。")
             cap0 = c2.number_input("初始资金（元）", min_value=1000.0, value=500000.0,
                                    step=10000.0, format="%.0f")
             start0 = c3.date_input("起始日期", value=prices.index[-1].date())

@@ -294,10 +294,16 @@ def nav_panel(holdings: dict, ensure=False) -> pd.DataFrame:
 
 
 def slot_weights(w: dict, holdings: dict) -> dict[str, float]:
-    """策略权重（按资产 key）→ 按我启用的位置归一化。
+    """策略权重（按资产 key）→ 落到我启用的位置上，合计 1。
 
-    策略算出来的权重是 8 个资产位置的权重，和我持仓的位置是一一对应的，
-    直接取用；被我关掉的位置，其权重按比例分给同桶里还开着的位置。
+    策略资产和我的位置大多一一对应，直接取用。对不上的两种情况：
+    - 策略有、我没有位置（B-RP 的 bond_short）；
+    - 我有位置但关掉了 / 没挂基金。
+    这部分权重**先按比例分给同桶里还开着、且本身有目标的位置**（bond_short → credit），
+    同桶一个都接不住（都关了，或都被趋势过滤清成 0）才全局归一。
+
+    原来一律全局归一：B-RP 的短融 20% 被摊到股票、黄金上，算出来的已不是 B-RP。
+    同桶里目标为 0 的位置不接：那是趋势过滤刚清掉的，不能靠这条路把它复活。
     """
     if not isinstance(w, dict):
         w = dict(w)      # 调用方传进来的可能是 pandas Series
@@ -305,10 +311,39 @@ def slot_weights(w: dict, holdings: dict) -> dict[str, float]:
     if not act:
         return {}
     raw = {s: float(w.get(s, 0) or 0) for s in act}
+    for a, v in w.items():
+        v = float(v or 0)
+        if a in raw or v <= 0:
+            continue
+        mates = [s for s in act if SLOT_BUCKET.get(s) == SLOT_BUCKET.get(a, a) and raw[s] > 0]
+        base = sum(raw[s] for s in mates)
+        if base <= 0:
+            continue                         # 同桶接不住 → 留给下面的全局归一
+        for s in mates:
+            raw[s] += v * raw[s] / base
     total = sum(raw.values())
     if total <= 0:
         return {s: 0.0 for s in act}
     return {s: v / total for s, v in raw.items()}
+
+
+def unplaced_assets(w: dict, holdings: dict) -> dict[str, str]:
+    """策略里有权重、但在我这儿落不到同名位置上的资产 → 去向说明（换策略预览用）。
+
+    ``{"bond_short": "并入收益垫(信用债)"}`` / ``{"xxx": "同桶无位置，按比例摊给全部位置"}``
+    """
+    if not isinstance(w, dict):
+        w = dict(w)
+    act = active(holdings)
+    out: dict[str, str] = {}
+    for a, v in w.items():
+        if a in act or float(v or 0) <= 0:
+            continue
+        mates = [s for s in act if SLOT_BUCKET.get(s) == SLOT_BUCKET.get(a, a)
+                 and float(w.get(s, 0) or 0) > 0]
+        out[a] = ("并入" + "、".join(SLOT_LABEL.get(s, s) for s in mates)) if mates \
+            else "同桶无位置，按比例摊给全部位置"
+    return out
 
 
 def default_codes(holdings: dict) -> dict[str, str]:
