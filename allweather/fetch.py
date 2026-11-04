@@ -225,9 +225,19 @@ def fetch_one(name, kind, sym, start=DEFAULT_START, end=DEFAULT_END):
 
 
 def _fetch_idx_csindex(sym, start, end):
-    """中证指数官网历史行情（H11014 短融等），全量接口。"""
+    """中证指数官网历史行情（H11014 短融等），全量接口。
+
+    区间里一条数据都没有时（已是最新、当天还没收盘），akshare 不返回空表，而是给空结果
+    硬套 16 个列名，抛 ``ValueError: Length mismatch: Expected axis has 0 elements``。
+    这不是失败，是「没有新数据」—— 当成空表返回，让上层按「已最新」处理。
+    """
     import akshare as ak
-    df = ak.stock_zh_index_hist_csindex(symbol=sym, start_date=start, end_date=end)
+    try:
+        df = ak.stock_zh_index_hist_csindex(symbol=sym, start_date=start, end_date=end)
+    except ValueError as e:
+        if "Length mismatch" in str(e) and "0 elements" in str(e):
+            return pd.DataFrame(columns=["date", "close"])
+        raise
     df["date"] = pd.to_datetime(df["日期"])
     df["close"] = pd.to_numeric(df["收盘"], errors="coerce")
     df = df.dropna(subset=["date", "close"])

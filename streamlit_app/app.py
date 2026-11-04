@@ -296,6 +296,27 @@ hr{ border-color:var(--line); margin:1.6rem 0; }
 }
 .pf-head .pf-grid .v.up{ color:#FCA5A5; }    /* 蓝底上用浅红/浅绿，保持红涨绿跌语义 */
 .pf-head .pf-grid .v.down{ color:#86EFAC; }
+/* 头卡上半：左总金额、右月度小柱图（窄屏换行到下面） */
+.pf-head .pf-top{ display:flex; justify-content:space-between; align-items:flex-end; gap:16px 28px; flex-wrap:wrap; }
+.pf-months{ min-width:0; }
+.pf-mh{ font-size:11.5px; opacity:.78; margin-bottom:6px; text-align:right; }
+.pf-mbars{ display:flex; gap:6px; justify-content:flex-end; }
+.pf-mbars .mb{ display:flex; flex-direction:column; align-items:center; width:62px; padding:5px 0 4px;
+  border-radius:10px; background:rgba(255,255,255,.07); cursor:default; color:#fff; }
+.pf-mbars .mb:hover{ background:rgba(255,255,255,.14); }
+.pf-mbars .mv{ font-size:12px; font-weight:650; font-variant-numeric:tabular-nums; }
+.pf-mbars .bw{ position:relative; width:14px; height:56px; margin:3px 0; }
+.pf-mbars .bw::after{ content:''; position:absolute; left:-8px; right:-8px; top:50%; height:1px; background:rgba(255,255,255,.3); }
+.pf-mbars .bw i{ position:absolute; left:0; right:0; border-radius:3px; }
+.pf-mbars .pos .bw i{ bottom:50%; background:#FCA5A5; }
+.pf-mbars .neg .bw i{ top:50%; background:#86EFAC; }
+.pf-mbars .flat .bw i{ top:calc(50% - 1px); background:rgba(255,255,255,.5); }
+.pf-mbars .pos .mv{ color:#FCA5A5; } .pf-mbars .neg .mv{ color:#86EFAC; }
+.pf-mbars .live .bw i{ opacity:.6; }
+.pf-mbars .ml{ font-size:11px; opacity:.85; white-space:nowrap; }
+.pf-mbars .mm{ font-size:10.5px; opacity:.68; font-variant-numeric:tabular-nums; }
+@media(max-width:640px){ .pf-months{ width:100%; } .pf-mh{ text-align:left; } .pf-mbars{ justify-content:flex-start; }
+  .pf-mbars .mb{ flex:1; width:auto; } }
 /* 现金那格多一个小占比：¥12,714 单放着既看不出是多是少，也不知道该不该管 */
 .pf-head .pf-grid .v .s{ font-size:11.5px; font-weight:500; opacity:.72; margin-left:7px }
 /* 头卡下面那一行：这一轮要不要动手、动手去哪看。只说「有没有事」，金额一律留在「帮你算」 */
@@ -456,25 +477,43 @@ div[data-testid="stAlert"] p{ color:var(--brand-strong); }
 /* ========== 页头：品牌 + 账户跟随 + 数据截止（原来在侧边栏，侧边栏已撤） ========== */
 .hero-brand{ display:flex; align-items:center; gap:12px; }
 .hero-mark{
-  width:40px; height:40px; border-radius:12px; display:inline-flex; align-items:center; justify-content:center;
+  width:38px; height:38px; border-radius:11px; display:inline-flex; align-items:center; justify-content:center;
   background:linear-gradient(135deg,#1E40AF,#3B82F6); color:#fff; flex:0 0 auto;
+  box-shadow:0 4px 12px rgba(30,64,175,.22);
 }
-.hero-mark svg{ width:22px; height:22px; }
-.hero-meta{ display:flex; align-items:center; gap:10px 14px; flex-wrap:wrap; margin-top:10px; }
-/* 账户跟随：全站最有后果的一个设定（决定「帮你算」整张清单），所以要比数据日期显眼 */
-.hero-strat{ display:inline-flex; align-items:center; gap:8px; padding:5px 12px 5px 10px;
-  border-radius:999px; background:#EEF2FF; border:1px solid #C7D2FE; }
-.hero-strat .k{ font-size:12px; color:var(--brand); font-weight:500; }
-.hero-strat b{ font-size:14px; color:var(--brand-strong); font-weight:700; }
-.hero-strat .h{ font-size:11.5px; color:var(--muted); border-left:1px solid #C7D2FE; padding-left:8px; }
-.hero-date{ font-size:13px; color:var(--sub); }
-.hero-bg{ font-size:12px; color:var(--muted); }
-/* 数据拉取失败：页头下一条红色横幅 */
-.fetch-err{
-  margin:-6px 0 14px; padding:9px 12px; font-size:12.5px; line-height:1.55;
-  border-radius:10px; background:#FEF2F2; border:1px solid #FECACA; color:var(--red);
-}
-.fetch-err-detail{ margin-top:3px; color:#991B1B; font-size:11.5px; word-break:break-all; }
+.hero-mark svg{ width:21px; height:21px; }
+.hero-brand .hero-title{ font-size:28px; letter-spacing:-.8px; }
+.hero-meta{ display:flex; align-items:center; gap:8px 12px; flex-wrap:wrap; margin:10px 0 0 50px; }
+/* 账户跟随：只说「跟的是谁」，去哪换交给悬停提示 + 末尾一个小换向图标 */
+.hero-strat{ display:inline-flex; align-items:center; gap:7px; padding:4px 9px 4px 11px;
+  border-radius:999px; background:#EEF2FF; border:1px solid #E0E7FF; cursor:help;
+  transition:border-color .15s, background .15s; }
+.hero-strat:hover{ border-color:#A5B4FC; background:#E0E7FF; }
+.hero-strat .k{ font-size:11.5px; color:#6366F1; }
+.hero-strat b{ font-size:13px; color:#1E3A8A; font-weight:650; letter-spacing:-.1px; }
+.hero-strat .sw{ display:inline-flex; color:#A5B4FC; }
+.hero-strat .sw svg{ width:13px; height:13px; }
+.hero-strat:hover .sw{ color:#4F46E5; }
+.hero-date{ font-size:12.5px; color:var(--muted); }
+.hero-date::before{ content:''; display:inline-block; width:3px; height:3px; border-radius:50%;
+  background:#CBD5E1; vertical-align:middle; margin:0 10px 0 0; }
+.hero-date.stale{ color:var(--amber); }
+@media(max-width:640px){ .hero-meta{ margin-left:0; } }
+
+/* 更新数据：拉取中图标转圈（按钮禁用），拉完自动停 */
+@keyframes aw-spin{ to{ transform:rotate(360deg); } }
+.st-key-upd_running button [data-testid="stIconMaterial"]{ display:inline-block; animation:aw-spin .9s linear infinite; }
+.st-key-upd_running button{ opacity:1 !important; color:var(--brand) !important; border-color:#C7D2FE !important;
+  background:#EEF2FF !important; }
+.upd-ok{ font-size:12px; color:var(--muted); white-space:nowrap; }
+/* 没拉到的项：一个琥珀色小按钮，点开才看是哪几项 —— 不再在页头下面铺一整条红框 */
+.st-key-upd_errs button{ color:var(--amber) !important; border-color:#FDE68A !important; background:#FFFBEB !important;
+  font-size:12.5px !important; min-height:34px; padding:2px 10px !important; }
+.upd-pop-h{ font-weight:650; color:var(--ink); font-size:13.5px; }
+.upd-pop-n{ font-size:12.5px; color:var(--sub); margin:4px 0 10px; line-height:1.6; }
+.upd-pop-i{ padding:8px 0; border-top:1px solid var(--line); font-size:12.5px; }
+.upd-pop-i b{ display:block; color:var(--ink); font-weight:600; }
+.upd-pop-i span{ display:block; color:var(--muted); font-size:11.5px; word-break:break-all; margin-top:2px; }
 /* 没有侧边栏了：连带把左上角那个展开箭头也收掉 */
 [data-testid="stSidebarCollapsedControl"], [data-testid="stExpandSidebarButton"]{ display:none; }
 
@@ -1742,35 +1781,33 @@ def _fetch_everything():
     return list(_errs) + list(_perr) + list(_nerr) + list(_verr), _msgs
 
 
-def _update_all_data():
-    """「更新数据」按钮：前台同步拉取，结果写进本会话的提示。"""
-    _errs, _msgs = _fetch_everything()
-    st.session_state.fetch_errors = _errs
-    st.session_state.fetch_summary = _msgs
-    st.session_state.fetched_lag = _check_data_staleness()[0]   # 拉过之后仍缺 → 节假日/尚未公布，不再标红
-    st.session_state.auto_fetch_done = True
-    return _errs
-
-
 @st.cache_resource
 def _bg_fetch_state():
     """全进程共享的后台更新状态（所有浏览器会话共用一个，避免多人/多次刷新重复拉取）。"""
     return {"thread": None, "errors": None, "finished": 0.0}
 
 
-def _start_background_fetch():
-    """数据滞后时在后台线程里更新，页面先用现有数据立刻显示，不再整页卡住等拉取。
+def _bg_running() -> bool:
+    th = _bg_fetch_state()["thread"]
+    return bool(th is not None and th.is_alive())
 
-    同一时间只跑一个；30 分钟内拉过（无论成功与否）就不再自动拉，避免净值尚未公布时每次刷新都重拉。
+
+def _start_background_fetch(force: bool = False):
+    """在后台线程里更新数据，页面先用现有数据照常显示。
+
+    自动触发（数据滞后时）：30 分钟内拉过就不再拉，免得净值未公布时每次刷新都重拉。
+    手动点「更新数据」：force=True，跳过 30 分钟限制。两者共用这一个线程，同一时间只跑一个。
+    原来手动点是在前台同步拉 —— 整页卡 10~30 秒，只能靠一个 toast 告诉人「在拉」；
+    放到后台以后，按钮自己转圈就是进度，拉完自动停。
     返回 "running" / "started" / "recent"。
     """
     import threading
     import time as _t
     stt = _bg_fetch_state()
-    if stt["thread"] is not None and stt["thread"].is_alive():
+    if _bg_running():
         return "running"
     marker = DATA_DIR / ".last_auto_fetch"
-    if marker.exists() and _t.time() - marker.stat().st_mtime < 1800:
+    if not force and marker.exists() and _t.time() - marker.stat().st_mtime < 1800:
         return "recent"
     marker.touch()
 
@@ -1788,29 +1825,21 @@ def _start_background_fetch():
     return "started"
 
 
-# 自动更新：数据滞后时后台拉取（不阻塞页面）；拉完后下一次操作/刷新即显示新数据
+# 自动更新：数据滞后时后台拉取（不阻塞页面）；拉完由页头的更新控件把整页刷新一次
 staleness_days, staleness_asset = _check_data_staleness()
 if "auto_fetch_done" not in st.session_state:
     st.session_state.auto_fetch_done = False
-_bg_status = None
+# 本会话打开前就已经结束的那次拉取不算「刚拉完」，否则一打开页面就无端整页重跑一次
+st.session_state.setdefault("upd_seen", _bg_fetch_state()["finished"])
 if staleness_days is not None and staleness_days >= 1 and not st.session_state.auto_fetch_done:
-    _bg_status = _start_background_fetch()
-_bg_running = bool(_bg_fetch_state()["thread"] is not None and _bg_fetch_state()["thread"].is_alive())
+    _start_background_fetch()
+    st.session_state.auto_fetch_done = True
 
-# 按钮文案 = 动作（更新数据），状态写在提示里；「数据已是最新」像状态标签，不像能点的按钮
-if staleness_days is not None:
-    # 本会话已拉过且仍缺同样天数 → 数据源还没出（节假日/当晚未公布），不算滞后
-    _already = st.session_state.get("fetched_lag") == staleness_days
-    if staleness_days == 0 or _already:
-        _data_state = ("ok", "更新数据", "已是最新净值；点击同时更新行情、净值明细、沪深300估值和指数估值")
-    elif staleness_days > 5:
-        _data_state = ("err", "更新数据", f"{staleness_asset} 缺 {staleness_days} 个交易日的净值，点击拉取")
-    else:
-        _data_state = ("warn", "更新数据", f"{staleness_asset} 缺 {staleness_days} 个交易日的净值，点击拉取")
-else:
-    _data_state = ("err", "拉取数据", "数据缺失，点击拉取")
-
-# 数据拉取失败提示：在页头下面一条红色横幅（见 Hero）
+# 数据状态只用来给页头日期配色、给按钮定主次，不再写成一长串悬停提示：
+# 本会话拉过之后仍缺同样天数 → 数据源还没出（节假日 / 当晚未公布），不算滞后
+_stale = 0 if staleness_days is None else int(staleness_days)
+if staleness_days is not None and st.session_state.get("fetched_lag") == staleness_days:
+    _stale = 0
 
 # ============================================================
 # 数据加载（直接读 CSV，不截断到 BACKTEST_END）
@@ -4401,7 +4430,74 @@ def _closed_rounds() -> list[dict]:
 # ============================================================
 # Hero
 # ============================================================
-_hero_cols = st.columns([3, 2], vertical_alignment="bottom")
+# 拉取失败的数据源 → 人话。原始报错（接口异常文本）只放在弹层最下面一行小字，给排查用
+_DATA_LABEL = {
+    "hs300": "沪深300 ETF", "bond_30y_etf": "30 年国债 ETF", "bond_10y_etf": "10 年国债 ETF",
+    "bond_credit": "城投债 ETF", "bond_short_etf": "短融 ETF", "shortbond_idx": "中证短融指数",
+    "gold": "黄金 ETF", "nonferr": "有色期货 ETF", "us_sp500": "标普500 ETF", "wti": "南方原油",
+    "nonferr_idx": "中证有色指数", "hs300_idx": "沪深300指数", "credit_idx": "上证企债指数",
+    "treasury_idx": "国债总指数", "london_gold": "伦敦金", "shfe_copper": "沪铜", "usdcny": "美元汇率",
+    "sp500_idx": "标普500指数", "wti_usd": "WTI 原油",
+}
+
+
+def _err_label(e: str) -> tuple[str, str]:
+    """「shortbond_idx: Length mismatch…」→（中证短融指数, 原文）。认不出名字就整条原样给。"""
+    head, _, rest = str(e).partition(":")
+    key = head.strip().split(" ")[0]
+    return (_DATA_LABEL.get(key, head.strip() or "数据源"), rest.strip() or str(e))
+
+
+def _update_ctl() -> None:
+    """页头右侧「更新数据」：点了在后台拉，按钮转圈；拉完自动停转、整页刷新一次。
+
+    - 运行中：fragment 每 1.5 秒看一眼线程，不碰页面其它部分；
+    - 刚结束：把结果记进本会话，整页 rerun（新数据要进所有页签）；
+    - 平时：一个按钮 + 一行小状态（几点更新的 / 几项没拉到，点开看是哪几项）。
+    原来点一下会同时冒出一条长悬停提示和一个 toast，失败还在页头下面铺一大条红框。
+    """
+    import time as _t
+    stt = _bg_fetch_state()
+    # 横排容器要放在 fragment 里面：fragment 自己会包一层，外面那层 horizontal 管不到里面的元素
+    row = st.container(horizontal=True, horizontal_alignment="right", vertical_alignment="center",
+                       gap="small", key="upd_row")
+    if _bg_running():
+        row.button("更新中", icon=":material/sync:", disabled=True, key="upd_running")
+        return
+    if stt["finished"] and stt["finished"] > st.session_state.get("upd_seen", 0):
+        st.session_state.upd_seen = stt["finished"]
+        st.session_state.fetch_errors = list(stt["errors"] or [])
+        st.session_state.fetched_lag = _check_data_staleness()[0]
+        st.session_state.upd_done = stt["finished"]
+        st.rerun()
+    _errs = st.session_state.get("fetch_errors") or []
+    if _errs:
+        with row.popover(f"{len(_errs)} 项没更新", icon=":material/error_outline:", key="upd_errs"):
+            st.markdown('<div class="upd-pop-h">这几项这次没拉到新数据</div>'
+                        '<div class="upd-pop-n">页面照常用已有的数据，不影响持仓和收益；'
+                        '多半是数据源当天还没出，晚点再点一次「更新数据」。</div>',
+                        unsafe_allow_html=True)
+            st.markdown("".join(
+                f'<div class="upd-pop-i"><b>{html_escape(n)}</b>'
+                f'<span>{html_escape(r[:160])}</span></div>'
+                for n, r in (_err_label(e) for e in _errs)), unsafe_allow_html=True)
+    elif st.session_state.get("upd_done"):
+        row.markdown(f'<span class="upd-ok">已更新 · {_t.strftime("%H:%M", _t.localtime(st.session_state.upd_done))}'
+                     '</span>', unsafe_allow_html=True, width="content")
+    if row.button("更新数据", icon=":material/sync:", key="upd_btn",
+                 type="primary" if _stale >= 1 else "secondary"):
+        _start_background_fetch(force=True)
+        st.session_state.fetch_errors = []
+        st.session_state.upd_done = None
+        st.rerun()           # 整页重跑：外面才会把这个 fragment 换成「每 1.5 秒看一眼」的模式
+
+
+_SWAP_SVG = ('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+             'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+             '<path d="M7 7h11l-3-3M17 17H6l3 3"/></svg>')
+_date_cls = "hero-date" + (" stale" if _stale >= 1 else "")
+_date_txt = f"数据截止 {_cn_date(last_date)}" + (f" · 缺 {_stale} 个交易日" if _stale >= 1 else "")
+_hero_cols = st.columns([3, 2], vertical_alignment="center")
 with _hero_cols[0]:
     st.markdown(
         # 拼成一行：多行 f-string 里条件为空会留下空行，空行后缩进的 </div> 被 Markdown 当成代码块显示出来
@@ -4409,40 +4505,17 @@ with _hero_cols[0]:
         f'<div class="hero-brand"><span class="hero-mark">{_LOGO_SVG}</span>'
         '<span class="hero-title">全天候再平衡</span></div>'
         '<div class="hero-meta">'
-        '<span class="hero-strat" title="决定「帮你算」的清单、状态条和体检的偏离目标">'
+        # 「去哪换」不写成正文：悬停提示 + 一个小换向图标就够了，胶囊只说「跟的是谁」
+        '<span class="hero-strat" title="账户按这个策略调仓（帮你算的清单、偏离目标都按它算）'
+        '&#10;在「权重与选基」里更换">'
         f'<span class="k">账户跟随</span><b>{_strat_display[strat_key]}</b>'
-        '<span class="h">在「权重与选基」里换</span></span>'
-        f'<span class="hero-date">数据截止 {_cn_date(last_date)}</span>'
-        + ('<span class="hero-bg">⟳ 后台正在更新数据，完成后刷新即可</span>' if _bg_running else '')
-        + '</div></div></div>',
+        f'<span class="sw">{_SWAP_SVG}</span></span>'
+        f'<span class="{_date_cls}">{_date_txt}</span>'
+        '</div></div></div>',
         unsafe_allow_html=True,
     )
-with _hero_cols[1], st.container(key="hero_actions", horizontal=True, horizontal_alignment="right",
-                                  vertical_alignment="center", gap="small"):
-    # 原来这里挂着一个「N 个信号触发」的 chip，等于在每一页顶上再标一次信号 ——
-    # 策略信号只有「模型 · 信号」页一处，这里不再重复，只留「更新数据」。
-    # 「更新数据」按钮：一次更新行情 + 沪深300 PE/PB + 指数估值；滞后/缺失时变成主色按钮
-    _data_cls, _data_label, _data_help = _data_state
-    _data_icon = {"ok": ":material/sync:", "warn": ":material/warning:", "err": ":material/error:"}[_data_cls]
-    _data_type = "secondary" if _data_cls == "ok" else "primary"
-    if st.button(_data_label, icon=_data_icon, type=_data_type, help=_data_help):
-        # 用浮层提示而不是 st.spinner：spinner 会在按钮下插入一行，整页往下跳
-        st.toast("正在更新行情、净值和估值，约 10~30 秒…", icon=":material/sync:", duration="long")
-        _errs = _update_all_data()
-        if _errs:
-            st.toast(f"有 {len(_errs)} 项拉取失败，详见页头下方提示", icon=":material/error:")
-        else:
-            st.toast("行情与估值已更新", icon=":material/check_circle:")
-        st.rerun()
-
-# 拉取失败：原来塞在侧边栏底下，侧边栏撤了就放页头正下方，比原来更不容易漏看
-if st.session_state.get("fetch_errors"):
-    _errs = st.session_state.fetch_errors
-    st.markdown(
-        f'<div class="fetch-err">⚠️ 数据拉取失败 {len(_errs)} 项'
-        f'<div class="fetch-err-detail">{"<br>".join(html_escape(e) for e in _errs)}</div></div>',
-        unsafe_allow_html=True,
-    )
+with _hero_cols[1], st.container(key="hero_actions"):
+    st.fragment(_update_ctl, run_every=1.5 if _bg_running() else None)()
 
 # ============================================================
 # Main Tabs
@@ -5248,16 +5321,49 @@ def _acct_health_view() -> None:
     st.caption("".join(_tail))
 
 
+def _head_months_html(n: int = 6) -> str:
+    """头卡右侧：最近 n 个月每月赚了几个点、多少钱 —— 不用点进「收益」就能看到最近走势。
+
+    数据跟「收益」页的按月切段同一个函数（HG.period_performance），口径一致：
+    收益率 = 月末 nav / 上月末 nav − 1（扣掉转入转出），金额 = 月末总资产 − 上月末 − 当月净转入。
+    柱子以 0 为中线，涨往上（浅红）跌往下（浅绿）；本月还没过完，柱子半透明。
+    """
+    if acct is None or not len(_acct_daily):
+        return ""
+    try:
+        per = HG.period_performance(_acct_daily, _acct_flows(), freq="M")[:n][::-1]
+    except Exception:
+        return ""
+    if not per:
+        return ""
+    mx = max(abs(float(p["ret"])) for p in per) or 1e-9
+    _today = pd.Timestamp(_hg_last)
+    cells = []
+    for p in per:
+        r, m = float(p["ret"]), float(p["pnl"])
+        # 类名别用 up/down：全站有 .up/.down 文字色（深红深绿），整格会被染色，蓝底上看不清
+        cls = "pos" if r * 100 >= 0.005 else ("neg" if r * 100 <= -0.005 else "flat")
+        h = max(2.0, abs(r) / mx * 26)
+        e = pd.Timestamp(p["end"])
+        live = (e.year, e.month) == (_today.year, _today.month)
+        mon = p["period"].split("年", 1)[-1]
+        cells.append(
+            f'<div class="mb {cls}{" live" if live else ""}" '
+            f'title="{p["period"]}{"（本月至今）" if live else ""}：{_pf_num(r * 100, 2)}% · {_pf_num(m, 2)} 元">'
+            f'<span class="mv">{_pf_num(r * 100, 2)}%</span>'
+            f'<span class="bw"><i style="height:{h:.0f}px"></i></span>'
+            f'<span class="ml">{mon}{"·至今" if live else ""}</span>'
+            f'<span class="mm">{_pf_num(m, 0)}</span></div>')
+    return ('<div class="pf-months"><div class="pf-mh">近 ' + str(len(per)) + ' 个月 · 每月收益</div>'
+            '<div class="pf-mbars">' + "".join(cells) + '</div></div>')
+
+
 # ============================================================
 # Tab 3: 我的账户（持仓 / 收益 / 对比 / 体检 四个子页签）
 # ============================================================
 with tab3:
-    st.subheader("我的账户 · 有什么，赚多少，跑得怎么样")
-    st.caption(
-        "一页四看：**持仓**＝手里有什么、占多少；**收益**＝按年 / 按月赚了多少钱、收益率多少（不是净值）；"
-        "**对比**＝跟项目默认基金、策略理论各差多少；**体检**＝仓位集不集中、现金够不够、回撤深不深。"
-        "逐笔成交在「交易记录」页；该怎么调、调多少在「帮你算」页；策略触发在「模型 · 信号」页。"
-    )
+    # 标题和一大段「一页四看」说明撤掉：头卡自己就说明了这是哪儿，
+    # 四个子页签各管什么写在切换器的悬停提示里，不用每次进来都读一遍
 
     # ---- 头卡：全站唯一一处「总金额 / 今日 / 持有收益」----
     _tot = _plan["total"]
@@ -5267,10 +5373,11 @@ with tab3:
     _head_sub = (f"账户起始 {_cn_date(acct['created'])} · 净值日期 {_cn_date(_hg_last)} · {_n_funds} 只基金"
                  if acct else "还没有账户")
     st.markdown(
-        '<div class="pf-head">'
+        '<div class="pf-head"><div class="pf-top"><div>'
         '<div class="pf-k">总金额（元）</div>'
         f'<div class="pf-amt">¥{_tot:,.2f}</div>'
         f'<div class="pf-sub">{_head_sub}</div>'
+        f'</div>{_head_months_html()}</div>'
         '<div class="pf-grid">'
         f'<div><div class="k">今日收益</div><div class="v {_pf_sign(_plan["today"])}">'
         f'{_pf_num(_plan["today"], 2)}</div></div>'
