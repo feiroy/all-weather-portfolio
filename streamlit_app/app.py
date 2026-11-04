@@ -301,7 +301,7 @@ hr{ border-color:var(--line); margin:1.6rem 0; }
    曲线比金额块高，左上角空出一行 */
 .pf-head.has-curve{ display:grid; grid-template-columns:minmax(0,1fr) minmax(300px,400px); gap:18px 30px; align-items:stretch; }
 .pf-head.has-curve .pf-grid{ grid-template-columns:repeat(2,minmax(0,1fr)); row-gap:12px; }
-@media(min-width:1180px){ .pf-head.has-curve .pf-grid{ grid-template-columns:repeat(4,minmax(0,1fr)); } }
+@media(min-width:1180px){ .pf-head.has-curve .pf-grid{ grid-template-columns:repeat(auto-fit,minmax(104px,1fr)); } }
 .pf-curve{ min-width:0; display:flex; flex-direction:column; padding-left:22px;
   border-left:1px solid rgba(255,255,255,.18); }
 .pf-ch{ display:flex; align-items:baseline; gap:8px; font-size:11.5px; flex-wrap:wrap; }
@@ -2201,6 +2201,19 @@ def _min_order(tgt_amt: float) -> float:
     return max(1.0, abs(tgt_amt) * 0.05)
 
 
+def _acct_invested_now() -> float:
+    """投入本金 = 初始资金 + 转入 − 转出（不含买卖：买卖只是钱换了个形态，还在账上）。"""
+    if acct is None:
+        return 0.0
+    v = float(acct.get("capital") or 0)
+    for t in acct.get("trades", []):
+        if t.get("side") in ("转入", "入金"):
+            v += float(t.get("shares") or 0)
+        elif t.get("side") in ("转出", "出金"):
+            v -= float(t.get("shares") or 0)
+    return v
+
+
 def _hg_plan(tgt_by_slot: dict | None = None) -> dict:
     """按策略目标权重算「该买多少 / 该卖多少」—— 全站唯一一份调仓计划。
 
@@ -2304,11 +2317,12 @@ def _hg_plan(tgt_by_slot: dict | None = None) -> dict:
             today_pnl += _held_day(_c, float(_sh), float(_nv.iloc[-1]), float(_nv.iloc[-2]),
                                    _nv.index[-2])[0]
     total = mv_total + sum(o["mv"] for o in other) + cash
-    # 收益按「份额」算，不按「本金金额差」：units 起于初始资金（记作 1 元 1 份），转入/转出按当时
-    # 净值折算份额，所以 equity/units 就是时间加权净值，收益 = 总资产 − 份额本金。
-    # 不能写成 total − capital：那样每次「转入」都会被当成赚到的钱（真踩过：转入 1 万后
-    # 持仓页持有收益从 +184 跳到 +10,184，而「收益对比」页累计收益仍 +0.04%，两页互相打架）。
-    base = float(_acct_units or 0)
+    # 持有收益 = 总资产 − 投入本金（初始资金 + 转入 − 转出），持有收益率 = 收益 / 投入本金 —— 支付宝口径。
+    # 不能写成 total − capital：每次「转入」都会被当成赚到的钱（真踩过：转入 1 万后 +184 → +10,184）。
+    # 也不能写成 total − units：units 是「份额」不是钱，只在转入那天账户净值恰好是 1 时才等于本金。
+    # 原来本金填了个虚的 50 万、长期挂着现金，净值一直≈1 看不出来；改成按实际转入以后，
+    # 9/4 那笔 ¥164 跌了 9%，10/26 转入 48.7 万时净值 0.91 → units 多出 4.8 万，持有收益算成 −5 万。
+    base = _acct_invested_now()
     return {"asset": asset, "cash": cash, "mv": mv_total,
             "mv_all": mv_total + sum(o["mv"] for o in other), "total": total,
             "other": other,
@@ -2392,6 +2406,43 @@ def _acct_flows() -> pd.Series:
     return out
 
 
+def _money_index(equity: pd.Series, flows: pd.Series, capital: float) -> tuple[pd.Series, float]:
+    """按「收益 / 投入本金」算的账户收益率指数：1 + 累计收益 ÷ 投入本金的最高值。
+
+    为什么不用时间加权（重放里那个 equity / units）：它把每一段时间等权 —— 9/4 只买了 ¥164，
+    那一个半月跌了 9%，时间加权就永远背着这 −9%，而 10/26 才转进来的 48.7 万根本没经历过。
+    支付宝看的是「收益 / 本金」。分母取**本金最高值**（不是当天本金）：本金小的时候那几块钱
+    的涨跌不会被放大成 ±5%，转入当天也不会出现一个假的大涨/大跌；今天的值 = 持有收益率。
+    """
+    inv = float(capital) + flows.reindex(equity.index).fillna(0.0).cumsum()
+    peak = float(inv.max()) if len(inv) else 0.0
+    if peak <= 0:
+        return pd.Series(1.0, index=equity.index), 0.0
+    return 1.0 + (equity.astype(float) - inv) / peak, peak
+
+
+def _bench_money_index(bench: pd.Series) -> pd.Series:
+    """把账户的入金节奏原样搬到基准上：同一天、同样多的钱买基准 —— 和账户比才是同一把尺子。
+
+    原来基准从建仓日按 1.0 归一（时间加权）：等于假设 9/4 就把 48.7 万全买了基准，
+    跟实际只投了 ¥164 的账户比，比出来的差距大部分是「钱什么时候进来的」，不是选基。
+    """
+    if acct is None or bench is None or len(bench.dropna()) < 2 or not len(_acct_daily):
+        return pd.Series(dtype=float)
+    b = bench.dropna().sort_index()
+    idx = _acct_daily.index[_acct_daily.index >= b.index[0]]
+    if len(idx) < 2:
+        return pd.Series(dtype=float)
+    bb = b.reindex(b.index.union(idx)).ffill().reindex(idx)
+    fl = _acct_flows().reindex(idx).fillna(0.0)
+    fl.iloc[0] += float(acct.get("capital") or 0)        # 初始资金算第一天的入金
+    units = (fl / bb).cumsum()
+    val = units * bb
+    inv = fl.cumsum()
+    peak = float(inv.max()) or 1.0
+    return 1.0 + (val - inv) / peak
+
+
 def _acct_pnl_series() -> pd.Series:
     """账户累计收益（元）= 总资产 − 累计净投入。
 
@@ -2403,6 +2454,13 @@ def _acct_pnl_series() -> pd.Series:
     eq = _acct_daily["equity"].astype(float)
     fl = _acct_flows().reindex(eq.index).fillna(0.0)
     return eq - (float(acct.get("capital") or 0) + fl.cumsum())
+
+
+# 账户「nav」统一换成收益/本金口径；时间加权那份留在 nav_twr，备查
+if acct is not None and len(_acct_daily):
+    _acct_daily["nav_twr"] = _acct_daily["nav"]
+    _acct_daily["nav"], _acct_invest_peak = _money_index(
+        _acct_daily["equity"], _acct_flows(), float(acct.get("capital") or 0))
 
 
 def _acct_equity_series() -> pd.Series:
@@ -5178,14 +5236,12 @@ def _acct_compare_view() -> None:
     _curves, _gap_def, _gap_strat = {}, None, None
     if float(_mine.iloc[0]) > 0:
         _curves["我的账户"] = _mine / float(_mine.iloc[0])
-    _bench_def = BM.replay_target(w, acct.get("created"), nav_getter=HG.nav_series)
-    if _bench_def is not None and len(_bench_def.dropna()) > 1:
-        _bd = _bench_def.dropna()
+    # 两条基准按账户同样的入金节奏买（同一天、同样多的钱），再按收益/本金折成同一种指数
+    _bd = _bench_money_index(BM.replay_target(w, acct.get("created"), nav_getter=HG.nav_series))
+    if len(_bd) > 1:
         _curves["项目默认基金"] = _bd / float(_bd.iloc[0])
-    _bench_strat = BM.strategy_curve(_BENCH_COL.get(strat_key, ""),
-                                     start=acct.get("created"))
-    if _bench_strat is not None and len(_bench_strat.dropna()) > 1:
-        _bs = _bench_strat.dropna()
+    _bs = _bench_money_index(BM.strategy_curve(_BENCH_COL.get(strat_key, ""), start=acct.get("created")))
+    if len(_bs) > 1:
         _curves["策略理论"] = _bs / float(_bs.iloc[0])
     # 差距按两条线共同覆盖的最后一天算，避免其中一条缺数据时把区间拉长
     for _nm, _tag in (("项目默认基金", "def"), ("策略理论", "strat")):
@@ -5205,8 +5261,8 @@ def _acct_compare_view() -> None:
     _ret_mine = float(_mine.iloc[-1] / float(_mine.iloc[0]) - 1) if float(_mine.iloc[0]) > 0 else 0.0
     _g1, _g2, _g3 = st.columns(3)
     _g1.metric("账户累计收益率", f"{_ret_mine*100:+.2f}%",
-               help="建仓那天算 0%。转入按当天净值折份额，加钱不会抬高这个数。"
-                    "想核对总资产：份额 × 最新单位净值 + 现金。")
+               help="收益 ÷ 投入本金（初始资金 + 转入 − 转出），和支付宝「持有收益率」同一个算法。"
+                    "两条基准按同样的入金节奏买，比的是同样的钱放在不同地方。")
     _g2.metric("vs 项目默认基金", f"{_gap_def*100:+.2f}pp" if _gap_def is not None else "—",
                help="把项目默认那 8 个代码按你现在的权重、同样的再平衡节奏重放一遍。"
                     "这一列只体现「换成你的基金」带来的差异。")
@@ -5223,12 +5279,12 @@ def _acct_health_view() -> None:
 
     这一页曾经把「累计收益」「与基准差」也列进指标表 —— 那是「收益」和「对比」两页的结论，
     等于同一件事在三个地方各印一遍，所以看着不伦不类。现在只留账户层面的风险：
-    集中度（一只 / 一个位置吃多少）、现金够不够、回撤深不深、哪只在亏、偏离目标多少。
+    集中度（一只 / 一个位置吃多少）、回撤深不深、哪只在亏、偏离目标多少。
     判断阈值写在行里（现状 / 提醒线 / 判断），越线才在结论卡里说一句「该怎么看」。
     """
     st.markdown(
         '<div class="sec-head"><span class="t">体检 · 账户有没有风险</span>'
-        '<span class="r">集中度 / 现金 / 回撤 / 单只浮亏 / 偏离目标</span></div>',
+        '<span class="r">集中度 / 回撤 / 单只浮亏 / 偏离目标</span></div>',
         unsafe_allow_html=True,
     )
     _rows = [r for r in _plan["rows"] if float(r["shares"] or 0) > 0]
@@ -5281,11 +5337,12 @@ def _acct_health_view() -> None:
              "一只基金就占了账户这么多，它自己出问题等于账户出问题",
              "；接受也行（这是策略定的比例），想稳一点就给这个位置再挂一只同类基金分摊",
              _slot_max > 0.25)
-    _row("现金占比", f"{_cash_r*100:.1f}%", "3% ~ 15%",
-         "偏少" if _cash_r < 0.03 else "偏多",
-         "调仓要先卖后买，现金太少会卡住；太多则拖低收益",
-         "" if 0.03 <= _cash_r <= 0.15 else "；到「帮你算」按目标比例算一遍，买多少卖多少那里有数",
-         (_cash_r < 0.03 or _cash_r > 0.15))
+    # 现金：只在账上真有闲钱时才列（卖出回款 / 转入还没买）。全买成基金是常态，
+    # 原来那条「< 3% 偏少」在支付宝场外基金这里不成立 —— 卖出 T+1 到账再买就是正常流程
+    if _cash_r >= 0.005:
+        _row("现金占比", f"{_cash_r*100:.1f}%", "15%", "偏多",
+             "卖出回款或转入的钱还没买成基金，闲着拖低收益",
+             "；到「帮你算 · 新钱怎么分」按目标比例买掉", _cash_r > 0.15)
     _row("最大回撤",
          (f"{_mdd*100:.2f}%（账户 {_days} 天）" if _mdd is not None else "—"), "12%", "超线",
          "净值从最高点回落的最大幅度，越深越考验能不能拿住", "；扛不住就降波动，别硬撑",
@@ -5428,28 +5485,29 @@ with tab3:
     _curve = _head_month_curve_html()
     _prev_tot = _tot - float(_plan["today"])
     _today_pct = (float(_plan["today"]) / _prev_tot * 100) if _prev_tot > 0 else 0.0
-    st.markdown(
+    st.markdown((
         f'<div class="pf-head{" has-curve" if _curve else ""}"><div class="pf-main">'
         '<div class="pf-k">总金额（元）</div>'
         f'<div class="pf-amt">¥{_tot:,.2f}</div>'
         f'<div class="pf-sub">{_head_sub}</div>'
         '<div class="pf-grid">'
-        # 今日收益带上收益率：分母 = 昨收总资产（今天总资产 − 今天赚的）
+        # 今日收益率单独一格：挂在金额后面的小字太淡，看着像没有
         f'<div><div class="k">今日收益</div><div class="v {_pf_sign(_plan["today"])}">'
-        f'{_pf_num(_plan["today"], 2)}'
-        f'<span class="s">{_pf_num(_today_pct, 2)}%</span></div></div>'
+        f'{_pf_num(_plan["today"], 2)}</div></div>'
+        f'<div><div class="k">今日收益率</div><div class="v {_pf_sign(_today_pct)}">'
+        f'{_pf_num(_today_pct, 2)}%</div></div>'
         f'<div><div class="k">持有收益</div><div class="v {_pf_sign(_plan["pnl"])}">'
         f'{_pf_num(_plan["pnl"], 2)}</div></div>'
         f'<div><div class="k">持有收益率</div><div class="v {_pf_sign(_plan["pnl_pct"])}">'
         f'{_pf_num(_plan["pnl_pct"] * 100, 2)}%</div></div>'
-        # 现金不是凭空来的：本金 − 已买入＝还留在账上、没买成基金的钱。带上占比，
-        # 否则一个孤零零的 ¥12,714 既看不出多还是少，也不知道该不该管它。
-        f'<div title="起始本金 − 已买入 = 现在还留在账上、没买成基金的钱">'
-        f'<div class="k">现金</div><div class="v">¥{_plan["cash"]:,.0f}'
-        f'<span class="s">{(_plan["cash"] / _tot * 100) if _tot else 0:.1f}%</span>'
-        '</div></div>'
-        f'</div></div>{_curve}'
-        '</div>',
+        # 现金只在真有闲钱时才出现（卖出还没买回、转入还没买）。账上本来就全买成了基金，
+        # 摆一个「¥0」只会让人问「为啥有现金」
+        + (f'<div title="卖出回款或转入后还没买成基金的钱"><div class="k">现金</div>'
+           f'<div class="v">¥{_plan["cash"]:,.0f}'
+           f'<span class="s">{(_plan["cash"] / _tot * 100) if _tot else 0:.1f}%</span></div></div>'
+           if abs(float(_plan["cash"])) >= 1 else '')
+        + f'</div></div>{_curve}'
+        '</div>'),
         unsafe_allow_html=True,
     )
 
@@ -5483,7 +5541,7 @@ with tab3:
             "账户视图", ["持仓", "收益", "对比", "体检"], default="持仓", key="acct_view",
             label_visibility="collapsed",
             help="持仓：手里有什么、占多少；收益：按年 / 按月赚了多少钱和收益率；"
-                 "对比：跟项目默认基金、策略理论各差多少；体检：集中度、现金、回撤、单只浮亏、偏离目标。",
+                 "对比：跟项目默认基金、策略理论各差多少；体检：集中度、回撤、单只浮亏、偏离目标。",
         ) or "持仓"
 
     if _av == "持仓":
@@ -5674,7 +5732,8 @@ def _calc_rebalance() -> None:
             min_width=900,
         )
         _other_mv = sum(float(o["mv"]) for o in _plan["other"])
-        st.caption(f"调仓基数 ¥{_plan['asset']:,.0f} = 持仓 ¥{_plan['mv']:,.0f} + 现金 ¥{_plan['cash']:,.0f}。"
+        st.caption(f"调仓基数 ¥{_plan['asset']:,.0f} = 持仓 ¥{_plan['mv']:,.0f}"
+                   + (f" + 现金 ¥{_plan['cash']:,.0f}" if abs(float(_plan['cash'])) >= 1 else "") + "。"
                    + (f"另有 ¥{_other_mv:,.0f} 落在「其他」（位置已关闭或已删）里，**不进基数**——"
                       "那部分钱不替你买卖，想让它参与就把位置重新打开。"
                       if _other_mv > 0 else "")

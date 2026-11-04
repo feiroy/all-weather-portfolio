@@ -14,7 +14,6 @@ import pandas as pd
 DEV_WARN = 0.05      # 单桶偏离 5pp → 提示（<3pp 属于正常漂移）
 DEV_URGENT = 0.12    # 单桶偏离 12pp → 需要动
 CASH_WARN = 0.15     # 现金占比超过 15% → 钱闲着
-CASH_INFO = 0.05     # 现金占比低于 5% → 调仓子弹不足
 DRAWDOWN_WARN = 0.12  # 账户回撤 12% → 提示
 LOSS_WARN = -0.15    # 单只浮亏 15% → 提示
 
@@ -116,10 +115,10 @@ def compute(
     if total > 0:
         cash_r = cash / total
         out["指标"]["现金占比"] = cash_r
+        # 只提醒「钱闲着」。原来还有一条「现金 < 5% → 调仓子弹偏少」：
+        # 支付宝场外基金卖出 T+1 回款再买，本来就是先卖后买，账上不留现金是常态，不该算毛病
         if cash_r >= CASH_WARN:
             add("warn", f"现金占比 {cash_r*100:.1f}%，超过 {CASH_WARN*100:.0f}%", "闲置资金拖低收益")
-        elif cash_r <= CASH_INFO:
-            add("info", f"现金占比 {cash_r*100:.1f}%，调仓子弹偏少", "调仓需要现金做先卖后买")
     for code, c in (cost or {}).items():
         s = slot_of_code(code) if slot_of_code else None
         shares = float((pos or {}).get(code, 0) or 0)
