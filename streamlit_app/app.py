@@ -315,7 +315,7 @@ hr{ border-color:var(--line); margin:1.6rem 0; }
 }
 /* 现金那格多一个小占比：¥12,714 单放着既看不出是多是少，也不知道该不该管 */
 .pf-head .pf-grid .v .s{ font-size:11.5px; font-weight:500; opacity:.72; margin-left:7px }
-/* 头卡下面那一行：这一轮要不要动手、动手去哪看。只说「有没有事」，金额一律留在「帮你算」 */
+/* 头卡下面那一行：这一轮要不要动手、动手去哪看。只说「有没有事」，金额一律留在「调仓」 */
 .todo-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:-2px 0 12px;
   padding:10px 14px;border:1px solid var(--line);border-left:3px solid var(--brand);
   border-radius:10px;background:var(--card);font-size:13px;color:var(--sub)}
@@ -491,11 +491,51 @@ div[data-testid="stAlert"] p{ color:var(--brand-strong); }
 .st-key-acct_out button:hover{ color:var(--brand) !important; border-color:#A5B4FC !important; }
 .acsw-n{ font-size:12px; color:var(--muted); margin-top:6px; }
 
-/* 页签分两组：账户的 4 个 | 公共的 4 个 */
-.st-key-main_tabs [role="tablist"] > [role="tab"]:nth-child(5){ margin-left:30px !important; position:relative; overflow:visible; }
-.st-key-main_tabs [role="tablist"] > [role="tab"]:nth-child(5)::before{
-  content:''; position:absolute; left:-16px; top:22%; bottom:22%; width:1px; background:var(--line-strong); }
-
+/* ========== 导航：电脑顶部一排，手机底部 4 个入口 ========== */
+.st-key-app_nav{ border-bottom:1px solid var(--line); margin:0 0 18px; gap:4px !important; }
+.st-key-app_nav > div{ flex:0 0 auto !important; width:auto !important; }
+.st-key-app_nav [data-testid="stPageLink"] a{ padding:9px 16px !important; border-radius:0 !important;
+  border-bottom:2px solid transparent; background:none !important; }
+.st-key-app_nav [data-testid="stPageLink"] a span, .st-key-app_nav [data-testid="stPageLink"] a p{
+  font-size:14.5px !important; color:var(--sub) !important; font-weight:500; }
+.st-key-app_nav [class*="_on"] [data-testid="stPageLink"] a{ border-bottom-color:var(--brand); }
+.st-key-app_nav [class*="_on"] [data-testid="stPageLink"] a span,
+.st-key-app_nav [class*="_on"] [data-testid="stPageLink"] a p{ color:var(--brand) !important; font-weight:650; }
+/* 下一级页面：‹ 返回 + 标题 */
+.st-key-subhead{ margin:-6px 0 12px; }
+.st-key-subhead [data-testid="stPageLink"] a{ padding:4px 10px 4px 4px !important; }
+.st-key-subhead [data-testid="stPageLink"] a p{ color:var(--brand) !important; font-size:14px !important; }
+.subhead-t{ font-size:17px; font-weight:700; color:var(--ink); }
+/* 市场入口页：四行大入口 */
+[class*="st-key-mk_"]{ border-radius:14px !important; }
+[class*="st-key-mk_"] [data-testid="stPageLink"] a p{ font-size:15.5px !important; font-weight:650; color:var(--ink) !important; }
+.mk-d{ font-size:12.5px; color:var(--muted); margin:-4px 0 2px 34px; }
+.st-key-asset_links{ margin:-4px 0 10px; }
+.st-key-asset_links [data-testid="stPageLink"] a p{ font-size:13px !important; color:var(--brand) !important; }
+@media(max-width:900px){
+  /* 底部导航：固定在屏幕最下面，图标在上、字在下 */
+  .st-key-app_nav{ position:fixed; left:0; right:0; bottom:0; z-index:1000; margin:0; border-bottom:0;
+    border-top:1px solid var(--line); background:rgba(255,255,255,.97); backdrop-filter:saturate(1.4) blur(6px);
+    padding:4px 4px calc(4px + env(safe-area-inset-bottom)) !important; justify-content:space-around !important; }
+  .st-key-app_nav > div{ flex:1 1 0 !important; min-width:0 !important; }
+  .st-key-app_nav [data-testid="stPageLink"] a{ flex-direction:column !important; gap:1px !important;
+    padding:5px 0 !important; border-bottom:0 !important; justify-content:center !important; width:100% !important; }
+  .st-key-app_nav [data-testid="stPageLink"] a span, .st-key-app_nav [data-testid="stPageLink"] a p{ font-size:11.5px !important; }
+  .st-key-app_nav [data-testid="stPageLink"] [data-testid="stIconMaterial"]{ font-size:23px !important; }
+  [data-testid="stMainBlockContainer"], .block-container{ padding-bottom:92px !important; }
+  /* 页头在手机上收紧：品牌大标题不要（底部导航已经说明了在哪），账户一行 + 数据日期一行 */
+  .hero{ display:none !important; }
+  .st-key-hero_meta{ margin:0 0 4px !important; row-gap:6px !important; }
+  .st-key-acct_set button p, .st-key-acct_out button p{ display:none; }
+  .st-key-acct_set button, .st-key-acct_out button{ padding:3px 8px !important; }
+  .st-key-hero_actions{ margin-top:-6px; }
+  .st-key-app_nav > div{ flex:1 1 0 !important; }
+  [data-testid="stMainBlockContainer"], .block-container{ padding-top:14px !important; }
+  [data-testid="stHeader"]{ height:0 !important; min-height:0 !important; }
+  .hero-strat .k, .hero-strat .sw{ display:none !important; }
+  .hero-strat{ padding:4px 10px !important; }
+  .hero-acct{ font-size:16px; margin-right:4px; }
+}
 /* ========== 入口页：选择账户 ========== */
 .lc-head{ display:flex; align-items:baseline; justify-content:space-between; margin:6px 0 14px; }
 .lc-head .t{ font-size:18px; font-weight:700; color:var(--ink); }
@@ -1786,7 +1826,7 @@ _STRAT_KEYS = ["B-Con", "B-RP", "V3c"]
 # 原来侧边栏有个三选一，刷新回默认、不落盘，账户里另存一个 strategy 只给对比页用：
 # 两个字段各说各的（账户存 V3c、持仓按 B-Con 配、侧边栏默认 B-Con），
 # 误点一下清单就从「12 笔卖 5.7 万」变成「14 笔卖 20.3 万含 3 笔清仓」，还没有任何提示。
-# 现在：跟账户有关的一切只读这里；换策略到「权重与选基」，先看预览再确认写盘；
+# 现在：跟账户有关的一切只读这里；换策略到「选基配置」，先看预览再确认写盘；
 # 只想看别的策略长什么样，「模型 · 信号 / 回测」和目标权重表三个策略本来就并排摆着。
 # ---- 多账户：data/accounts/ 一个账户一个文件（交易记录 + 选基配置），当前账户记在网址 ?acct= 里 ----
 from allweather import accounts as AC          # noqa: E402
@@ -1815,13 +1855,15 @@ def _switch_account(aid: str | None) -> None:
 
 
 # 进哪个账户只看网址 ?acct=：没有（或者账户已删）就停在入口页，像「选择用户」那样先挑一个再进
-_aid = st.query_params.get("acct")
+_aid = st.query_params.get("acct") or st.session_state.get("acct_id")
 if _aid not in _ACCT_IDS:
     _aid = None
     if "acct" in st.query_params:
         del st.query_params["acct"]
 if _aid and st.session_state.get("acct_id") != _aid:
     _switch_account(_aid)                      # 换了账户（或刚打开）：清一遍控件状态
+elif _aid and st.query_params.get("acct") != _aid:
+    st.query_params["acct"] = _aid
 acct = AC.load(_aid)
 ACCT_INFO = next((a for a in _ACCTS if a["id"] == _aid), None)
 ACCT_FILE = AC.path_of(_aid) if _aid else None
@@ -2156,8 +2198,8 @@ cash_ratio = 0.0
 # ============================================================
 # 计算权重
 # ============================================================
-# 三个策略一次算完：账户只用其中一个，但「权重与选基」的目标权重表、换策略预览、
-# 「模型 · 信号」都是三个并排看。目标权重由回测引擎「假如今天调仓」算出（pipeline.live_target_weights），
+# 三个策略一次算完：账户只用其中一个，但「选基配置」的目标权重表、换策略预览、
+# 「市场 · 策略信号」都是三个并排看。目标权重由回测引擎「假如今天调仓」算出（pipeline.live_target_weights），
 # 实盘和回测只有这一份规则；_W0_ALL 是趋势过滤前的原始权重，只用来标注谁被过滤、谁接收了。
 @st.cache_data(ttl=300, show_spinner=False)
 def _live_weights(_asof: str):
@@ -2500,9 +2542,9 @@ def _acct_invested_now() -> float:
 def _hg_plan(tgt_by_slot: dict | None = None) -> dict:
     """按策略目标权重算「该买多少 / 该卖多少」—— 全站唯一一份调仓计划。
 
-    tgt_by_slot：换一套位置目标权重算（「权重与选基」换策略前的预览），缺省用账户跟随的策略。
+    tgt_by_slot：换一套位置目标权重算（「选基配置」换策略前的预览），缺省用账户跟随的策略。
 
-    「我的账户」的持仓表、「帮你算」的两份清单都读这一份，
+    「我的账户」的持仓表、「调仓」的两份清单都读这一份，
     两处不再各算一遍，避免数字对不上。
 
     口径：**调仓基数 = 配置内持仓市值 + 现金**，不含「其他」（位置已关/已删、账上还有份额的代码）。
@@ -2620,10 +2662,10 @@ _plan = _hg_plan()
 
 
 def _plan_status() -> dict:
-    """这一轮到底要不要动手 —— 「我的账户」顶部和「帮你算」顶部共用这一份结论。
+    """这一轮到底要不要动手 —— 「我的账户」顶部和「调仓」顶部共用这一份结论。
 
     三种情况分开说，因为用户接下来要做的事完全不同：
-      orders  有单要下（买 / 卖多少）    → 去「帮你算」看清单
+      orders  有单要下（买 / 卖多少）    → 去「调仓」看清单
       stuck   偏离超标但下不了单          → 一手太大 / 缺口太小，只能等下次一起买
       calm    都在 0.5% 阈值内            → 什么都不用做
 
@@ -2929,7 +2971,7 @@ def _pf_badge(it: dict, with_qty: bool = False) -> str:
 def _pf_state_parts(it: dict) -> tuple[str, str]:
     """持仓表的最后一列：只报「这只基金现在有什么问题」，正常持有的行留空。
 
-    买卖动作一律在「帮你算」页给一处 —— 同一个东西在两张表上各标一遍，
+    买卖动作一律在「调仓」页给一处 —— 同一个东西在两张表上各标一遍，
     位置开关一变就会互相打脸。留空的列反而更好用：扫一眼只有异常行有字。
     """
     if it.get("why"):
@@ -4647,7 +4689,7 @@ def _pf_detail(it: dict, inline: bool = False) -> None:
         if _cl:
             st.caption(f"这一只已经清仓（最近一次 {_cn_date(_cl[0]['close'])}，"
                        f"当时累计 {_pf_num(float(_cl[0]['pnl'] or 0), 2)} 元）。"
-                       "逐笔都在「交易记录」里，那一笔卖出上标着「清仓」；"
+                       "逐笔都在「记录」里，那一笔卖出上标着「清仓」；"
                        "这一轮什么价买的、什么价卖的，看下面的买卖点。")
 
     # 子页签：一行里切换看买卖点还是累计盈亏。
@@ -4678,7 +4720,7 @@ def _pf_detail(it: dict, inline: bool = False) -> None:
                 st.caption(f"红三角＝买入、绿三角＝卖出（这只基金共 {len(_tr)} 笔），"
                            "悬停或点一下净值线能看到每笔的份额与成交净值。")
             else:
-                st.caption("这只基金还没有买卖成交 —— 在「交易记录」补录后，"
+                st.caption("这只基金还没有买卖成交 —— 在「记录」补录后，"
                            "图上就会出现三角标记。")
     else:
         # 累计盈亏：换成「元」来看赚了多少，口径与支付宝「累计盈亏」一致。
@@ -4733,7 +4775,7 @@ def _pf_detail(it: dict, inline: bool = False) -> None:
         else:
             st.caption("这只基金还没有成交，累计盈亏是 0。")
 
-    # 逐笔成交流水不在这里重复一遍：只报个数并指路，「交易记录」页可以按基金筛出全部记录就地改
+    # 逐笔成交流水不在这里重复一遍：只报个数并指路，「记录」页可以按基金筛出全部记录就地改
     _mine_tr = [t for t in ((acct or {}).get("trades") or [])
                 if str(t.get("code") or "") == code]
     if _mine_tr:
@@ -4747,7 +4789,7 @@ def _pf_detail(it: dict, inline: bool = False) -> None:
                      for t in _mine_tr if t.get("side") == "卖出")
         st.caption(f"这只基金一共 {len(_mine_tr)} 笔成交（买 {_nb} · 卖 {_ns}）："
                    f"累计买入 ¥{_amt_b:,.0f}、卖出 ¥{_amt_s:,.0f}。"
-                   "要逐笔看或改动，去「交易记录」页顶上选这只基金 —— 那里能把它的记录全筛出来，"
+                   "要逐笔看或改动，去「记录」页顶上选这只基金 —— 那里能把它的记录全筛出来，"
                    "日期 / 金额 / 单价都可以就地改。")
 
 
@@ -4854,7 +4896,7 @@ def _acct_settings() -> None:
                      disabled=(_nm.strip() == ACCT_INFO["name"] and _kd == ACCT_INFO["kind"])):
             AC.update(_aid, name=_nm.strip() or ACCT_INFO["name"], kind=_kd)
             st.rerun()
-        st.markdown('<div class="acsw-n">跟随哪个策略在「权重与选基」里换（会先给预览）。</div>',
+        st.markdown('<div class="acsw-n">跟随哪个策略在「选基配置」里换（会先给预览）。</div>',
                     unsafe_allow_html=True)
         st.divider()
         if len(_ACCTS) <= 1:
@@ -4884,7 +4926,7 @@ with _hero_cols[0]:
             + _KIND_TAG.get(ACCT_INFO.get("kind"), "")
             # 「去哪换」不写成正文：悬停提示 + 一个小换向图标就够了，胶囊只说「跟的是谁」
             + '<span class="hero-strat" title="这个账户按这个策略调仓（帮你算的清单、偏离目标都按它算）'
-            '&#10;在「权重与选基」里更换">'
+            '&#10;在「选基配置」里更换">'
             f'<span class="k">跟随</span><b>{_strat_display[strat_key]}</b>'
             f'<span class="sw">{_SWAP_SVG}</span></span>',
             unsafe_allow_html=True, width="content")
@@ -5206,7 +5248,7 @@ def _slot_config_panel() -> None:
 
         st.markdown("**换成场外（支付宝可买）同类基金 — 一键填入参考代码**")
         st.caption("下面是同类基金的参考代码，跟踪指数和费率不一定和原版一致，填入后请自己核对；"
-                   "收益差异会在「我的账户 · 对比」里的「vs 项目默认基金」体现出来。"
+                   "收益差异会在「资产 · 对比」里的「vs 项目默认基金」体现出来。"
                    "填入会把该位置**替换**成这一只（原来挂的多只会被清掉）。")
         _preset_rows = [[HG.SLOT_LABEL[s], ETF_META.get(s, {}).get("code", ""),
                          ETF_META.get(s, {}).get("name", ""), c, n] for s, c, n in _HG_PRESET]
@@ -5221,22 +5263,17 @@ def _slot_config_panel() -> None:
 # ============================================================
 # Main Tabs —— 前四页是「我的账户」（每天用），后四页是项目自带的策略模型（偶尔看）
 # 「我的账户」一页管完：有什么（持仓）、赚了多少（收益）、跟谁比（对比）、有没有风险（体检）；
-# 「帮你算」是**唯一**给出「该买多少、卖多少」的地方，而且只算不写账。
+# 「调仓」是**唯一**给出「该买多少、卖多少」的地方，而且只算不写账。
 # ============================================================
-# 前 4 个跟着账户走（换账户内容就换），后 4 个是公共的（行情、模型、估值，哪个账户里看都一样），
-# 中间用一道竖线隔开 —— 见 .st-key-main_tabs 的样式
-with st.container(key="main_tabs"):
-    tab3, tab5, tab_calc, tab2, tab7, tab1, tab8, tab10 = st.tabs(
-        ["我的账户", "交易记录", "帮你算", "权重与选基",
-         "基金检索", "模型 · 信号", "模型 · 回测", "指数估值"]
-    )
+# 页签已改成多页面（文件末尾 st.navigation）：每个原来的页签块变成一个页面函数 _pg_*，
+# 手机上底部导航 + 点进去跳页，电脑上顶部导航 —— 见 _render_nav / _subpage_header
 
 # ============================================================
 # Tab 1: 信号仪表盘
 # ============================================================
-with tab1:
+def _pg_signals() -> None:
     st.caption("这一页是**项目自带策略模型**算出来的信号（估值分位、宏观季节、趋势过滤），"
-               "跟你自己买了什么无关；你的钱这一轮该不该动，看「帮你算」页。")
+               "跟你自己买了什么无关；你的钱这一轮该不该动，看「调仓」页。")
     # ---- ① 三个策略的回测净值同图：原来只画侧边栏选的那一条，现在并排 ----
     _bm = {_strat_display[k]: c for k in _STRAT_KEYS
            if (c := _bench_curve(k)) is not None and len(c) > 30}
@@ -5273,7 +5310,7 @@ with tab1:
                   _srows, min_width=860)
     st.markdown('<div class="sec-note">「触发」是市场状态（三个策略看的是同一份行情）；'
                 '「生效」是这个策略的规则里有这一条、而且这一轮用上了 —— 比如黄金、标普的趋势过滤，'
-                '保守增强回测否决过，所以对它「不适用」。生效的信号已经算进「权重与选基」的目标权重里。</div>',
+                '保守增强回测否决过，所以对它「不适用」。生效的信号已经算进「选基配置」的目标权重里。</div>',
                 unsafe_allow_html=True)
 
     st.divider()
@@ -5357,11 +5394,11 @@ def _weight_note(k: str, a: str) -> str:
 def _strategy_switch_panel() -> None:
     """账户跟随哪个策略：选 → 预览后果 → 确认写盘。
 
-    这个选择决定「帮你算」整张清单，所以不能一点就生效：先把「会清掉哪些位置、
+    这个选择决定「调仓」整张清单，所以不能一点就生效：先把「会清掉哪些位置、
     哪部分权重在你这儿没位置放、清单变成几笔、要卖多少」摆出来，确认了才写进账户。
     """
     if acct is None:
-        st.caption("还没建账户：建账户时在「交易记录」里选跟随的策略。")
+        st.caption("还没建账户：建账户时在「记录」里选跟随的策略。")
         return
     _cur = strat_key
     with st.container(key="strat_switch"):
@@ -5371,7 +5408,7 @@ def _strategy_switch_panel() -> None:
                               key="strat_pick")
         if _pick == _cur:
             _c2.markdown(
-                f'<div class="sw-note">「帮你算」、状态条、体检的偏离目标、对比页的两条基准，'
+                f'<div class="sw-note">「调仓」、状态条、体检的偏离目标、对比页的两条基准，'
                 f'都按 <b>{_strat_display[_cur]}</b> 算。换策略前会先给预览。</div>',
                 unsafe_allow_html=True)
             return
@@ -5416,7 +5453,7 @@ def _strategy_switch_panel() -> None:
             st.rerun()
 
 
-with tab2:
+def _pg_weights() -> None:
     st.subheader("权重与选基 · 每个位置该占多少、我拿哪只基金去实现")
     st.caption(
         "最上面是**账户跟随哪个策略**；中间是**三个策略各自算的目标权重**（并排看，不用切）；"
@@ -5488,7 +5525,7 @@ def _acct_period_view() -> None:
         unsafe_allow_html=True,
     )
     if acct is None or len(_acct_equity_series()) <= 1:
-        st.info("账户还没有净值曲线：先在「交易记录」补录成交，之后这里自动按天算。")
+        st.info("账户还没有净值曲线：先在「记录」补录成交，之后这里自动按天算。")
         return
     # ① 走势：上面累计收益率、下面累计收益 —— 同一段时间的两个单位，共用一条时间轴
     _trend = _acct_trend_payload()
@@ -5531,7 +5568,7 @@ def _acct_compare_view() -> None:
     )
     _mine = _acct_daily["nav"].dropna() if (acct is not None and len(_acct_daily)) else pd.Series(dtype=float)
     if acct is None or len(_mine) <= 1:
-        st.info("账户还没有净值曲线：在「交易记录」补录成交后自动生成。")
+        st.info("账户还没有净值曲线：在「记录」补录成交后自动生成。")
         return
     _curves, _gap_def, _gap_strat = {}, None, None
     if float(_mine.iloc[0]) > 0:
@@ -5571,7 +5608,7 @@ def _acct_compare_view() -> None:
                     "以及回测用累计净值/实盘用单位净值的口径差。")
     st.caption("三条线都以**建仓日 = 0%**，图上不看净值绝对值 —— 账户是两个基准各自归一出来的，"
                "只有收益率能放到同一把尺子上；两条差距就是「我的收益率 − 基准收益率」。"
-               "图上可以拖动缩放、切日/月/年线，和「基金检索」页的用法一致。")
+               "图上可以拖动缩放、切日/月/年线，和「市场 · 基金检索」页的用法一致。")
 
 
 def _acct_health_view() -> None:
@@ -5589,7 +5626,7 @@ def _acct_health_view() -> None:
     )
     _rows = [r for r in _plan["rows"] if float(r["shares"] or 0) > 0]
     if not _rows:
-        st.info("还没有持仓：先到「交易记录」补录成交，这里才有可体检的对象。")
+        st.info("还没有持仓：先到「记录」补录成交，这里才有可体检的对象。")
         return
     _m = _al["指标"]
 
@@ -5626,10 +5663,10 @@ def _acct_health_view() -> None:
     _multi = any(sum(1 for r in _rows if r["slot"] == k) > 1 for k in _slot_w)
     if _multi:
         _row("单只最大占比", f"{_big['w_now']*100:.1f}%（{_nm(_big)}）", "25%", "偏高",
-             "一只基金的涨跌就能左右整个账户", "；想分散到「权重与选基」给这个位置再挂一只同类基金",
+             "一只基金的涨跌就能左右整个账户", "；想分散到「选基配置」给这个位置再挂一只同类基金",
              float(_big["w_now"] or 0) > 0.25)
         _row("单一位置最大占比", f"{_slot_max*100:.1f}%（{HG.SLOT_LABEL.get(_slot_k, _slot_k)}）", "50%", "偏高",
-             "整个位置同涨同跌，相当于半个账户压在一个资产上", "；压不压看「帮你算」给的目标比例",
+             "整个位置同涨同跌，相当于半个账户压在一个资产上", "；压不压看「调仓」给的目标比例",
              _slot_max > 0.50)
     else:
         _row("最大仓位", f"{_slot_max*100:.1f}%（{_nm(_big)} · 位置「{HG.SLOT_LABEL.get(_slot_k, _slot_k)}」）",
@@ -5642,7 +5679,7 @@ def _acct_health_view() -> None:
     if _cash_r >= 0.005:
         _row("现金占比", f"{_cash_r*100:.1f}%", "15%", "偏多",
              "卖出回款或转入的钱还没买成基金，闲着拖低收益",
-             "；到「帮你算 · 新钱怎么分」按目标比例买掉", _cash_r > 0.15)
+             "；到「调仓 · 新钱怎么分」按目标比例买掉", _cash_r > 0.15)
     _row("最大回撤",
          (f"{_mdd*100:.2f}%（账户 {_days} 天）" if _mdd is not None else "—"), "12%", "超线",
          "净值从最高点回落的最大幅度，越深越考验能不能拿住", "；扛不住就降波动，别硬撑",
@@ -5653,7 +5690,7 @@ def _acct_health_view() -> None:
              float(_worst["pl"]) <= -0.15)
     if _dev is not None:
         _row("偏离目标最大", f"{float(_dev['dev'])*100:+.1f}pp（{_nm(_dev)}）", "±5pp", "该调了",
-             "和策略目标已经拉开距离，再放下去就是「凭感觉持仓」", "；调多少看「帮你算」",
+             "和策略目标已经拉开距离，再放下去就是「凭感觉持仓」", "；调多少看「调仓」",
              abs(float(_dev["dev"])) >= 0.05)
 
     # ---- 结论卡：全正常只报平安，越线才说「越了哪条、去哪处理」 ----
@@ -5676,7 +5713,7 @@ def _acct_health_view() -> None:
     _tail = []
     if _days and _days < 120:
         _tail.append(f"账户才 {_days} 天，回撤和浮亏这两个数还说明不了太多，样本长起来才准。")
-    _tail.append("这里的判断只看账户层面；策略该不该触发在「模型 · 信号」，真要动手在「帮你算」。")
+    _tail.append("这里的判断只看账户层面；策略该不该触发在「市场 · 策略信号」，真要动手在「调仓」。")
     st.caption("".join(_tail))
 
 
@@ -5771,7 +5808,7 @@ def _head_month_curve_html() -> str:
 # ============================================================
 # Tab 3: 我的账户（持仓 / 收益 / 对比 / 体检 四个子页签）
 # ============================================================
-with tab3:
+def _pg_assets() -> None:
     # 标题和一大段「一页四看」说明撤掉：头卡自己就说明了这是哪儿，
     # 四个子页签各管什么写在切换器的悬停提示里，不用每次进来都读一遍
 
@@ -5812,7 +5849,7 @@ with tab3:
     )
 
     # ---- 头卡下面一行结论：这一轮要不要动手 ----
-    # 只说「有没有事、去哪看」，一个金额都不报 —— 该买该卖多少只存在「帮你算」一处，
+    # 只说「有没有事、去哪看」，一个金额都不报 —— 该买该卖多少只存在「调仓」一处，
     # 两边各标一遍迟早会打脸（这条是从「提醒」页被删那次的教训里留下的）
     _st = _plan_status()
     if _plan["rows"]:
@@ -5821,19 +5858,23 @@ with tab3:
                 '<div class="todo-bar"><span class="lead">该动手了</span>'
                 f'<span>有 {_st["n"]} 笔要下'
                 + (f'，其中 {_st["liq"]} 笔是清仓' if _st.get("liq") else '') + '</span>'
-                '<span class="go">清单在「帮你算 · 存量调仓」→</span></div>',
+                '<span class="go">清单在「调仓」→</span></div>',
                 unsafe_allow_html=True)
         elif _st["kind"] == "stuck":
             st.markdown(
                 '<div class="todo-bar warn"><span class="lead">偏离超标，但这一轮买不进</span>'
                 f'<span>{_st["n"]} 个位置超过 0.5%，一手就顶掉整个缺口</span>'
-                '<span class="go">为什么在「帮你算 · 存量调仓」→</span></div>',
+                '<span class="go">为什么在「调仓」→</span></div>',
                 unsafe_allow_html=True)
         else:
             st.markdown(
                 '<div class="todo-bar calm"><span class="lead">这一轮不用动</span>'
                 '<span>仓位都在目标附近，不折腾省手续费</span></div>',
                 unsafe_allow_html=True)
+
+    with st.container(key="asset_links", horizontal=True, gap="small"):
+        st.page_link(PG_WEIGHTS, label="选基配置 · 每个位置挂哪只基金 ›", icon=":material/tune:",
+                     query_params={"acct": _aid})
 
     # ---- 一页四看：持仓 / 收益 / 对比 / 信号（说的是同一个账户，只是角度不同）----
     with st.container(key="acct_view_switch"):
@@ -5845,11 +5886,11 @@ with tab3:
         ) or "持仓"
 
     if _av == "持仓":
-        # 这一页只回答「手里有什么、占多少」。该买该卖多少一律在「帮你算」，
+        # 这一页只回答「手里有什么、占多少」。该买该卖多少一律在「调仓」，
         # 这里连个数都不报 —— 同一件事两个页面各标一遍，迟早互相打脸。
         # ---- 持仓列表：一只基金一行，点一下就地展开、再点一下收起 ----
         if not _plan["rows"] and not _plan["other"]:
-            st.info("还没有挂任何基金 —— 到「权重与选基」页底部给位置加一只，或点「恢复项目默认代码」。")
+            st.info("还没有挂任何基金 —— 到「选基配置」页底部给位置加一只，或点「恢复项目默认代码」。")
         else:
             _pf_rows = [_pf_row(it) for it in _plan["rows"]]
             for _o in _plan["other"]:          # 位置关掉了、或配置里已删，账上还留着份额的代码
@@ -5879,7 +5920,7 @@ with tab3:
                     # 这句解释放进详情面板、贴着被点的那一行：留在列表上方的话，
                     # 选中/取消各来一次，整张表就上下平移 37px —— 那正是「点一下抖一下」的来源
                     _sel_note = (f"这只基金所在的{_why}（账上还有 ¥{_sel_other['mv']:,.0f}，占着总资产）："
-                                 "想卖就到「交易记录」记一笔卖出，想继续拿就把位置重新打开 —— "
+                                 "想卖就到「记录」记一笔卖出，想继续拿就把位置重新打开 —— "
                                  "否则它不参与这一轮的调仓。")
                     _sel_it = _hg_other_item(_pf_open,
                                              "位置已关闭" if _sel_other.get("in_cfg") else "不在配置里")
@@ -5916,8 +5957,8 @@ with tab3:
                 st.caption(
                     f"另有 **¥{_other_sum:,.0f}**（占 {_other_sum / _plan['total'] * 100 if _plan['total'] else 0:.0f}%）"
                     "落在「位置已关闭 / 不在配置里」的基金上（上表最后几行）：钱是你的、也算进总金额，"
-                    "但**不参与目标权重和调仓**。想让它继续干活就到「权重与选基」把那个位置打开，"
-                    "不想拿就到「交易记录」记一笔卖出。"
+                    "但**不参与目标权重和调仓**。想让它继续干活就到「选基配置」把那个位置打开，"
+                    "不想拿就到「记录」记一笔卖出。"
                 )
 
     elif _av == "收益":
@@ -5931,34 +5972,34 @@ with tab3:
 # Tab 3: 帮你算 —— 全站唯一给出「该买/卖多少」的地方，只算不写账
 #   · 存量调仓：钱已经在账户里，把现有仓位调回目标比例（可能一边买一边卖）
 #   · 新钱怎么分：往账户里新投一笔钱，只买不卖
-# 两边都不再提供「登记成成交」—— 记什么、记多少，由你到「交易记录」自己填。
+# 两边都不再提供「登记成成交」—— 记什么、记多少，由你到「记录」自己填。
 # 原来这是两个独立页签（买卖提醒 / 定投一笔），同一件事要在两个页面上看金额，现已合并。
 # ============================================================
 def _calc_rebalance() -> None:
     st.markdown(
         '<div class="sec-head"><span class="t">存量调仓 · 把仓位调回目标比例</span>'
-        '<span class="r">只算不记账 · 算完到「交易记录」自己填</span></div>',
+        '<span class="r">只算不记账 · 算完到「记录」自己填</span></div>',
         unsafe_allow_html=True,
     )
     st.caption(
         "钱已经在账户里，这里只回答一件事：把现有仓位调回目标比例，该买什么、卖什么、各多少（可能一边买一边卖）。"
-        "**这是「计划」，不是流水** —— 具体记哪几笔，到「交易记录」自己填；"
+        "**这是「计划」，不是流水** —— 具体记哪几笔，到「记录」自己填；"
         "新投一笔钱怎么分，切到「新钱怎么分」。"
     )
 
     if not _plan["has_acct"]:
-        st.info("还没有账户：先到「交易记录」建一个账户（填一笔初始资金），之后这里就会按你的真实持仓算买卖。")
+        st.info("还没有账户：先到「记录」建一个账户（填一笔初始资金），之后这里就会按你的真实持仓算买卖。")
     elif _plan["total"] <= 0:
-        st.info("账户里还没有钱和持仓：先到「交易记录」建账户时填上初始资金，再在支付宝买好后补录买入。")
+        st.info("账户里还没有钱和持仓：先到「记录」建账户时填上初始资金，再在支付宝买好后补录买入。")
     elif _plan["asset"] <= 0:
         # 钱都在「位置已关闭 / 配置里已删」的代码上：能算不能动，先告诉人怎么把钱挪出来
         st.warning(
             f"账户里有 ¥{_plan['total']:,.0f}，但都落在**已关闭或已删掉的位置**里，没有可调仓的钱。"
             "这些份额不参与调仓（见「我的账户」里标「位置已关闭 / 不在配置里」的行）："
-            "想继续拿就把它所在的位置重新打开，想换掉就到「交易记录」逐笔记卖出。"
+            "想继续拿就把它所在的位置重新打开，想换掉就到「记录」逐笔记卖出。"
         )
     elif not _plan["rows"]:
-        st.warning("还没有挂任何基金：先到「权重与选基」给位置加一只，或点右上角「更新数据」拉取净值。")
+        st.warning("还没有挂任何基金：先到「选基配置」给位置加一只，或点右上角「更新数据」拉取净值。")
     else:
         # ---- 结论：这一轮动不动、买多少卖多少 ----
         # 判断只在 _plan_status() 里做一次，「我的账户」顶部那条读的是同一份
@@ -6052,16 +6093,16 @@ def _calc_rebalance() -> None:
                     "或者把买入的那几笔按比例调小，差额留到下次。"
                 )
             st.caption("金额按最新净值估算；实际以你在支付宝成交的价格为准。"
-                       "这一页不写账 —— 成交后到「交易记录」逐笔填日期 / 金额 / 单价，"
+                       "这一页不写账 —— 成交后到「记录」逐笔填日期 / 金额 / 单价，"
                        "差多少都能就地改。")
 
 # ============================================================
-# 「帮你算」的另一半：新钱怎么分（只买不卖）
+# 「调仓」的另一半：新钱怎么分（只买不卖）
 # ============================================================
 def _calc_dca() -> None:
     st.markdown(
         '<div class="sec-head"><span class="t">新钱怎么分 · 这一笔只买不卖</span>'
-        '<span class="r">只算不记账 · 算完到「交易记录」自己填</span></div>',
+        '<span class="r">只算不记账 · 算完到「记录」自己填</span></div>',
         unsafe_allow_html=True,
     )
     st.caption(
@@ -6070,11 +6111,11 @@ def _calc_dca() -> None:
     )
 
     if not _plan["has_acct"]:
-        st.info("还没有账户：先到「交易记录」建一个账户（填一笔初始资金），之后这里才能按目标权重分钱。")
+        st.info("还没有账户：先到「记录」建一个账户（填一笔初始资金），之后这里才能按目标权重分钱。")
     elif _plan["total"] <= 0:
-        st.info("账户里还没有钱和持仓：先到「交易记录」建账户时填上初始资金，再在支付宝买好后补录买入。")
+        st.info("账户里还没有钱和持仓：先到「记录」建账户时填上初始资金，再在支付宝买好后补录买入。")
     elif not _plan["rows"]:
-        st.warning("还没有挂任何基金：先到「权重与选基」给位置加一只，或点右上角「更新数据」拉取净值。")
+        st.warning("还没有挂任何基金：先到「选基配置」给位置加一只，或点右上角「更新数据」拉取净值。")
     else:
         # ---------------- 新钱怎么分：按目标权重分，直接给出每只买多少份 ----------------
         with st.container(key="dca_card"):
@@ -6189,7 +6230,7 @@ def _calc_dca() -> None:
                     + (f"按现在的权重，这次至少要投 ¥{_dc_min_need:,.0f} 才能每个位置都买到一手。"
                        if _dc_min_need > 0 else "")
                     + "\n\n如果这只基金你其实是在支付宝按**金额**买的，说明它的「买卖单位」被记成了「股」，"
-                    "到「权重与选基」页底改成「份额」就能算份额；如果确实是场内 ETF，就调大金额。"
+                    "到「选基配置」页底改成「份额」就能算份额；如果确实是场内 ETF，就调大金额。"
                 )
             _dc_skip = [_s for _s in _dc_slots if _s not in _dc_slot_alloc]
             st.caption(
@@ -6216,13 +6257,13 @@ def _calc_dca() -> None:
                 st.warning(f"账户现金只有 ¥{_plan['cash']:,.0f}，这笔要买 ¥{_dc_buy:,.0f} —— "
                            "把这次的金额调小到现金以内再算。")
             st.caption("按最新净值估算；实际成交净值以支付宝确认为准。"
-                       "这一页不写账 —— 成交后到「交易记录」逐笔填日期 / 金额 / 单价。")
+                       "这一页不写账 —— 成交后到「记录」逐笔填日期 / 金额 / 单价。")
 
 
 # ============================================================
-# 「帮你算」页：两个子视图共用一个页签，都只算不写
+# 「调仓」页：两个子视图共用一个页签，都只算不写
 # ============================================================
-with tab_calc:
+def _pg_calc() -> None:
     with st.container(key="calc_switch"):
         _calc_view = st.segmented_control(
             "算哪种", ["存量调仓", "新钱怎么分"], default="存量调仓", key="calc_view",
@@ -6238,7 +6279,7 @@ with tab_calc:
 # ============================================================
 # Tab 5: 交易记录（补录 + 台账）—— 只记录支付宝上实际发生了什么
 # ============================================================
-with tab5:
+def _pg_trades() -> None:
     _cash, _mv_all, _total = (float(_plan["cash"]), float(_plan["mv_all"]),
                               float(_plan["total"]))
     st.markdown(
@@ -6248,14 +6289,14 @@ with tab5:
         unsafe_allow_html=True,
     )
     st.caption("这一页只记「实际做了什么」，每一笔都会立刻重算持仓和收益。"
-               "「帮你算」里的那份是策略算出来的计划，记不记、记多少由你。"
+               "「调仓」里的那份是策略算出来的计划，记不记、记多少由你。"
                "只有两种类型：**买入** 把现金换成基金，**卖出** 把基金换回现金 —— "
                "卖出的钱自动回到账户现金里，不用另外记一笔。")
     _slot_opts = _hg_slot_options()
     if acct is None:
         st.info("没有选中账户：点右上角「切换账户」回到入口页选一个。")
     elif not _slot_opts:
-        st.warning("还没有挂任何基金：先到「权重与选基」给位置加至少一只基金，才能记账。")
+        st.warning("还没有挂任何基金：先到「选基配置」给位置加至少一只基金，才能记账。")
     else:
         _trades = acct.setdefault("trades", [])
 
@@ -6263,7 +6304,7 @@ with tab5:
         # 0 开头的开放式基金在支付宝申购（场外）。但它决定**记账单位**，所以要在表单里说出来：
         #   场内 → 按「股」，100 股一手，价格一天里随时变，还有溢价折价；
         #   场外 → 按「份额」，按金额申购，份额带两位小数，一天只有一个净值。
-        # 判错了不用改代码：「权重与选基」页底的「买卖单位」一列可以改成股 / 份额，这里以那里为准；
+        # 判错了不用改代码：「选基配置」页底的「买卖单位」一列可以改成股 / 份额，这里以那里为准；
         # 没改过的（unit 还是默认值）就用代码 + 申购状态猜。
         _unit_of: dict[str, str] = {}
         for _s0 in HG.SLOTS:
@@ -6301,7 +6342,7 @@ with tab5:
             tr_slot = rB[2].selectbox(
                 "基金", _slot_opts, format_func=lambda x: x[2], key="tr_fund",
                 help="这只基金按「股」还是按「份额」记账，由它的代码决定（ETF/LOF 场内按股，"
-                     "开放式基金场外按份额）；判错了到「权重与选基」页底把「买卖单位」改成份额 / 股。")
+                     "开放式基金场外按份额）；判错了到「选基配置」页底把「买卖单位」改成份额 / 股。")
             tr_amount = rB[3].number_input("金额（元）", min_value=0.0, step=1000.0,
                                            format="%.2f", key="tr_amount")
             _nav_hint = _hg_nav_on(None, tr_date, tr_slot[1])
@@ -6424,7 +6465,7 @@ with tab5:
             + "".join(_it_html) + '</div>', unsafe_allow_html=True)
 
         if not _trades:
-            st.caption("还没有成交。上面记一笔即可；「帮你算」只给金额，不会自己写账。")
+            st.caption("还没有成交。上面记一笔即可；「调仓」只给金额，不会自己写账。")
         elif not _f_tr:
             st.caption("这只基金还没有成交记录。")
         else:
@@ -6873,7 +6914,7 @@ _CAT = {"hs300": "宽基·A股", "us_sp500": "宽基·美股", "credit": "信用
 _BT_FIXED = [{"code": f"bt:{a}", "label": f"{ETF_META.get(a, {}).get('code', '')} {ETF_META.get(a, {}).get('name', a)}",
               "tag": "回测资产"} for a in _ACCT_ASSETS]
 
-with tab7:
+def _pg_funds() -> None:
     # 视图切换：单只走势 / 多只对比（原「基金对比」页合并到这里，少一个标签页）
     _MODE_S, _MODE_C = "单只走势", "多只对比"
     with st.container(key="trend_mode_switch"):
@@ -7244,7 +7285,7 @@ def _custom_portfolio_panel():
         if _mine:
             _dates = _acct_trade_dates()
             if acct is None or not _dates:
-                st.info("当前账户还没有买卖记录，没有「操作日」可以回测 —— 先在「交易记录」里记几笔。")
+                st.info("当前账户还没有买卖记录，没有「操作日」可以回测 —— 先在「记录」里记几笔。")
                 return
             _c0 = pd.Timestamp(acct.get("created") or _dates[0])
             _pf = load_panel(end=pd.Timestamp.today().strftime("%Y-%m-%d"))
@@ -7338,7 +7379,7 @@ def _custom_portfolio_panel():
 # ============================================================
 # Tab 8: 三策略比较 / 调频影响（统一月度、年度、多年视图）
 # ============================================================
-with tab8:
+def _pg_backtest() -> None:
     _custom_portfolio_panel()
     st.caption("回测面板从 2015-01-01 起 —— 卡点是短融（bond_short）：511360 上市前只有中证短融指数、"
                "序列从 2015 年开始，而面板要等所有资产都就绪。30 年国债的合成序列能回到 2005-01-06，"
@@ -7348,7 +7389,7 @@ with tab8:
 # ============================================================
 # Tab 10: 指数估值 —— 蛋卷估值快照 + 近10年 PE/PB 走势（仅展示，不进入策略计算）
 # ============================================================
-with tab10:
+def _pg_valuation() -> None:
     _vp = _valuation_payload()
     if not _vp:
         with st.container(key="val_head"):
@@ -7378,3 +7419,62 @@ with tab10:
             + (f' · PE/PB 百分位较高者 {_x["pct"]:.0f}%' if _x.get("pct") is not None else ""),
             "估值只作加减仓参考，不进策略信号；评分 ≥18 猎杀区、≤6 泡沫区"),
             unsafe_allow_html=True)
+
+
+# ============================================================
+# 多页面导航：手机底部 4 个入口、电脑顶部一排；点进去的下一级页面左上角「‹ 返回」
+# 每个页面有自己的网址（/calc、/trades、/market/funds…），浏览器返回键、刷新、收藏都正常
+# ============================================================
+def _subpage_header(title: str, parent, parent_label: str) -> None:
+    """下一级页面的页头：‹ 返回上一级 + 页面标题（手机上就是 App 里那条返回栏）。"""
+    with st.container(key="subhead", horizontal=True, vertical_alignment="center", gap="small"):
+        st.page_link(parent, label=parent_label, icon=":material/chevron_left:", query_params={"acct": _aid})
+        st.markdown(f'<span class="subhead-t">{html_escape(title)}</span>', unsafe_allow_html=True,
+                    width="content")
+
+
+def _pg_market() -> None:
+    """「市场」：四个公共页面的入口（行情、模型、估值，哪个账户里看都一样）。"""
+    st.markdown('<div class="sec-head"><span class="t">市场</span>'
+                '<span class="r">公共页面：跟账户无关，换账户内容不变</span></div>', unsafe_allow_html=True)
+    for _pg, _desc in ((PG_FUNDS, "搜任意基金，看走势、回撤、和别的基金对比"),
+                       (PG_SIGNALS, "三个策略这一轮触发了哪些趋势过滤"),
+                       (PG_BACKTEST, "三个策略的历史回测、调仓节奏对比、自定义策略"),
+                       (PG_VALUATION, "指数 PE / PB 分位，贵不贵")):
+        with st.container(key=f"mk_{_pg.url_path.replace('/', '_')}", border=True):
+            st.page_link(_pg, label=_pg.title, icon=_pg.icon, query_params={"acct": _aid})
+            st.markdown(f'<div class="mk-d">{_desc}</div>', unsafe_allow_html=True)
+
+
+def _with_back(fn, title, parent, parent_label):
+    def _run():
+        _subpage_header(title, parent, parent_label)
+        fn()
+    return _run
+
+
+PG_ASSETS = st.Page(_pg_assets, title="资产", icon=":material/account_balance_wallet:", url_path="", default=True)
+PG_CALC = st.Page(_pg_calc, title="调仓", icon=":material/swap_horiz:", url_path="calc")
+PG_TRADES = st.Page(_pg_trades, title="记录", icon=":material/receipt_long:", url_path="trades")
+PG_MARKET = st.Page(_pg_market, title="市场", icon=":material/insights:", url_path="market")
+PG_FUNDS = st.Page(_with_back(_pg_funds, "基金检索", PG_MARKET, "市场"), title="基金检索",
+                   icon=":material/search:", url_path="funds")
+PG_SIGNALS = st.Page(_with_back(_pg_signals, "策略信号", PG_MARKET, "市场"), title="策略信号",
+                     icon=":material/sensors:", url_path="signals")
+PG_BACKTEST = st.Page(_with_back(_pg_backtest, "回测", PG_MARKET, "市场"), title="回测",
+                      icon=":material/query_stats:", url_path="backtest")
+PG_VALUATION = st.Page(_with_back(_pg_valuation, "指数估值", PG_MARKET, "市场"), title="指数估值",
+                       icon=":material/thermostat:", url_path="valuation")
+PG_WEIGHTS = st.Page(_with_back(_pg_weights, "选基配置", PG_ASSETS, "资产"), title="选基配置",
+                     icon=":material/tune:", url_path="weights")
+_TOP = [PG_ASSETS, PG_CALC, PG_TRADES, PG_MARKET]
+_PARENT = {PG_FUNDS.url_path: PG_MARKET, PG_SIGNALS.url_path: PG_MARKET, PG_BACKTEST.url_path: PG_MARKET,
+           PG_VALUATION.url_path: PG_MARKET, PG_WEIGHTS.url_path: PG_ASSETS}
+
+_pg = st.navigation(_TOP + [PG_FUNDS, PG_SIGNALS, PG_BACKTEST, PG_VALUATION, PG_WEIGHTS], position="hidden")
+_cur_top = _PARENT.get(_pg.url_path, _pg)
+with st.container(key="app_nav", horizontal=True, gap=None):
+    for _p in _TOP:
+        with st.container(key=f"nav_{_p.url_path or 'home'}_{'on' if _p.url_path == _cur_top.url_path else 'off'}"):
+            st.page_link(_p, label=_p.title, icon=_p.icon, query_params={"acct": _aid})
+_pg.run()
