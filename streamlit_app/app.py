@@ -453,50 +453,30 @@ hr{ border-color:var(--line); margin:1.6rem 0; }
 div[data-testid="stAlert"]{ background:#EFF6FF; border-color:var(--brand-soft) !important; }
 div[data-testid="stAlert"] p{ color:var(--brand-strong); }
 
-/* ========== 侧边栏 ========== */
-[data-testid="stSidebar"]{ background:var(--card); border-right:1px solid var(--line); }
-[data-testid="stSidebar"] .block-container{ padding:1.4rem 1.2rem 2.4rem; }
-.sb-brand{
-  display:flex; align-items:center; gap:10px; margin:2px 0 24px;
-  font-size:17px; font-weight:700; letter-spacing:-.2px; color:var(--ink);
-}
-.sb-brand .mark{
-  width:32px; height:32px; border-radius:10px; display:inline-flex; align-items:center; justify-content:center;
+/* ========== 页头：品牌 + 账户跟随 + 数据截止（原来在侧边栏，侧边栏已撤） ========== */
+.hero-brand{ display:flex; align-items:center; gap:12px; }
+.hero-mark{
+  width:40px; height:40px; border-radius:12px; display:inline-flex; align-items:center; justify-content:center;
   background:linear-gradient(135deg,#1E40AF,#3B82F6); color:#fff; flex:0 0 auto;
 }
-.sb-brand .mark svg{ width:18px; height:18px; }
-.sb-label{ font-size:11px; color:var(--muted); letter-spacing:1px; margin:20px 0 5px; text-transform:uppercase; }
-/* 账户跟随的策略：只读展示，换策略在「权重与选基」（要先看预览，不能一点就换） */
-.sb-strat{ font-size:14.5px; font-weight:650; color:var(--ink); padding:9px 12px; border-radius:10px;
-  background:#EEF2FF; border:1px solid #DBE3FB; }
-.sb-hint{ font-size:11.5px; color:var(--muted); margin:6px 2px 0; }
-.sb-divider{ border-top:1px solid var(--line); margin:18px 0 12px; }
-/* 数据拉取失败提示 */
-.sb-fetch-err{
-  margin-top:10px; padding:9px 11px; font-size:12px; line-height:1.5;
+.hero-mark svg{ width:22px; height:22px; }
+.hero-meta{ display:flex; align-items:center; gap:10px 14px; flex-wrap:wrap; margin-top:10px; }
+/* 账户跟随：全站最有后果的一个设定（决定「帮你算」整张清单），所以要比数据日期显眼 */
+.hero-strat{ display:inline-flex; align-items:center; gap:8px; padding:5px 12px 5px 10px;
+  border-radius:999px; background:#EEF2FF; border:1px solid #C7D2FE; }
+.hero-strat .k{ font-size:12px; color:var(--brand); font-weight:500; }
+.hero-strat b{ font-size:14px; color:var(--brand-strong); font-weight:700; }
+.hero-strat .h{ font-size:11.5px; color:var(--muted); border-left:1px solid #C7D2FE; padding-left:8px; }
+.hero-date{ font-size:13px; color:var(--sub); }
+.hero-bg{ font-size:12px; color:var(--muted); }
+/* 数据拉取失败：页头下一条红色横幅 */
+.fetch-err{
+  margin:-6px 0 14px; padding:9px 12px; font-size:12.5px; line-height:1.55;
   border-radius:10px; background:#FEF2F2; border:1px solid #FECACA; color:var(--red);
 }
-.sb-fetch-err-detail{ margin-top:4px; color:#991B1B; font-size:11px; word-break:break-all; }
-/* 单选组做成等宽"列表项"，选中项浅底高亮 */
-[data-testid="stSidebar"] [data-testid="stElementContainer"]:has([data-testid="stRadio"]),
-[data-testid="stSidebar"] [data-testid="stRadio"],
-[data-testid="stSidebar"] [data-testid="stRadioGroup"],
-[data-testid="stSidebar"] [role="radiogroup"]{ width:100% !important; }
-[data-testid="stSidebar"] [role="radiogroup"]{ gap:4px; display:flex; flex-direction:column; }
-[data-testid="stSidebar"] [role="radiogroup"] > div{ width:100% !important; }
-[data-testid="stSidebar"] [role="radiogroup"] label{
-  border:1px solid transparent; border-radius:10px; padding:9px 12px;
-  font-size:14px; transition:background .12s; cursor:pointer;
-  display:flex; align-items:center; width:100%; box-sizing:border-box;
-}
-[data-testid="stSidebar"] [role="radiogroup"] label:hover{ background:var(--bg); }
-[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked){
-  background:var(--brand-soft); border-color:var(--brand-soft); color:var(--brand-strong); font-weight:600;
-}
-[data-testid="stSidebar"] [data-testid="stButton"]>button{
-  width:100%; justify-content:flex-start; color:var(--sub); font-weight:500;
-}
-[data-testid="stSidebar"] [data-testid="stCaptionContainer"]{ font-size:11px; margin-top:6px; }
+.fetch-err-detail{ margin-top:3px; color:#991B1B; font-size:11.5px; word-break:break-all; }
+/* 没有侧边栏了：连带把左上角那个展开箭头也收掉 */
+[data-testid="stSidebarCollapsedControl"], [data-testid="stExpandSidebarButton"]{ display:none; }
 
 /* ========== 基金检索页：含阶段数字的概览 / 走势分析 ========== */
 /* 基金检索 / 收益日历 / 基金对比 共用同一卡片容器 */
@@ -635,7 +615,7 @@ div[data-testid="stAlert"] p{ color:var(--brand-strong); }
 [data-testid="stDecoration"]{ display:none; }
 [data-testid="stStatusWidget"]{ display:none; }
 #MainMenu{ visibility:hidden; }
-/* 注意：不要隐藏 stHeader / stToolbar 容器，侧边栏"展开"按钮在里面 */
+/* stHeader / stToolbar 容器保留（右上角菜单在里面）；侧边栏已撤，展开箭头在页头样式里单独隐藏 */
 
 /* ========== 响应式 ========== */
 @media(max-width:640px){
@@ -1724,10 +1704,6 @@ def _check_data_staleness():
 # ============================================================
 # Sidebar
 # ============================================================
-st.sidebar.markdown(
-    f'<div class="sb-brand"><span class="mark">{_LOGO_SVG}</span>全天候再平衡</div>',
-    unsafe_allow_html=True,
-)
 
 _strat_display = {"B-Con": "V3-B 保守增强", "B-RP": "V3-B 风险平价", "V3c": "V3c 多元"}
 _STRAT_KEYS = ["B-Con", "B-RP", "V3c"]
@@ -1741,11 +1717,7 @@ _STRAT_KEYS = ["B-Con", "B-RP", "V3c"]
 ACCT_FILE = DATA_DIR / "sim_account.json"
 acct = load_acct(ACCT_FILE)
 strat_key = (acct or {}).get("strategy") if (acct or {}).get("strategy") in _STRAT_KEYS else "B-Con"
-st.sidebar.markdown('<div class="sb-label">账户跟随</div>'
-                    f'<div class="sb-strat">{_strat_display[strat_key]}</div>'
-                    '<div class="sb-hint">在「权重与选基」里换</div>',
-                    unsafe_allow_html=True)
-st.sidebar.markdown('<div class="sb-divider"></div>', unsafe_allow_html=True)
+# 显示在页头「全天候再平衡」下面（侧边栏已撤：只剩这一项和数据日期，不值得占一整列）
 
 def _fetch_everything():
     """拉取全部数据（不依赖页面会话，前台按钮和后台线程共用）。返回 (错误列表, 说明列表)。
@@ -1823,8 +1795,7 @@ if "auto_fetch_done" not in st.session_state:
 _bg_status = None
 if staleness_days is not None and staleness_days >= 1 and not st.session_state.auto_fetch_done:
     _bg_status = _start_background_fetch()
-if (_bg_fetch_state()["thread"] is not None and _bg_fetch_state()["thread"].is_alive()):
-    st.sidebar.caption("⟳ 后台正在更新数据，完成后刷新页面即可看到最新值")
+_bg_running = bool(_bg_fetch_state()["thread"] is not None and _bg_fetch_state()["thread"].is_alive())
 
 # 按钮文案 = 动作（更新数据），状态写在提示里；「数据已是最新」像状态标签，不像能点的按钮
 if staleness_days is not None:
@@ -1839,15 +1810,7 @@ if staleness_days is not None:
 else:
     _data_state = ("err", "拉取数据", "数据缺失，点击拉取")
 
-# 数据拉取失败提示：任何资产拉取失败都在侧边栏顶部醒目展示
-if st.session_state.get("fetch_errors"):
-    _errs = st.session_state.fetch_errors
-    _err_txt = "<br>".join(html_escape(e) for e in _errs)
-    st.sidebar.markdown(
-        f'<div class="sb-fetch-err">⚠️ 数据拉取失败 {len(_errs)} 项'
-        f'<div class="sb-fetch-err-detail">{_err_txt}</div></div>',
-        unsafe_allow_html=True,
-    )
+# 数据拉取失败提示：在页头下面一条红色横幅（见 Hero）
 
 # ============================================================
 # 数据加载（直接读 CSV，不截断到 BACKTEST_END）
@@ -1886,7 +1849,6 @@ def _load_prices_and_signals():
 prices, signals = _load_prices_and_signals()
 
 last_date = prices.index[-1].strftime("%Y-%m-%d")
-st.sidebar.caption(f"数据截止：{_cn_date(last_date)}")
 
 missing = sorted({a for k in _STRAT_KEYS for a in STRATEGIES[k]["assets"] if a not in prices.columns})
 if missing:
@@ -2084,7 +2046,7 @@ def _replay_holdings(trades, capital, created, by_day: dict | None = None):
 
 
 _hg_panel = HG.nav_panel(holdings)
-# ACCT_FILE / acct 已在侧边栏处加载：账户策略决定目标权重，得在算权重之前读到
+# ACCT_FILE / acct 已在文件前部（算权重之前）加载：账户策略决定目标权重
 
 
 def _migrate_trades(a: dict) -> bool:
@@ -4442,12 +4404,17 @@ def _closed_rounds() -> list[dict]:
 _hero_cols = st.columns([3, 2], vertical_alignment="bottom")
 with _hero_cols[0]:
     st.markdown(
-        f"""<div class="hero">
-          <div>
-            <div class="hero-title">全天候再平衡</div>
-            <div class="hero-sub">数据截止 {_cn_date(last_date)} · 账户跟随 {cfg['name']}</div>
-          </div>
-        </div>""",
+        # 拼成一行：多行 f-string 里条件为空会留下空行，空行后缩进的 </div> 被 Markdown 当成代码块显示出来
+        '<div class="hero"><div>'
+        f'<div class="hero-brand"><span class="hero-mark">{_LOGO_SVG}</span>'
+        '<span class="hero-title">全天候再平衡</span></div>'
+        '<div class="hero-meta">'
+        '<span class="hero-strat" title="决定「帮你算」的清单、状态条和体检的偏离目标">'
+        f'<span class="k">账户跟随</span><b>{_strat_display[strat_key]}</b>'
+        '<span class="h">在「权重与选基」里换</span></span>'
+        f'<span class="hero-date">数据截止 {_cn_date(last_date)}</span>'
+        + ('<span class="hero-bg">⟳ 后台正在更新数据，完成后刷新即可</span>' if _bg_running else '')
+        + '</div></div></div>',
         unsafe_allow_html=True,
     )
 with _hero_cols[1], st.container(key="hero_actions", horizontal=True, horizontal_alignment="right",
@@ -4463,10 +4430,19 @@ with _hero_cols[1], st.container(key="hero_actions", horizontal=True, horizontal
         st.toast("正在更新行情、净值和估值，约 10~30 秒…", icon=":material/sync:", duration="long")
         _errs = _update_all_data()
         if _errs:
-            st.toast(f"有 {len(_errs)} 项拉取失败，详见侧边栏提示", icon=":material/error:")
+            st.toast(f"有 {len(_errs)} 项拉取失败，详见页头下方提示", icon=":material/error:")
         else:
             st.toast("行情与估值已更新", icon=":material/check_circle:")
         st.rerun()
+
+# 拉取失败：原来塞在侧边栏底下，侧边栏撤了就放页头正下方，比原来更不容易漏看
+if st.session_state.get("fetch_errors"):
+    _errs = st.session_state.fetch_errors
+    st.markdown(
+        f'<div class="fetch-err">⚠️ 数据拉取失败 {len(_errs)} 项'
+        f'<div class="fetch-err-detail">{"<br>".join(html_escape(e) for e in _errs)}</div></div>',
+        unsafe_allow_html=True,
+    )
 
 # ============================================================
 # Main Tabs
