@@ -6980,6 +6980,23 @@ def _cp_run(rets, cfg):
                       weighting_method="hierarchical_rp").nv
 
 
+_CADENCE = {"月末（默认）": "monthly", "双周": "biweekly", "每周": "weekly", "我的操作日": "mine"}
+
+
+def _acct_trade_dates() -> list:
+    """当前账户真动过手的日子（买入 / 卖出），去重排序。转入转出不算调仓。"""
+    if acct is None:
+        return []
+    out = set()
+    for t in acct.get("trades", []):
+        if t.get("side") in ("买入", "卖出"):
+            try:
+                out.add(pd.Timestamp(t.get("date")).normalize())
+            except Exception:
+                pass
+    return sorted(out)
+
+
 def _cp_metrics(nv):
     from allweather.stats import perf_metrics
     m = perf_metrics(nv, rets=nv.pct_change().dropna())
@@ -7059,57 +7076,103 @@ def _custom_portfolio_panel():
     with st.container(key="cp_compare"):
         st.markdown('<div class="sec-head"><span class="t">策略对比</span>'
                     '<span class="r">内置三策略 + 我的策略</span></div>', unsafe_allow_html=True)
-        _c1, _c2 = st.columns(2)
+        _c1, _c2, _c3 = st.columns(3)
+        with _c3:
+            cad = st.selectbox(
+                "内置策略调仓节奏", list(_CADENCE), key="cp_cad",
+                help="回测默认每月最后一个交易日调仓。选「双周 / 每周」看换成更勤的节奏会怎样；"
+                     "选「我的操作日」就按当前账户真实的买卖日期调仓，从建账那天回测到今天，"
+                     "和「月末调仓」同一段时间比 —— 看你实际的操作节奏有没有拖后腿。")
+        _mine = _CADENCE[cad] == "mine"
         with _c1:
             start = st.selectbox("回测起点", [f"{y}-01-01" for y in range(2015, pd.Timestamp.today().year + 1)],
-                                 index=0, key="cp_start")   # 默认最早：面板只有 2015 起，别默认藏掉一半历史
+                                 index=0, key="cp_start", disabled=_mine,
+                                 help="「我的操作日」固定从建账日起算，这里不起作用" if _mine else None)
         with _c2:
             freq = st.selectbox("自定义策略再平衡", [("每月", "M"), ("每季", "Q"), ("不再平衡", "N")],
-                                format_func=lambda x: x[0], key="cp_freq")
+                                format_func=lambda x: x[0], key="cp_freq", disabled=_mine)
 
-        panel = load_panel().loc[start:]
-        rets = panel.pct_change().dropna()
-        results = {}
         from allweather.pipeline import run_strategy_backtest
-        for label, key in [("V3-B 风险平价", "V3-B 风险平价"), ("V3-B 保守增强", "V3-B 保守增强"), ("V3c 多元", "V3c 多元")]:
-            results[label] = run_strategy_backtest(rets, key).nv
-        for nm, cfg in saved.items():
-            c = dict(cfg)
-            c["freq"] = freq[1]
-            results[nm] = _cp_run(rets, c)
+        _BUILTIN = ["V3-B 风险平价", "V3-B 保守增强", "V3c 多元"]
+        results, n_reb, base = {}, {}, {}
+        if _mine:
+            _dates = _acct_trade_dates()
+            if acct is None or not _dates:
+                st.info("当前账户还没有买卖记录，没有「操作日」可以回测 —— 先在「交易记录」里记几笔。")
+                return
+            _c0 = pd.Timestamp(acct.get("created") or _dates[0])
+            _pf = load_panel(end=pd.Timestamp.today().strftime("%Y-%m-%d"))
+            _rets = _pf.pct_change().dropna()
+            # 建账以前按月末调（策略早就在跑），建账以后只在你真动手的那几天调
+            _ix = _rets.index
+            _pre = [d for k, d in enumerate(_ix)                      # 每月最后一个交易日
+                    if d < _c0 and (k + 1 == len(_ix) or _ix[k + 1].month != d.month)]
+            for key in _BUILTIN:
+                for tag, kw in (("我的操作日", dict(rebal_dates=_pre + _dates)), ("月末", {})):
+                    r = run_strategy_backtest(_rets, key, track_weights=True, **kw)
+                    nv = r.nv.loc[_c0:]
+                    nv = nv / float(nv.iloc[0])
+                    results[f"{key} · {tag}"] = nv
+                    n_reb[f"{key} · {tag}"] = int((r.weight_df.index >= _c0).sum())
+                base[f"{key} · 我的操作日"] = f"{key} · 月末"
+        else:
+            panel = load_panel().loc[start:]
+            rets = panel.pct_change().dropna()
+            _rf = _CADENCE[cad]
+            for key in _BUILTIN:
+                r = run_strategy_backtest(rets, key, _rf)
+                _nm = key if _rf == "monthly" else f"{key} · {cad}"
+                results[_nm], n_reb[_nm] = r.nv, int(r.n_rebal)
+                if _rf != "monthly":
+                    r0 = run_strategy_backtest(rets, key)
+                    results[f"{key} · 月末"], n_reb[f"{key} · 月末"] = r0.nv, int(r0.n_rebal)
+                    base[_nm] = f"{key} · 月末"
+            for nm, cfg in saved.items():
+                c = dict(cfg)
+                c["freq"] = freq[1]
+                results[nm] = _cp_run(rets, c)
 
+        _short = _mine and (len(next(iter(results.values()))) < 252)
         rows = []
         for nm, nv in results.items():
             m = _cp_metrics(nv)
-            rows.append([nm, f"{m['cagr']:.2%}", f"{m['mdd']:.2%}", f"{m['sharpe']:.2f}",
-                         f"{m['calmar']:.2f}", f"{m['ann_vol']:.2%}", f"{nv.iloc[-1]:.3f}"])
-        _render_table([("策略", "left"), ("年化收益", "right"), ("最大回撤", "right"),
-                       ("夏普", "right"), ("卡玛", "right"), ("年化波动", "right"), ("期末净值", "right")],
-                      rows, min_width=860)
+            _r0 = (f"{nv.iloc[-1] / nv.iloc[0] - 1:+.2%}" if _short else f"{m['cagr']:.2%}")
+            _vs = ""
+            if nm in base:
+                mb = _cp_metrics(results[base[nm]])
+                _d = ((nv.iloc[-1] / nv.iloc[0]) - (results[base[nm]].iloc[-1] / results[base[nm]].iloc[0])
+                      if _short else m["cagr"] - mb["cagr"])
+                _vs = (f'<span class="{_pf_sign(_d)}">{_d * 100:+.2f}pp</span>'
+                       f'<br><span class="muted">回撤 {(m["mdd"] - mb["mdd"]) * 100:+.2f}pp</span>')
+            rows.append([nm, _r0, f"{m['mdd']:.2%}", f"{m['sharpe']:.2f}" if not _short else "—",
+                         f"{m['calmar']:.2f}" if not _short else "—", f"{m['ann_vol']:.2%}",
+                         f"{nv.iloc[-1]:.3f}", str(n_reb.get(nm, "—")), _vs or '<span class="muted">—</span>'])
+        _render_table([("策略", "left"), ("区间收益" if _short else "年化收益", "right"), ("最大回撤", "right"),
+                       ("夏普", "right"), ("卡玛", "right"), ("年化波动", "right"), ("期末净值", "right"),
+                       ("调仓次数", "right"), ("vs 月末", "right")],
+                      rows, min_width=980)
 
-        # 表下紧跟口径说明：报告（2005 起）和本表（所选起点）常被拿来直接比，
-        # 差 1pp 以上就会以为「策略变差了」—— 把两组并列摆出来，并说清本表是「重新起跑」
-        _ref = ""
-        try:
-            import json as _json
-            _sm = _json.loads((DATA_DIR.parent / "output" / "summary.json").read_text())
-            _hit = [(lbl, _sm[k]) for lbl, k in
-                    [("风险平价", "V3-B 风险平价(20d)_100% RP"),
-                     ("保守增强", "V3-B 保守增强(20d)_100% RP"),
-                     ("V3c", "V3c 多元_100% RP")] if k in _sm]
-            if _hit:
-                _ref = (f'<br>报告口径（2005-04 起，{_hit[0][1].get("n_years", 0):.0f} 年）：'
-                        + " / ".join(f'{lbl} {d["cagr"] * 100:.2f}%' for lbl, d in _hit))
-        except Exception:
-            _ref = ""
-        st.markdown('<div class="sec-note">本表从所选起点<b>重新起跑</b>，不是把长期曲线剪一段 —— '
-                    '换个起点年化能差 1pp 以上，高低取决于那段区间里有什么：'
-                    '2015 起含 2015 股灾和 2016–2018 的低谷，比 2005 起低；2019 起避开那段，反而更高。'
-                    f'同一策略换个起点就换个数，不是策略变好变坏。{_ref}'
-                    '<br>年化按 252 个交易日折一年（与本项目报告同口径）；按日历天数折会比这里低 0.2–0.3pp。'                    '</div>', unsafe_allow_html=True)
+        if _mine:
+            st.markdown(
+                f'<div class="sec-note">按当前账户「{html_escape((ACCT_INFO or {}).get("name", ""))}」的 '
+                f'<b>{len(_dates)}</b> 个买卖日调仓（{"、".join(_cn_date(d) for d in _dates[:8])}'
+                f'{" 等" if len(_dates) > 8 else ""}），从建账日 {_cn_date(_c0)} 回测到今天，'
+                '与同一段时间「每月月末调仓」比。用的是项目默认 8 只 ETF / 指数的净值，比的是<b>节奏</b>，不是选基。'
+                '<br>建账不到一年时只看区间收益和回撤（年化、夏普在这么短的区间里没意义）。</div>',
+                unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="sec-note">本表从所选起点<b>重新起跑</b>，不是把长期曲线剪一段 —— '
+                        '换个起点年化能差 1pp 以上：2015 起含 2015 股灾和 2016–2018 的低谷；2019 起避开那段，反而更高。'
+                        '同一策略换个起点就换个数，不是策略变好变坏。'
+                        + ('<br>「vs 月末」= 这个节奏减去同起点的月末调仓：上面是年化差，下面是最大回撤差（负数 = 回撤更深）。'
+                           if base else '')
+                        + '<br>年化按 252 个交易日折一年（与本项目报告同口径）；按日历天数折会比这里低 0.2–0.3pp。'
+                        '</div>', unsafe_allow_html=True)
 
         st.iframe(_compare_chart_html(results, default_range="全部",
                                       title="净值与回撤对比", with_drawdown=True), height="content")
+        if _mine:
+            return
 
         # 逐年收益对比
         yearly = {}
@@ -7124,6 +7187,7 @@ def _custom_portfolio_panel():
                       min_width=max(700, 120 * len(results)))
         st.markdown('<div class="sec-note">自定义策略按所选模式（等权/自定义权重/逆波动率/HRP）在统一区间回测；'
                     '内置策略含各自趋势过滤规则，收益口径为累计净值。</div>', unsafe_allow_html=True)
+
 
 # ============================================================
 # Tab 8: 三策略比较 / 调频影响（统一月度、年度、多年视图）
