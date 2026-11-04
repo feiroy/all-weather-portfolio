@@ -6681,7 +6681,7 @@ def _custom_portfolio_panel():
         _c1, _c2 = st.columns(2)
         with _c1:
             start = st.selectbox("回测起点", [f"{y}-01-01" for y in range(2015, pd.Timestamp.today().year + 1)],
-                                 index=4, key="cp_start")
+                                 index=0, key="cp_start")   # 默认最早：面板只有 2015 起，别默认藏掉一半历史
         with _c2:
             freq = st.selectbox("自定义策略再平衡", [("每月", "M"), ("每季", "Q"), ("不再平衡", "N")],
                                 format_func=lambda x: x[0], key="cp_freq")
@@ -6705,6 +6705,28 @@ def _custom_portfolio_panel():
         _render_table([("策略", "left"), ("年化收益", "right"), ("最大回撤", "right"),
                        ("夏普", "right"), ("卡玛", "right"), ("年化波动", "right"), ("期末净值", "right")],
                       rows, min_width=860)
+
+        # 表下紧跟口径说明：报告（2005 起）和本表（所选起点）常被拿来直接比，
+        # 差 1pp 以上就会以为「策略变差了」—— 把两组并列摆出来，并说清本表是「重新起跑」
+        _ref = ""
+        try:
+            import json as _json
+            _sm = _json.loads((DATA_DIR.parent / "output" / "summary.json").read_text())
+            _hit = [(lbl, _sm[k]) for lbl, k in
+                    [("风险平价", "V3-B 风险平价(20d)_100% RP"),
+                     ("保守增强", "V3-B 保守增强(20d)_100% RP"),
+                     ("V3c", "V3c 多元_100% RP")] if k in _sm]
+            if _hit:
+                _ref = (f'<br>报告口径（2005-04 起，{_hit[0][1].get("n_years", 0):.0f} 年）：'
+                        + " / ".join(f'{lbl} {d["cagr"] * 100:.2f}%' for lbl, d in _hit))
+        except Exception:
+            _ref = ""
+        st.markdown('<div class="sec-note">本表从所选起点<b>重新起跑</b>，不是把长期曲线剪一段 —— '
+                    '换个起点年化能差 1pp 以上，高低取决于那段区间里有什么：'
+                    '2015 起含 2015 股灾和 2016–2018 的低谷，比 2005 起低；2019 起避开那段，反而更高。'
+                    f'同一策略换个起点就换个数，不是策略变好变坏。{_ref}'
+                    '<br>年化按 252 个交易日折一年（与本项目报告同口径）；按日历天数折会比这里低 0.2–0.3pp。'                    '</div>', unsafe_allow_html=True)
+
         st.iframe(_compare_chart_html(results, default_range="全部",
                                       title="净值与回撤对比", with_drawdown=True), height="content")
 
@@ -6719,14 +6741,17 @@ def _custom_portfolio_panel():
                  for yy in years]
         _render_table([("年份", "left")] + [(nm, "right") for nm in results], yrows,
                       min_width=max(700, 120 * len(results)))
-        st.markdown('<div class="sec-note">自定义策略按所选模式（等权/自定义权重/逆波动率/HRP）在统一区间回测；内置策略含各自趋势过滤与抄底规则，收益口径为累计净值。</div>', unsafe_allow_html=True)
+        st.markdown('<div class="sec-note">自定义策略按所选模式（等权/自定义权重/逆波动率/HRP）在统一区间回测；'
+                    '内置策略含各自趋势过滤与抄底规则，收益口径为累计净值。</div>', unsafe_allow_html=True)
 
 # ============================================================
 # Tab 8: 三策略比较 / 调频影响（统一月度、年度、多年视图）
 # ============================================================
 with tab8:
     _custom_portfolio_panel()
-    st.caption("回测面板从 2015-01-01 起（30 年国债合成数据起点，其他资产按公共区间截齐）。")
+    st.caption("回测面板从 2015-01-01 起 —— 卡点是短融（bond_short）：511360 上市前只有中证短融指数、"
+               "序列从 2015 年开始，而面板要等所有资产都就绪。30 年国债的合成序列能回到 2005-01-06，"
+               "所以不带短融的策略本可以跑更长。")
 
 
 # ============================================================
