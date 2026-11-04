@@ -512,7 +512,45 @@ div[data-testid="stAlert"] p{ color:var(--brand-strong); }
 .mk-d{ font-size:12.5px; color:var(--muted); margin:-4px 0 2px 34px; }
 .st-key-asset_links{ margin:-4px 0 10px; }
 .st-key-asset_links [data-testid="stPageLink"] a p{ font-size:13px !important; color:var(--brand) !important; }
+/* 调仓卡片（手机）/ 表格（电脑）二选一 */
+.st-key-rb_cards{ display:none; }
+.rbc-top{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.rbc-top .nm{ font-size:15px; font-weight:650; color:var(--ink); margin-right:auto; }
+.rbc-top .pf-badge{ margin-left:0; }
+.rbc-sub{ font-size:12.5px; color:var(--muted); margin-top:3px; font-variant-numeric:tabular-nums; }
+.rbc-w{ font-size:13px; color:var(--sub); margin-top:6px; }
+.rbc-w b{ color:var(--ink); font-weight:650; font-variant-numeric:tabular-nums; }
+[class*="st-key-rbc_"]{ border-radius:14px !important; }
+[class*="st-key-rbc_"] [data-testid="stPageLink"] a p{ font-size:13px !important; color:var(--brand) !important; }
+.rbc-hold{ display:flex; justify-content:space-between; padding:7px 0; border-bottom:1px solid var(--line); font-size:13px; }
+/* 记一笔页：一列表单，电脑上不铺满 */
+.st-key-tr_card{ max-width:620px; }
+/* 记录页「＋ 记一笔」：电脑上是标题下一颗按钮，手机上浮在底部导航上面 */
+.st-key-tr_new_btn [data-testid="stPageLink"] a{ background:var(--brand) !important; border-radius:999px !important;
+  padding:7px 16px !important; display:inline-flex !important; }
+.st-key-tr_new_btn [data-testid="stPageLink"] a p, .st-key-tr_new_btn [data-testid="stPageLink"] a span{
+  color:#fff !important; font-weight:650 !important; }
+.st-key-hd_actions{ margin-bottom:8px; }
+/* 详情页左栏（电脑）：紧凑的「名称 + 金额」列表，当前这只蓝底 */
+.hd-h{ font-size:12.5px; color:var(--muted); margin:2px 0 10px 10px; }
+.st-key-hd_list{ gap:2px !important; border-right:1px solid var(--line); padding-right:12px; }
+[class*="st-key-hdi_"] [data-testid="stPageLink"], [class*="st-key-hdi_"] [data-testid="stPageLink"] a{ width:100% !important; }
+[class*="st-key-hdi_"] [data-testid="stPageLink"] a{ border-radius:10px !important; padding:7px 10px !important;
+  background:transparent !important; justify-content:flex-start !important; }
+[class*="st-key-hdi_"] [data-testid="stPageLink"] a:hover{ background:var(--bg) !important; }
+[class*="st-key-hdi_"] [data-testid="stIconMaterial"]{ display:none !important; }
+[class*="st-key-hdi_"] [data-testid="stPageLink"] a p{ font-size:13px !important; color:var(--sub) !important; }
+[class*="st-key-hdi_"][class*="_on"] [data-testid="stPageLink"] a{ background:#EEF2FF !important; }
+[class*="st-key-hdi_"][class*="_on"] [data-testid="stPageLink"] a p{ color:var(--brand) !important; font-weight:650; }
+.st-key-hd_actions [data-testid="stPageLink"] a p{ font-size:13px !important; color:var(--brand) !important; }
 @media(max-width:900px){
+  .st-key-rb_cards{ display:flex; }
+  .st-key-rb_table{ display:none; }
+  .st-key-hd_list, [data-testid="stColumn"]:has(> div > .st-key-hd_list),
+  [data-testid="stColumn"]:has(.st-key-hd_list){ display:none !important; }
+  [data-testid="stElementContainer"]:has(> div > .hero), [data-testid="stElementContainer"]:has(.hero){ display:none !important; }
+  .st-key-tr_new_btn{ position:fixed; right:16px; bottom:calc(72px + env(safe-area-inset-bottom)); z-index:1001; width:auto !important; }
+  .st-key-tr_new_btn [data-testid="stPageLink"] a{ box-shadow:0 6px 18px rgba(30,64,175,.32); padding:10px 18px !important; }
   /* 底部导航：固定在屏幕最下面，图标在上、字在下 */
   .st-key-app_nav{ position:fixed; left:0; right:0; bottom:0; z-index:1000; margin:0; border-bottom:0;
     border-top:1px solid var(--line); background:rgba(255,255,255,.97); backdrop-filter:saturate(1.4) blur(6px);
@@ -530,7 +568,11 @@ div[data-testid="stAlert"] p{ color:var(--brand-strong); }
   .st-key-acct_set button, .st-key-acct_out button{ padding:3px 8px !important; }
   .st-key-hero_actions{ margin-top:-6px; }
   .st-key-app_nav > div{ flex:1 1 0 !important; }
-  [data-testid="stMainBlockContainer"], .block-container{ padding-top:14px !important; }
+  [data-testid="stMainBlockContainer"], .block-container{ padding-top:10px !important; }
+  /* 底部导航整块移出文档流：不然它和页头之间白白多出两道 21px 的间距 */
+  [data-testid="stLayoutWrapper"]:has(> .st-key-app_nav){ position:fixed !important; left:0; right:0; bottom:0;
+    z-index:1000; height:auto !important; }
+  [data-testid="stMainBlockContainer"] > div > [data-testid="stVerticalBlock"]{ row-gap:14px !important; }
   [data-testid="stHeader"]{ height:0 !important; min-height:0 !important; }
   .hero-strat .k, .hero-strat .sw{ display:none !important; }
   .hero-strat{ padding:4px 10px !important; }
@@ -5808,6 +5850,69 @@ def _head_month_curve_html() -> str:
 # ============================================================
 # Tab 3: 我的账户（持仓 / 收益 / 对比 / 体检 四个子页签）
 # ============================================================
+def _pf_all_rows() -> list[dict]:
+    """持仓列表的全部行：配置里的基金 + 「位置已关闭 / 不在配置里」但账上还有份额的。"""
+    rows = [_pf_row(it) for it in _plan["rows"]]
+    for _o in _plan["other"]:
+        _why = "位置已关闭" if _o.get("in_cfg") else "不在配置里"
+        _r = _pf_row(_hg_other_item(_o["code"], _why))
+        # 占比列留空：这些钱不参与目标权重，跟上面几行的百分比不是同一把尺，混排会看起来「对不上」
+        _r.update({"badge": _why, "badge_cls": "warn", "w": "—"})
+        rows.append(_r)
+    return rows
+
+
+def _holding_item(code: str) -> tuple[dict | None, str]:
+    """代码 → (详情用的条目, 附加说明)。位置被关掉 / 从配置里删掉的也能看，说明一句为什么不参与调仓。"""
+    it = next((x for x in _plan["rows"] if x["code"] == code), None)
+    if it:
+        return it, ""
+    o = next((x for x in _plan["other"] if x["code"] == code), None)
+    if not o:
+        return None, ""
+    _why = "位置被关掉了" if o.get("in_cfg") else "位置已从配置里删掉"
+    note = (f"这只基金所在的{_why}（账上还有 ¥{o['mv']:,.0f}，占着总资产）："
+            "想卖就到「记录」记一笔卖出，想继续拿就到「选基配置」把位置重新打开 —— "
+            "否则它不参与这一轮的调仓。")
+    return _hg_other_item(code, "位置已关闭" if o.get("in_cfg") else "不在配置里"), note
+
+
+def _pg_holding() -> None:
+    """一只基金的详情页。手机：单独一页；电脑：左边仍是持仓列表（点别的只换右边），右边详情。"""
+    code = str(st.query_params.get("code") or "")
+    it, note = _holding_item(code)
+    name = (str(it["f"].get("name") or FL.fund_name(code) or code) if it else (FL.fund_name(code) or code or "基金详情"))
+    _subpage_header(name, PG_ASSETS, "资产")
+    if it is None:
+        st.info("这只基金不在当前账户里了（可能换了账户，或已经全部卖出又从配置里删掉）。")
+        return
+    _l, _r = st.columns([1, 2.6], gap="medium")
+    with _l, st.container(key="hd_list"):
+        # 窄栏里放不下持仓表那 6 列：只留「名称 + 金额」，点哪只右边换哪只
+        st.markdown(f'<div class="hd-h">我的基金 · {len(_plan["rows"]) + len(_plan["other"])} 只</div>',
+                    unsafe_allow_html=True)
+        _seen = set()
+        for _it in list(_plan["rows"]) + [_hg_other_item(o["code"]) for o in _plan["other"]]:
+            _c = _it["code"]
+            if _c in _seen or (_it.get("dup") and _c in _seen):
+                continue
+            _seen.add(_c)
+            _nm = str(_it["f"].get("name") or FL.fund_name(_c) or _c)
+            with st.container(key=f"hdi_{_c}_{'on' if _c == code else 'off'}"):
+                st.page_link(PG_HOLDING, label=f"{_nm}　¥{float(_it['mv']):,.0f}",
+                             query_params={"acct": _aid, "code": _c})
+    with _r:
+        if note:
+            st.caption(note)
+        with st.container(key="hd_actions", horizontal=True, gap="small"):
+            st.page_link(PG_RECORD, label="记一笔这只基金", icon=":material/add:",
+                         query_params={"acct": _aid, "code": code})
+            _n = sum(1 for t in (acct or {}).get("trades", []) if str(t.get("code")) == code)
+            st.page_link(PG_TRADES, label=f"它的成交 · {_n} 笔", icon=":material/receipt_long:",
+                         query_params={"acct": _aid, "code": code})
+        _pf_detail(it)
+
+
 def _pg_assets() -> None:
     # 标题和一大段「一页四看」说明撤掉：头卡自己就说明了这是哪儿，
     # 四个子页签各管什么写在切换器的悬停提示里，不用每次进来都读一遍
@@ -5892,64 +5997,13 @@ def _pg_assets() -> None:
         if not _plan["rows"] and not _plan["other"]:
             st.info("还没有挂任何基金 —— 到「选基配置」页底部给位置加一只，或点「恢复项目默认代码」。")
         else:
-            _pf_rows = [_pf_row(it) for it in _plan["rows"]]
-            for _o in _plan["other"]:          # 位置关掉了、或配置里已删，账上还留着份额的代码
-                _why = "位置已关闭" if _o.get("in_cfg") else "不在配置里"
-                _r = _pf_row(_hg_other_item(_o["code"], _why))
-                # 占比列留空：这些钱不参与目标权重，跟上面几行的百分比不是同一把尺，混排会看起来「对不上」
-                _r.update({"badge": _why, "badge_cls": "warn", "w": "—"})
-                _pf_rows.append(_r)
-
-            @st.fragment
-            def _pf_stack_block():
-                """持仓列表 + 就地展开的详情，整块跑在 fragment 里。
-
-                点一行只重跑这一块（不重跑整页），头卡、上面的统计都不用重算，
-                所以展开是「闪一下」而不是整页重载那种卡顿。
-                """
-                _pf_open = st.session_state.get("pf_open") or ""
-                _codes = [r["code"] for r in _pf_rows]
-                _cut = _codes.index(_pf_open) if _pf_open in _codes else -1
-                _upper = _pf_rows if _cut < 0 else _pf_rows[:_cut + 1]
-                _lower = [] if _cut < 0 else _pf_rows[_cut + 1:]
-                _sel_it = next((it for it in _plan["rows"] if it["code"] == _pf_open), None)
-                _sel_other = next((o for o in _plan["other"] if o["code"] == _pf_open), None)
-                _sel_note = ""
-                if not _sel_it and _sel_other:
-                    _why = "位置被关掉了" if _sel_other.get("in_cfg") else "位置已从配置里删掉"
-                    # 这句解释放进详情面板、贴着被点的那一行：留在列表上方的话，
-                    # 选中/取消各来一次，整张表就上下平移 37px —— 那正是「点一下抖一下」的来源
-                    _sel_note = (f"这只基金所在的{_why}（账上还有 ¥{_sel_other['mv']:,.0f}，占着总资产）："
-                                 "想卖就到「记录」记一笔卖出，想继续拿就把位置重新打开 —— "
-                                 "否则它不参与这一轮的调仓。")
-                    _sel_it = _hg_other_item(_pf_open,
-                                             "位置已关闭" if _sel_other.get("in_cfg") else "不在配置里")
-
-                # 三段拼成一张卡：上半段列表 / 详情 / 下半段列表（详情落在被点的那一行正下方）
-                with st.container(key="pf_stack"):
-                    _sel_a, _at_a = _pf_list(_upper, selected=_pf_open, key="pf_list_a",
-                                             cap=not _sel_it, pos="top" if _sel_it else "")
-                    if _sel_it:
-                        with st.container(key="pf_inline"):
-                            if _sel_note:
-                                st.caption(_sel_note)
-                            _pf_detail(_sel_it, inline=True)
-                    if _lower:
-                        _sel_b, _at_b = _pf_list(_lower, key="pf_list_b", head=False,
-                                                 cap=False, pos="bot")
-                    else:
-                        _sel_b, _at_b = "", 0
-
-                # 点行 = 切换：展开着的那行再点一下就收起（全站唯一的收起入口）
-                _new_sel, _new_at = (_sel_a, _at_a) if _at_a >= _at_b else (_sel_b, _at_b)
-                if _new_at and _new_at != st.session_state.get("pf_click_at"):
-                    st.session_state["pf_click_at"] = _new_at
-                    st.session_state["pf_open"] = "" if _new_sel == _pf_open else _new_sel
-                    st.rerun(scope="fragment")
-                if not _sel_it:
-                    st.caption("点一下基金名，就在这一行下面展开金额、买卖点与累计盈亏；再点一下收起。")
-
-            _pf_stack_block()
+            # 点一只基金 = 跳到它的详情页（手机上是新的一页，电脑上左边列表右边详情）。
+            # 原来是就地展开在这一行下面：手机上一展开就把下面的基金挤出屏幕，收起又得找回原来那行
+            _sel, _at = _pf_list(_pf_all_rows(), selected="", key="pf_list")
+            if _sel and _at and _at != st.session_state.get("pf_click_at"):
+                st.session_state["pf_click_at"] = _at
+                st.switch_page(PG_HOLDING, query_params={"acct": _aid, "code": _sel})
+            st.caption("点一只基金看详情：金额、买卖点、累计盈亏，以及它的每一笔成交。")
 
             # 汇总紧跟列表：点开某只基金后详情很长，这句被推到详情下面就等于看不见了
             _other_sum = sum(float(o["mv"]) for o in _plan["other"])
@@ -5975,6 +6029,43 @@ def _pg_assets() -> None:
 # 两边都不再提供「登记成成交」—— 记什么、记多少，由你到「记录」自己填。
 # 原来这是两个独立页签（买卖提醒 / 定投一笔），同一件事要在两个页面上看金额，现已合并。
 # ============================================================
+def _rebalance_cards() -> None:
+    """手机上的调仓清单：要动的基金一笔一张卡（买卖 · 数量 · 权重从多少到多少 · 记这一笔），
+    不动的收进最下面一行。权重按「位置」给（位置内多只基金时，再标位置内占比）。"""
+    _act = [it for it in _plan["rows"] if it.get("side")]
+    _hold = [it for it in _plan["rows"] if not it.get("side")]
+    _slot_w = {it["slot"]: (it["slot_w"], it["slot_tgt_w"]) for it in _plan["rows"] if it["slot_first"]}
+    if not _act:
+        st.caption("这一轮没有要下的单。")
+    for k, it in enumerate(_act):
+        _sw, _tw = _slot_w.get(it["slot"], (0.0, 0.0))
+        _u, _d = ("份", 2) if it.get("otc") else ("股", 0)
+        _cls = "buy" if it["side"] == "买入" else "sell"
+        with st.container(key=f"rbc_{k}", border=True):
+            st.markdown(
+                '<div class="rbc">'
+                f'<div class="rbc-top"><span class="nm">{html_escape(str(it["f"].get("name") or it["code"]))}</span>'
+                f'<span class="pf-badge {_cls}">{it["side"]} ¥{it["amount"]:,.0f}</span>'
+                + ('<span class="pf-badge close">清仓</span>' if it.get("liq") else '') + '</div>'
+                f'<div class="rbc-sub">{it["code"]} · {"场外" if it.get("otc") else "场内"} · '
+                f'{it["qty"]:,.{_d}f} {_u}</div>'
+                f'<div class="rbc-w">{HG.SLOT_LABEL.get(it["slot"], it["slot"])}　'
+                f'<b>{_sw * 100:.1f}%</b> → <b>{_tw * 100:.1f}%</b>'
+                + (f'<span class="muted">　位置内 {it["x"] * 100:.0f}%</span>' if it["slot_n"] > 1 else '')
+                + '</div></div>', unsafe_allow_html=True)
+            st.page_link(PG_RECORD, label="照这笔记一笔", icon=":material/edit_note:",
+                         query_params={"acct": _aid, "code": it["code"], "side": it["side"],
+                                       "amount": f'{float(it["amount"]):.2f}'})
+    if _hold or _plan["other"]:
+        with st.expander(f"其余 {len(_hold) + len(_plan['other'])} 只这一轮不动"):
+            st.markdown("".join(
+                f'<div class="rbc-hold"><span>{html_escape(str(it["f"].get("name") or it["code"]))}</span>'
+                f'<span class="muted">{_pf_badge_parts(it)[0]}</span></div>' for it in _hold)
+                + "".join(f'<div class="rbc-hold"><span>{html_escape(FL.fund_name(o["code"]) or o["code"])}</span>'
+                          '<span class="muted">位置已关 · 不参与</span></div>' for o in _plan["other"]),
+                unsafe_allow_html=True)
+
+
 def _calc_rebalance() -> None:
     st.markdown(
         '<div class="sec-head"><span class="t">存量调仓 · 把仓位调回目标比例</span>'
@@ -6061,17 +6152,22 @@ def _calc_rebalance() -> None:
                 "0.0%", '<span class="muted">—</span>',
                 f'<span class="muted">{_why}，不参与调仓</span>',
             ])
-        _render_table(
-            [("位置", "left"), ("我的基金", "left"), ("当前市值(¥)", "right"),
-             ("当前权重", "right"), ("目标权重(位置)", "right"), ("偏离", "right"), ("操作", "left")],
-            _rb_rows,
-            totals=["合计", "—", f'{_plan["mv_all"]:,.0f}',
-                    f'{(_plan["mv_all"] / _plan["total"] * 100) if _plan["total"] else 0:.1f}%',
-                    "100.0%", "—",
-                    (f'买 ¥{_plan["buy"]:,.0f} / 卖 ¥{_plan["sell"]:,.0f}'
-                     if (_plan["buy"] or _plan["sell"]) else "—")],
-            min_width=900,
-        )
+        # 电脑上一张表（一屏看完 12 笔）；手机上表格横着滑看不全，换成一笔一张卡片 ——
+        # 两份都渲染，CSS 按屏幕宽度只显示一份（.st-key-rb_table / .st-key-rb_cards）
+        with st.container(key="rb_table"):
+            _render_table(
+                [("位置", "left"), ("我的基金", "left"), ("当前市值(¥)", "right"),
+                 ("当前权重", "right"), ("目标权重(位置)", "right"), ("偏离", "right"), ("操作", "left")],
+                _rb_rows,
+                totals=["合计", "—", f'{_plan["mv_all"]:,.0f}',
+                        f'{(_plan["mv_all"] / _plan["total"] * 100) if _plan["total"] else 0:.1f}%',
+                        "100.0%", "—",
+                        (f'买 ¥{_plan["buy"]:,.0f} / 卖 ¥{_plan["sell"]:,.0f}'
+                         if (_plan["buy"] or _plan["sell"]) else "—")],
+                min_width=900,
+            )
+        with st.container(key="rb_cards"):
+            _rebalance_cards()
         _other_mv = sum(float(o["mv"]) for o in _plan["other"])
         st.caption(f"调仓基数 ¥{_plan['asset']:,.0f} = 持仓 ¥{_plan['mv']:,.0f}"
                    + (f" + 现金 ¥{_plan['cash']:,.0f}" if abs(float(_plan['cash'])) >= 1 else "") + "。"
@@ -6279,6 +6375,135 @@ def _pg_calc() -> None:
 # ============================================================
 # Tab 5: 交易记录（补录 + 台账）—— 只记录支付宝上实际发生了什么
 # ============================================================
+def _pg_record() -> None:
+    """记一笔（单独一页）：从「记录」右上角 / 「调仓」卡片 / 基金详情进来，存完回「记录」。
+
+    网址可带预填：?code=基金代码&side=买入|卖出&amount=金额。控件 key 带上预填签名 ——
+    同一页从不同卡片点进来时，不会沿用上一次没存的输入。
+    """
+    _cash = float(_plan["cash"])
+    _slot_opts = _hg_slot_options()
+    if acct is None:
+        st.info("没有选中账户：点右上角「切换账户」回到入口页选一个。")
+        return
+    if not _slot_opts:
+        st.warning("还没有挂任何基金：先到「选基配置」给位置加至少一只基金，才能记账。")
+        return
+    _trades = acct.setdefault("trades", [])
+    _q_code = str(st.query_params.get("code") or "")
+    _q_side = str(st.query_params.get("side") or "")
+    try:
+        _q_amt = round(float(st.query_params.get("amount") or 0), 2)
+    except ValueError:
+        _q_amt = 0.0
+    _sig = f"{_q_code}_{_q_side}_{_q_amt:.0f}"
+    if _q_code:
+        st.caption("从「调仓」或基金详情带过来的：基金、买卖、金额已经填好，按支付宝里实际成交的改一下再存。")
+
+    _unit_of: dict[str, str] = {}
+    for _s0 in HG.SLOTS:
+        for _f0 in HG.funds(holdings.get(_s0, {})):
+            _unit_of[str(_f0["code"])] = str(_f0.get("unit") or HG.default_unit(_f0["code"]))
+
+    def _uw(code) -> str:
+        return "股" if _unit_of.get(str(code), HG.default_unit(str(code))) == "股" else "份"
+
+    def _mkt(code) -> str:
+        return ("场内 · 按股成交，100 股一手" if _uw(code) == "股"
+                else "场外 · 按份额申购，一天一个净值")
+
+    # ---------------- 记一笔：金额优先，和支付宝「买入 5,000 元」的说法一致 ----------------
+    with st.container(key="tr_card"):
+        # 一页一张表单、一列竖排：买还是卖 → 哪只 → 哪天 → 多少钱 → 单价 → 手续费。
+        # 代码里控件的创建顺序是 日期 / 类型 / 基金 / 金额 / 单价 / 手续费（单价默认值要看日期和基金），
+        # 所以先按显示顺序占好位，再往位子里放
+        _ph = {k: st.container() for k in ("side", "fund", "date", "amount", "nav", "fee")}
+        rB = [_ph["date"], _ph["side"], _ph["fund"], _ph["amount"], _ph["nav"], _ph["fee"], st]
+        tr_date = rB[0].date_input("日期", value=pd.Timestamp(_hg_last).date(),
+                                   max_value=date.today(),
+                                   format="YYYY/MM/DD", key=f"tr_date_{_sig}")
+        # 不给「类型」挂问号：这一格只有 100px 宽，问号会贴在「基金」标签前头，
+        # 看着倒像基金那一栏的说明。买 / 卖各自会发生什么，下面那行灰字已经说清了。
+        tr_side = rB[1].selectbox("类型", ["买入", "卖出"], index=1 if _q_side == "卖出" else 0,
+                                  key=f"tr_side_{_sig}")
+        tr_slot = rB[2].selectbox(
+            "基金", _slot_opts, format_func=lambda x: x[2], key=f"tr_fund_{_sig}",
+            index=next((k for k, x in enumerate(_slot_opts) if x[1] == _q_code), 0),
+            help="这只基金按「股」还是按「份额」记账，由它的代码决定（ETF/LOF 场内按股，"
+                 "开放式基金场外按份额）；判错了到「选基配置」页底把「买卖单位」改成份额 / 股。")
+        tr_amount = rB[3].number_input("金额（元）", min_value=0.0, step=1000.0, value=_q_amt,
+                                       format="%.2f", key=f"tr_amount_{_sig}")
+        _nav_hint = _hg_nav_on(None, tr_date, tr_slot[1])
+        _uw1 = _uw(tr_slot[1])
+        tr_nav = rB[4].number_input(
+            f"单价（元/{_uw1}）",
+            min_value=0.0, value=round(float(_nav_hint or 0), 4),
+            step=0.0001, format="%.4f", key=f"tr_nav_{tr_slot[1]}_{tr_date}",
+            help=("默认取这天的净值（场外按当日收盘净值成交）；支付宝里确认价不一样时改这里。"
+                  if _uw1 == "份" else
+                  "默认取这天的收盘价；场内成交价会比净值高一点或低一点（溢价 / 折价），"
+                  "按证券账户里实际的成交价填。"))
+        tr_fee = rB[5].number_input("手续费（元）", min_value=0.0, step=1.0,
+                                    format="%.2f", key=f"tr_fee_{_sig}")
+        _side_note = (f"买入：现金 → 基金。金额按单价折成{_uw1}数，现金减少。"
+                      if tr_side == "买入" else
+                      "卖出：基金 → 现金。钱自动回到账户现金里。")
+        _act = rB[6]
+
+        _sh_new = 0.0
+        if tr_nav > 0:
+            _sh_new = ((float(tr_amount) - float(tr_fee)) / float(tr_nav) if tr_side == "买入"
+                       else (float(tr_amount) + float(tr_fee)) / float(tr_nav))
+        # 现金只看「金额」：买入付出去多少、卖出到账多少（手续费已含在金额里）
+        _cash_after = (_cash + float(tr_amount) if tr_side == "卖出"
+                       else _cash - float(tr_amount))
+        # 先说这只基金按什么成交，再说这笔会发生什么 —— 「我该填股价还是净值」是这个表单最容易填错的地方
+        _hint = f"**{_mkt(tr_slot[1])}**　{_side_note}"
+        if tr_amount > 0 and tr_nav > 0:
+            _hint += (f"　≈ {_sh_new:,.2f} {_uw(tr_slot[1])}"
+                      f"，现金 ¥{_cash:,.0f} → ¥{_cash_after:,.0f}")
+            # 场内买入只能是整手（100 股），折出零股基本就是金额或单价填错了 —— 顺带给出就近那一手
+            if tr_side == "买入" and _uw(tr_slot[1]) == "股" and abs(round(_sh_new) - _sh_new) > 0.01:
+                _near = int(round(_sh_new / 100)) * 100
+                _hint += ("（场内买入按整手 100 股，这个金额不够一手）" if _near <= 0 else
+                          f"（场内买入按整手 100 股；就近是 {_near:,} 股 ≈ ¥{_near * float(tr_nav):,.2f}）")
+        st.caption(_hint)
+        if _cash_after < -1:
+            st.warning(
+                f"记完现金会变成 ¥{_cash_after:,.0f}（负的）—— 账户里没有这么多现金。"
+                "把金额调小到现金以内；如果这只基金之前就有持仓、只是没补录，"
+                "先把那笔买入补上，现金就够扣了。")
+
+        if _act.button("保存这一笔", type="primary", key="tr_add", width="stretch"):
+            _t = {"date": str(tr_date), "side": tr_side,
+                  "slot": (tr_slot[0] if tr_slot else ""),
+                  "code": (tr_slot[1] if tr_slot else ""),
+                  "shares": round(float(_sh_new), 4),
+                  "nav": float(tr_nav), "fee": float(tr_fee)}
+            if float(tr_amount) <= 0:
+                st.warning("金额要大于 0")
+            elif float(tr_nav) <= 0:
+                st.warning("单价要大于 0 —— 换一天或手工填那天的成交净值")
+            elif (tr_side == "卖出"
+                  and _sh_new > _held_on(_trades, tr_slot[1], tr_date) + 1e-6):
+                # 卖出超过当时持有 = 凭空多出现金，账目直接错；先拦住并说清楚能卖多少
+                _held = _held_on(_trades, tr_slot[1], tr_date)
+                _uw2 = _uw(tr_slot[1])
+                st.warning(
+                    f"卖不了这么多：{FL.fund_name(tr_slot[1]) or tr_slot[1]} 到 {_cn_date(tr_date)} "
+                    f"只持有 {_held:,.2f} {_uw2}（约 ¥{_held * float(tr_nav):,.0f}），"
+                    f"这次要卖 {_sh_new:,.2f} {_uw2}。改小金额，或先补录这笔之前漏记的买入。"
+                )
+            else:
+                _trades.append(_t)
+                _save_acct(acct)
+                st.session_state["_tr_flash"] = (
+                    f"已记录：{_cn_date(tr_date)} {tr_side} {FL.fund_name(tr_slot[1]) or tr_slot[1]} "
+                    f"¥{float(tr_amount):,.2f}")
+                st.switch_page(PG_TRADES, query_params={"acct": _aid})
+
+
+
 def _pg_trades() -> None:
     _cash, _mv_all, _total = (float(_plan["cash"]), float(_plan["mv_all"]),
                               float(_plan["total"]))
@@ -6323,94 +6548,13 @@ def _pg_trades() -> None:
         _funds = [{"slot": s, "code": c, "label": lb, "unit": _uw(c)}
                   for s, c, lb in _slot_opts]
 
-        # ---------------- 记一笔：金额优先，和支付宝「买入 5,000 元」的说法一致 ----------------
-        with st.container(key="tr_card"):
-            st.markdown('<div class="sec-head"><span class="t">记一笔</span></div>',
-                        unsafe_allow_html=True)
-
-            # 一套列宽管一行：日期 / 类型 / 基金 / 金额 / 单价 / 手续费 / 按钮
-            # 类型原来是标题旁边那颗「买入 | 卖出」切换：它离要填的字段太远，眼睛得来回跳两行。
-            # 挪进这一行、紧挨日期之后，读起来就是「哪天 · 买还是卖 · 哪只 · 多少钱」一句话。
-            rB = st.columns([1.15, 0.85, 2.3, 1.15, 1.15, 1.15, 0.8], gap="small",
-                            vertical_alignment="bottom")
-            tr_date = rB[0].date_input("日期", value=pd.Timestamp(_hg_last).date(),
-                                       max_value=date.today(),
-                                       format="YYYY/MM/DD", key="tr_date")
-            # 不给「类型」挂问号：这一格只有 100px 宽，问号会贴在「基金」标签前头，
-            # 看着倒像基金那一栏的说明。买 / 卖各自会发生什么，下面那行灰字已经说清了。
-            tr_side = rB[1].selectbox("类型", ["买入", "卖出"], index=0, key="tr_side")
-            tr_slot = rB[2].selectbox(
-                "基金", _slot_opts, format_func=lambda x: x[2], key="tr_fund",
-                help="这只基金按「股」还是按「份额」记账，由它的代码决定（ETF/LOF 场内按股，"
-                     "开放式基金场外按份额）；判错了到「选基配置」页底把「买卖单位」改成份额 / 股。")
-            tr_amount = rB[3].number_input("金额（元）", min_value=0.0, step=1000.0,
-                                           format="%.2f", key="tr_amount")
-            _nav_hint = _hg_nav_on(None, tr_date, tr_slot[1])
-            _uw1 = _uw(tr_slot[1])
-            tr_nav = rB[4].number_input(
-                f"单价（元/{_uw1}）",
-                min_value=0.0, value=round(float(_nav_hint or 0), 4),
-                step=0.0001, format="%.4f", key=f"tr_nav_{tr_slot[1]}_{tr_date}",
-                help=("默认取这天的净值（场外按当日收盘净值成交）；支付宝里确认价不一样时改这里。"
-                      if _uw1 == "份" else
-                      "默认取这天的收盘价；场内成交价会比净值高一点或低一点（溢价 / 折价），"
-                      "按证券账户里实际的成交价填。"))
-            tr_fee = rB[5].number_input("手续费（元）", min_value=0.0, step=1.0,
-                                        format="%.2f", key="tr_fee")
-            _side_note = (f"买入：现金 → 基金。金额按单价折成{_uw1}数，现金减少。"
-                          if tr_side == "买入" else
-                          "卖出：基金 → 现金。钱自动回到账户现金里。")
-            _act = rB[6]
-
-            _sh_new = 0.0
-            if tr_nav > 0:
-                _sh_new = ((float(tr_amount) - float(tr_fee)) / float(tr_nav) if tr_side == "买入"
-                           else (float(tr_amount) + float(tr_fee)) / float(tr_nav))
-            # 现金只看「金额」：买入付出去多少、卖出到账多少（手续费已含在金额里）
-            _cash_after = (_cash + float(tr_amount) if tr_side == "卖出"
-                           else _cash - float(tr_amount))
-            # 先说这只基金按什么成交，再说这笔会发生什么 —— 「我该填股价还是净值」是这个表单最容易填错的地方
-            _hint = f"**{_mkt(tr_slot[1])}**　{_side_note}"
-            if tr_amount > 0 and tr_nav > 0:
-                _hint += (f"　≈ {_sh_new:,.2f} {_uw(tr_slot[1])}"
-                          f"，现金 ¥{_cash:,.0f} → ¥{_cash_after:,.0f}")
-                # 场内买入只能是整手（100 股），折出零股基本就是金额或单价填错了 —— 顺带给出就近那一手
-                if tr_side == "买入" and _uw(tr_slot[1]) == "股" and abs(round(_sh_new) - _sh_new) > 0.01:
-                    _near = int(round(_sh_new / 100)) * 100
-                    _hint += ("（场内买入按整手 100 股，这个金额不够一手）" if _near <= 0 else
-                              f"（场内买入按整手 100 股；就近是 {_near:,} 股 ≈ ¥{_near * float(tr_nav):,.2f}）")
-            st.caption(_hint)
-            if _cash_after < -1:
-                st.warning(
-                    f"记完现金会变成 ¥{_cash_after:,.0f}（负的）—— 账户里没有这么多现金。"
-                    "把金额调小到现金以内；如果这只基金之前就有持仓、只是没补录，"
-                    "先把那笔买入补上，现金就够扣了。")
-
-            if _act.button("记一笔", type="primary", key="tr_add", width="stretch"):
-                _t = {"date": str(tr_date), "side": tr_side,
-                      "slot": (tr_slot[0] if tr_slot else ""),
-                      "code": (tr_slot[1] if tr_slot else ""),
-                      "shares": round(float(_sh_new), 4),
-                      "nav": float(tr_nav), "fee": float(tr_fee)}
-                if float(tr_amount) <= 0:
-                    st.warning("金额要大于 0")
-                elif float(tr_nav) <= 0:
-                    st.warning("单价要大于 0 —— 换一天或手工填那天的成交净值")
-                elif (tr_side == "卖出"
-                      and _sh_new > _held_on(_trades, tr_slot[1], tr_date) + 1e-6):
-                    # 卖出超过当时持有 = 凭空多出现金，账目直接错；先拦住并说清楚能卖多少
-                    _held = _held_on(_trades, tr_slot[1], tr_date)
-                    _uw2 = _uw(tr_slot[1])
-                    st.warning(
-                        f"卖不了这么多：{FL.fund_name(tr_slot[1]) or tr_slot[1]} 到 {_cn_date(tr_date)} "
-                        f"只持有 {_held:,.2f} {_uw2}（约 ¥{_held * float(tr_nav):,.0f}），"
-                        f"这次要卖 {_sh_new:,.2f} {_uw2}。改小金额，或先补录这笔之前漏记的买入。"
-                    )
-                else:
-                    _trades.append(_t)
-                    _save_acct(acct)
-                    st.toast("已记录", icon=":material/check_circle:")
-                    st.rerun()
+        # 记一笔挪到单独一页（/record）：手机上表单 7 个字段挤一行根本填不了，
+        # 记完自动回到这里。从「调仓」卡片或基金详情点过来时，基金 / 买卖 / 金额已经填好
+        with st.container(key="tr_new_btn"):
+            st.page_link(PG_RECORD, label="记一笔", icon=":material/add:", query_params={"acct": _aid})
+        _flash = st.session_state.pop("_tr_flash", "")
+        if _flash:
+            st.toast(_flash, icon=":material/check_circle:")
 
         # ---------------- 成交台账：先筛，再看表；最近的在最上面 ----------------
         _ledger_codes = []
@@ -6428,8 +6572,11 @@ def _pg_trades() -> None:
         # 摘要必须**单独一行铺满全宽**：跟下拉挤一行时它从下拉右边起，左边比表格缩进近 300px、
         # 右边却跟表格齐平，上下扫过去就是「前后没对齐」。那空出来的右半行给操作说明，别留白。
         _fc1, _fc2 = st.columns([1.6, 5.0], gap="medium", vertical_alignment="bottom")
+        _qcode = str(st.query_params.get("code") or "")
+        _qlab = next((k for k, v in _pick_map.items() if v and v == _qcode), None)
         _fcode = _pick_map[_fc1.selectbox("看哪只基金的历史", list(_pick_map),
-                                          key="tr_fund_filter")]
+                                          index=list(_pick_map).index(_qlab) if _qlab else 0,
+                                          key=f"tr_fund_filter_{_qcode or 'all'}")]
         _fc2.markdown('<div class="tr-ledger-hint">最近的在上 · 铅笔就地改，垃圾桶就地删</div>',
                       unsafe_allow_html=True)
         _f_tr = ([t for t in _trades if str(t.get("code") or "") == _fcode]
@@ -7467,11 +7614,16 @@ PG_VALUATION = st.Page(_with_back(_pg_valuation, "指数估值", PG_MARKET, "市
                        icon=":material/thermostat:", url_path="valuation")
 PG_WEIGHTS = st.Page(_with_back(_pg_weights, "选基配置", PG_ASSETS, "资产"), title="选基配置",
                      icon=":material/tune:", url_path="weights")
+PG_RECORD = st.Page(_with_back(_pg_record, "记一笔", PG_TRADES, "记录"), title="记一笔",
+                    icon=":material/add:", url_path="record")
+PG_HOLDING = st.Page(_pg_holding, title="基金详情", icon=":material/description:", url_path="holding")
 _TOP = [PG_ASSETS, PG_CALC, PG_TRADES, PG_MARKET]
 _PARENT = {PG_FUNDS.url_path: PG_MARKET, PG_SIGNALS.url_path: PG_MARKET, PG_BACKTEST.url_path: PG_MARKET,
-           PG_VALUATION.url_path: PG_MARKET, PG_WEIGHTS.url_path: PG_ASSETS}
+           PG_VALUATION.url_path: PG_MARKET, PG_WEIGHTS.url_path: PG_ASSETS,
+           PG_RECORD.url_path: PG_TRADES, PG_HOLDING.url_path: PG_ASSETS}
 
-_pg = st.navigation(_TOP + [PG_FUNDS, PG_SIGNALS, PG_BACKTEST, PG_VALUATION, PG_WEIGHTS], position="hidden")
+_pg = st.navigation(_TOP + [PG_FUNDS, PG_SIGNALS, PG_BACKTEST, PG_VALUATION, PG_WEIGHTS,
+                            PG_RECORD, PG_HOLDING], position="hidden")
 _cur_top = _PARENT.get(_pg.url_path, _pg)
 with st.container(key="app_nav", horizontal=True, gap=None):
     for _p in _TOP:
