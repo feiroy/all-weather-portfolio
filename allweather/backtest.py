@@ -279,6 +279,7 @@ def backtest(
     rebal_freq: str = "monthly",
     vol_trigger_threshold: float | None = None,
     month_mid_day: int = 10,
+    rebal_dates=None,
 ) -> BacktestResult:
     """统一回测引擎 — 逆波动率/分层风险平价 + 趋势过滤 + 抄底。
 
@@ -288,6 +289,8 @@ def backtest(
                 在每自然周（或每双周）最后一个交易日调仓，覆盖 rebal_mode 的月内调仓日选择。
     vol_trigger_threshold: vol_trigger 模式的波动率阈值（年化，如 0.30 = 30%）。
     month_mid_day: month_mid 模式选当月第几个交易日（默认 10，用于调仓日历网格实验）。
+    rebal_dates: 指定调仓日（可迭代的日期）。给了就只在这些日子调仓，覆盖 rebal_freq/rebal_mode；
+                 非交易日顺延到下一个交易日。用途：按我的实际操作日回测；实盘「假如今天调仓」算目标权重。
 
     When track_dynamic_nav=True, returns (nv, nv_dynamic, n_rebal, weight_df, signal_df).
     """
@@ -348,6 +351,11 @@ def backtest(
         nv_dyn = pd.Series(index=rets_rp.index, dtype=float)
 
     lookback = rp_window if weighting_method in ("hierarchical_rp", "erc") else iv_window
+    _rebal_set = None
+    if rebal_dates is not None:
+        _ix = rets_rp.index
+        _pos = _ix.searchsorted(pd.DatetimeIndex(pd.to_datetime(list(rebal_dates))))
+        _rebal_set = {_ix[p] for p in _pos if p < len(_ix)}
     # 每月交易日序号（rebal_mode="month_mid" 用）：当月第 N 个交易日
     month_seq = rets_rp.index.to_series().groupby(rets_rp.index.to_period("M")).cumcount() + 1
     # 自然周序号（rebal_freq="weekly"/"biweekly" 用）：用 ISO 周（每周一开新周）
@@ -421,6 +429,8 @@ def backtest(
             _month_end_t = (i + 1 >= len(rets_rp.index)) or (d.month != rets_rp.index[i + 1].month)
             _rebal_trigger = _month_end_t or (
                 vol_ann is not None and vol_ann[i] > vol_trigger_threshold and last_rebal_month != d.month)
+        if _rebal_set is not None:
+            _rebal_trigger = d in _rebal_set
         if _rebal_trigger and i > lookback:
             last_rebal_month = d.month
             window_df = rets_rp.iloc[max(0, i - lookback):i]

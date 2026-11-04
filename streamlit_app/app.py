@@ -17,8 +17,6 @@ import numpy as np
 
 from allweather.rebalance import (
     compute_signal_states,
-    compute_target_weights,
-    apply_signal_overrides,
     STRATEGIES,
     ETF_META,
 )
@@ -1664,6 +1662,27 @@ SIGNAL_ACTIONS = [
         "strategies": ["B-RP", "V3c"],
         "type": "趋势过滤",
     },
+    # 下面两条回测引擎一直有，原来实盘漏了（2026-11 起实盘改由回测引擎算目标权重）
+    {
+        "key": "wti_below_sma75",
+        "sell_slot": "wti", "buy_slot": "credit",
+        "desc": f"{ETF_META['wti']['name']} ({ETF_META['wti']['code']}) 跌破 SMA75",
+        "condition": lambda s: s.get("wti_below_sma75", False),
+        "sell": f"{ETF_META['wti']['name']} ({ETF_META['wti']['code']})",
+        "buy": _cr,
+        "strategies": ["B-Con", "B-RP", "V3c"],
+        "type": "趋势过滤",
+    },
+    {
+        "key": "hs300_below_sma30",
+        "sell_slot": "hs300", "buy_slot": "credit",
+        "desc": f"{_hs} 跌破 SMA30",
+        "condition": lambda s: s.get("hs300_below_sma30", False),
+        "sell": _hs,
+        "buy": _cr,
+        "strategies": ["B-RP"],
+        "type": "趋势过滤",
+    },
 ]
 
 # ============================================================
@@ -1869,10 +1888,18 @@ cash_ratio = 0.0
 # 计算权重
 # ============================================================
 # 三个策略一次算完：账户只用其中一个，但「权重与选基」的目标权重表、换策略预览、
-# 「模型 · 信号」都是三个并排看。apply_signal_overrides 是纯函数（只做趋势过滤），不读写任何状态。
-_W0_ALL = {k: compute_target_weights(k, prices, cash_ratio) for k in _STRAT_KEYS}
-_W_ALL = {k: apply_signal_overrides(k, _W0_ALL[k], signals, prices)
-          for k in _STRAT_KEYS}
+# 「模型 · 信号」都是三个并排看。目标权重由回测引擎「假如今天调仓」算出（pipeline.live_target_weights），
+# 实盘和回测只有这一份规则；_W0_ALL 是趋势过滤前的原始权重，只用来标注谁被过滤、谁接收了。
+@st.cache_data(ttl=300, show_spinner=False)
+def _live_weights(_asof: str):
+    from allweather.data import load_panel
+    from allweather.pipeline import live_target_weights
+    _pn = load_panel(end=pd.Timestamp.today().strftime("%Y-%m-%d"))
+    _out = {k: live_target_weights(k, _pn) for k in _STRAT_KEYS}
+    return {k: v[0] for k, v in _out.items()}, {k: v[1] for k, v in _out.items()}
+
+
+_W_ALL, _W0_ALL = _live_weights(last_date)
 w0 = _W0_ALL[strat_key]
 w = _W_ALL[strat_key]
 cfg = STRATEGIES[strat_key]
@@ -4998,11 +5025,10 @@ with tab1:
 def _weight_note(k: str, a: str) -> str:
     """某策略下某资产这一轮被信号改了什么 —— 直接拿「改前 / 改后」两份权重比，不再手抄一遍规则。
 
-    原来按 strat_key 和 signals 再写一遍「B-RP/V3c 才有黄金过滤」，跟 apply_signal_overrides
+    原来按 strat_key 和 signals 再写一遍「B-RP/V3c 才有黄金过滤」，跟回测引擎
     是两份规则，改一处忘一处就会标错；比权重差值永远跟实际算出来的一致。
     """
     s0 = _W0_ALL[k]
-    s0 = s0 / s0.sum() if float(s0.sum()) > 0 else s0
     b, f = float(s0.get(a, 0) or 0), float(_W_ALL[k].get(a, 0) or 0)
     if b > 0 and f <= 1e-9:
         return "趋势过滤 → 0"

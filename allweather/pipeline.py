@@ -91,6 +91,35 @@ def run_strategy_backtest(rets, strategy: str, rebal_freq: str = "monthly", **ru
     return backtest_b(rets[assets], **kwargs)
 
 
+# 实盘（网页 / 命令行）用的策略 key → 回测里的策略名
+LIVE_STRATEGY = {"B-Con": "V3-B 保守增强", "B-RP": "V3-B 风险平价", "V3c": "V3c 多元"}
+_NO_FILTERS = dict(nonferr_trend_window=0, wti_trend_window=0, gold_trend_filter=False,
+                   equity_trend_assets=None, equity_trend_windows=None)
+
+
+def live_target_weights(key: str, panel: pd.DataFrame | None = None) -> tuple[pd.Series, pd.Series]:
+    """实盘目标权重 = 回测引擎「假如在面板最后一天调仓」算出来的那一行。
+
+    原来实盘另有一套 compute_target_weights + apply_signal_overrides，规则和回测各写一份，
+    已经对不上：风险平价漏了沪深300 30 日趋势过滤（2026-11-04 跌破，回测 0%、实盘 13.1%），
+    三个策略都漏了原油 75 日趋势过滤，权重窗口也错开一天。现在只有回测引擎这一份规则。
+
+    返回 (目标权重, 趋势过滤前的原始权重)，都已归一到 1（风险平价波动率超标时引擎会留现金，
+    实盘不留现金，按比例摊回去）。原始权重只用来标注「哪个被过滤了、谁接收了」。
+    """
+    if panel is None:
+        panel = load_panel(end=pd.Timestamp.today().strftime("%Y-%m-%d"))
+    rets = panel.pct_change().dropna()
+    last = [rets.index[-1]]
+
+    def _one(**extra):
+        r = run_strategy_backtest(rets, LIVE_STRATEGY[key], track_weights=True, rebal_dates=last, **extra)
+        w = r.weight_df.iloc[-1].astype(float)
+        return w / w.sum() if float(w.sum()) > 0 else w
+
+    return _one(), _one(**_NO_FILTERS)
+
+
 def step_2_run_backtests(rets):
     """Step 2: 3 策略 × 3 现金档 = 9 回测（+2 动态现金 = 11）。"""
     print("\n" + "─" * 60)

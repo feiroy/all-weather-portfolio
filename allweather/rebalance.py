@@ -21,7 +21,7 @@ from .config import (
     RISK_PARITY_WINDOW, RISK_PARITY_MAX_WEIGHT, RISK_PARITY_MIN_WEIGHT,
     GOLD_DIP_THRESHOLD,
     HS300_DIP_SMA,
-    SP500_TREND_WINDOW,
+    SP500_TREND_WINDOW, HS300_TREND_WINDOW,
     V3B_RP_ASSETS, V3B_RP_BUCKETS,
     V3B_CON_ASSETS, V3B_CON_BUCKETS,
     V3C_ASSETS,
@@ -83,6 +83,9 @@ def compute_signal_states(prices):
     signals["nonferr_below_sma75"] = _sma_filter(prices, "nonferr", 75)
     signals["gold_below_sma75"] = _sma_filter(prices, "gold", 75)
     signals["sp500_below_sma75"] = _sma_filter(prices, "us_sp500", SP500_TREND_WINDOW)
+    # 下面两条回测引擎一直有，实盘原来漏了：原油 75 日（三个策略）、沪深300 30 日（仅风险平价）
+    signals["wti_below_sma75"] = _sma_filter(prices, "wti", 75)
+    signals["hs300_below_sma30"] = _sma_filter(prices, "hs300", HS300_TREND_WINDOW)
 
     # --- Gold dip ---
     gold_dd = _drawdown(prices, "gold", 252)
@@ -142,38 +145,9 @@ def compute_target_weights(strat_key, prices, cash_ratio=0.0):
     return w * (1 - cash_ratio)
 
 
-def apply_signal_overrides(strat_key, w, signals, prices=None):
-    """按策略应用趋势过滤到目标权重（纯函数，不读写任何状态文件）。
-
-    沪深300 抄底加仓已撤（2026-11）：按现行 PB 入场 / PE 出场规则，三个策略 21 年回测里
-    只在 2012-12、2024-02 两次进场各加仓一个月，年化只多 0.01~0.04pp、回撤夏普不变
-    （experiments/_hs300_nodip_ab.py）；实盘又因为「同月只加一次」的状态文件和回测对不上。
-    prices 参数保留只为兼容旧调用。
-    """
-    w = w.copy()
-
-    # nonferr trend filter (all strategies)
-    if signals.get("nonferr_below_sma75", False) and "nonferr" in w.index and "credit" in w.index:
-        if w["nonferr"] > 0:
-            w["credit"] += w["nonferr"]
-            w["nonferr"] = 0.0
-
-    # gold trend filter (V3-B RP 和 V3c；与回测引擎一致，B-Con 不加)
-    if strat_key in ("B-RP", "V3c"):
-        if signals.get("gold_below_sma75", False) and "gold" in w.index and "credit" in w.index:
-            if w["gold"] > 0:
-                w["credit"] += w["gold"]
-                w["gold"] = 0.0
-
-    # SP500 trend filter (V3-B RP 和 V3c；B-Con 回测否决不加)
-    if strat_key in ("B-RP", "V3c") and signals.get("sp500_below_sma75", False) \
-            and "us_sp500" in w.index and "credit" in w.index:
-        if w["us_sp500"] > 0:
-            w["credit"] += w["us_sp500"]
-            w["us_sp500"] = 0.0
-
-    # Gold dip / HS300 dip 抄底都已在回测否决，实盘不执行
-    return w / w.sum()  # renormalize to 1.0
+# 实盘目标权重统一走 pipeline.live_target_weights（回测引擎「假如今天调仓」）。
+# 原来这里的 apply_signal_overrides 是另写的一份趋势过滤，漏了风险平价的沪深300 30 日、
+# 三个策略的原油 75 日，已删。
 
 
 # ============================================================
@@ -249,12 +223,8 @@ def display_weight_table(strat_key, w, signals):
 
 def display_all_strategies(prices, signals, tier="100"):
     """策略目标权重同屏对比。"""
-    cash_ratio = 1 - int(tier) / 100
-    results = {}
-    for k in list(STRATEGIES.keys()):
-        w0 = compute_target_weights(k, prices, cash_ratio)
-        w1 = apply_signal_overrides(k, w0, signals, prices)
-        results[k] = w1
+    from .pipeline import live_target_weights
+    results = {k: live_target_weights(k, prices)[0] for k in STRATEGIES}
 
     print(f"\n{LINE}")
     print(f"  策略目标权重对比（{tier}% RP）  数据: {prices.index[-1].date()}")
@@ -474,9 +444,8 @@ def _single_strat_flow(strat_key, tier, prices, signals, build_amount):
         print(f"缺少数据: {missing}")
         return
 
-    cash_ratio = 1 - int(tier) / 100
-    w0 = compute_target_weights(strat_key, prices, cash_ratio)
-    w = apply_signal_overrides(strat_key, w0, signals, prices)
+    from .pipeline import live_target_weights
+    w = live_target_weights(strat_key, prices)[0]     # 与回测同一套规则（含趋势过滤）
 
     display_signal_dashboard(signals)
     display_weight_table(strat_key, w, signals)

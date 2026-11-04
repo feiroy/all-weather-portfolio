@@ -50,6 +50,7 @@ def backtest_b(
     target_vol: float | None = None,
     vol_target_window: int = 60,
     rebal_freq: str = "monthly",
+    rebal_dates=None,
 ) -> BacktestResult:
     """Plan B backtest — 委托给 backtest() 统一引擎。"""
     return backtest(
@@ -90,4 +91,5 @@ def backtest_b(
         target_vol=target_vol,
         vol_target_window=vol_target_window,
         rebal_freq=rebal_freq,
+        rebal_dates=rebal_dates,
     )
