@@ -259,6 +259,7 @@ def backtest(
     hs300_value_dip: bool = False,
     hs300_pb_entry: float = HS300_PB_ENTRY,
     hs300_pe_exit: float = HS300_PE_EXIT,
+    hs300_hold_until_exit: bool = False,
     equity_trend_assets: list | None = None,
     equity_trend_window: int = 120,
     equity_trend_windows: dict | None = None,
@@ -452,6 +453,10 @@ def backtest(
                     pb_pct_series=hs300_pb_pct, pe_pct_series=hs300_pe_pct,
                     hs300_sma_val=hs300_sma_v, hs300_price_val=hs300_px, date=d,
                 )
+                # 默认：只在进场那次调仓加仓，之后回到正常权重，直到退出前不再加（原项目口径）。
+                # hold_until_exit：进场后每次调仓都按 1.8 倍给目标，直到退出条件满足。
+                if hs300_hold_until_exit and hs300_boosted and hs300_boost is None:
+                    hs300_boost = hs300_dip_boost
             sma_params = {"nf_window": nonferr_trend_window, "nf_sma": nf_sma,
                           "au_sma": au_sma, "wti_window": wti_trend_window, "wti_sma": wti_sma,
                           "eq_smas": eq_smas}
