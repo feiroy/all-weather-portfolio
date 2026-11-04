@@ -81,7 +81,7 @@ def file_hash(path):
 
 
 def readonly_hashes():
-    paths = [ROOT / "data/sim_account.json", *sorted((ROOT / "data").glob("*.csv"))]
+    paths = [*sorted((ROOT / "data" / "accounts").glob("*.json")), *sorted((ROOT / "data").glob("*.csv"))]
     return {str(p.relative_to(ROOT)): file_hash(p) for p in paths}
 
 
@@ -93,14 +93,15 @@ def unchanged_data():
     finally:
         after = readonly_hashes()
         assert before == after, f"只读测试改变了账户或行情；不进行恢复覆盖：{[(p, before.get(p), after.get(p)) for p in before.keys() | after.keys() if before.get(p) != after.get(p)]}"
-        print("账户 SHA256（前/后相同）：", after["data/sim_account.json"])
+        print("账户文件 SHA256（前/后相同）：", {p: h for p, h in after.items() if "accounts" in p})
 
 
 @contextmanager
 def block_mutations():
     sys.path.insert(0, str(ROOT))
     with patch("allweather.fetch.fetch_all", side_effect=AssertionError("测试禁止更新行情")), \
-         patch("allweather.sim_account.save_acct", side_effect=AssertionError("测试禁止写入账户")):
+         patch("allweather.sim_account.save_acct", side_effect=AssertionError("测试禁止写入账户")), \
+         patch("allweather.accounts.save", side_effect=AssertionError("测试禁止写入账户")):
         yield
 
 
