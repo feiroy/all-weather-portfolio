@@ -290,7 +290,7 @@ def print_summary_recommendation(perf_results=None):
     print()
 
     cards = [
-        (PORTFOLIO_NAMES["con"], "★★★", "保守增强", "逆波动率 20d + nonferr趋势(75d) + HS300 AND抄底，max_w=0.25",
+        (PORTFOLIO_NAMES["con"], "★★★", "保守增强", "逆波动率 20d + nonferr趋势(75d)，max_w=0.25",
          [f"+ 回撤最低({_pv(PORTFOLIO_NAMES['con'],'mdd','pct','%')})，Sharpe 最高({_pv(PORTFOLIO_NAMES['con'],'sharpe','num')})",
           f"+ 熊市表现最好(2008 +14.95%，2022 +3.42%)",
           "+ 风险调整后效率最优",
@@ -298,7 +298,7 @@ def print_summary_recommendation(perf_results=None):
           f"- 长期累计回报最低({_pv(PORTFOLIO_NAMES['con'],'cum_return','pct','%')})"],
          "适合：保守型资金、退休/教育金、无法承受大幅回撤"),
 
-        (PORTFOLIO_NAMES["rp"], "★★★", "学院派", "4桶等权 HRP + nonferr(75d) + Gold(75d) + SP500(75d) + HS300(30d) + HS300 AND抄底",
+        (PORTFOLIO_NAMES["rp"], "★★★", "学院派", "4桶等权 HRP + nonferr(75d) + Gold(75d) + SP500(75d) + HS300(30d)",
          [f"+ 长期回报最高 CAGR {_pv(PORTFOLIO_NAMES['rp'],'cagr','pct','%')}，累计 {_pv(PORTFOLIO_NAMES['rp'],'cum_return','pct','%')}",
           "+ 四桶真正等权(25%x4)，全天候理念最纯正",
           "+ 桶级分散 + 资产级分散 + 四重趋势过滤",
@@ -306,7 +306,7 @@ def print_summary_recommendation(perf_results=None):
           "- 4桶逻辑比另外两个策略复杂"],
          "适合：长期持有者(5年+)、认同正统全天候理念、能承受短期波动"),
 
-        (PORTFOLIO_NAMES["v3c"], "★★★", "多元全天候", "6资产逆波动率 60d + nonferr(75d) + Gold(75d) + SP500(75d) + HS300 AND抄底",
+        (PORTFOLIO_NAMES["v3c"], "★★★", "多元全天候", "6资产逆波动率 60d + nonferr(75d) + Gold(75d) + SP500(75d)",
          [f"+ 中位回报 CAGR {_pv(PORTFOLIO_NAMES['v3c'],'cagr','pct','%')}，回撤({_pv(PORTFOLIO_NAMES['v3c'],'mdd','pct','%')})显著低于风险平价",
           f"+ 多元资产组合覆盖通胀敞口全面",
           "+ SP500 趋势过滤(75d)降低权益下行风险，不含 bond_10y 结构更轻",

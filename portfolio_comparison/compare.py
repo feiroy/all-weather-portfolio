@@ -1,7 +1,7 @@
 """竞品组合 vs 全天候策略 全维度对比
 
 竞品：城投债50% + 标普500 20% + 纳指100 10% + 黄金10% + 华宝油气5%，年度再平衡
-全天候：V3-B Con / V3-B RP / V3c，月度再平衡 + 趋势过滤 + 抄底
+全天候：V3-B Con / V3-B RP / V3c，月度再平衡 + 趋势过滤
 """
 import sys
 from pathlib import Path
@@ -161,7 +161,7 @@ def run_allweather_backtests(rets_full):
     _common = dict(
         cash_ratio=0.0,
         nonferr_trend_window=75,
-        hs300_value_dip=True,
+        hs300_value_dip=False,   # 与主策略一致：沪深300 抄底已撤
         track_weights=False, track_signals=False,
         hs300_pb_data=hs300_pb_data, hs300_pe_data=hs300_pe_data,
         hs300_pb_pct=hs300_pb_pct, hs300_pe_pct=hs300_pe_pct,

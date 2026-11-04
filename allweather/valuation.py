@@ -2,7 +2,7 @@
 
 1. 策略信号用（乐咕乐股，akshare stock_index_pe_lg / stock_index_pb_lg）
    - 写入 data/hs300_pe.csv、data/hs300_pb.csv，列名与历史文件一致（已核对重叠 255 天差值 0）。
-   - 回测和实盘的 HS300 抄底信号（PB<30%ile 入场 / PE>70%ile 出场）只读这两个文件。
+   - 原来供 HS300 抄底信号（PB<30%ile 入场 / PE>70%ile 出场）使用；抄底已撤，现仅展示。
 
 2. 估值展示用（蛋卷基金公开接口，与 etf-dashboard-auto 同源）
    - 快照：https://danjuanapp.com/djapi/index_eva/dj  → 63 个指数的 PE/PB/百分位/股息率/ROE/估值档

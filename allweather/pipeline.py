@@ -52,7 +52,8 @@ def strategy_backtest_kwargs(strategy: str, rebal_freq: str = "monthly") -> dict
         raise ValueError(f"未知调仓频率: {rebal_freq}")
     common = dict(
         cash_ratio=0.0, nonferr_trend_window=75, wti_trend_window=75,
-        hs300_value_dip=True, gold_dip_threshold=None, rebal_freq=rebal_freq,
+        # 沪深300 抄底已撤（2026-11，experiments/_hs300_nodip_ab.py：年化只差 0.01~0.04pp）
+        hs300_value_dip=False, gold_dip_threshold=None, rebal_freq=rebal_freq,
     )
     if strategy == "V3-B 风险平价":
         params = dict(

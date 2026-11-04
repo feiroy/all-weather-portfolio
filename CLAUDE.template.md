@@ -17,14 +17,14 @@ This file provides guidance to Claude Code when working with code in this reposi
 ## 前置原则
 ### 第 0 层：哲学基座
 方法论的底层。所有 Sperandeo 原则之所以成立，是因为它们符合以下更根本的认知规律：
-**实事求是。** 每个参数回答"为什么在中国数据上成立"。桥水原版是起点不是终点。30Y 三阶段合成、HS300 AND 抄底、nonferr 75d — 全是实事求是的结果。
+**实事求是。** 每个参数回答"为什么在中国数据上成立"。桥水原版是起点不是终点。30Y 三阶段合成、nonferr 75d — 全是实事求是的结果。
 **矛盾论。** 80/20 是主要矛盾的量化。桶结构是主要方面，内部加权是次要方面。牛市收益是主要矛盾，熊市回撤是主要矛盾。不同质的矛盾用不同方法解决。
 **实践论。** 7 步闭环 = 认识→实践→再认识。memory 是实践记录，否决≠删除。具体分析见 `docs/framework/马克思主义.md`。
 ### Sperandeo 三层结构
 按优先级排序，不可颠倒：
 **第一层：保障资本。** D_excess 尾部风险诊断（每次验证必须跑，D<<0 直接否决）| 墨菲定律（每个信号有 fallback）| 止损纪律（不扛下跌趋势）
 **第二层：一致性的获利能力。** 奥卡姆剃刀（从最简开始）| 80/20 检验（CAGR+0.3pp 或 MDD-1pp 以上才值得）| 休谟因果（必须有经济学逻辑）| 最小描述长度（参数响应面平的→砍掉）
-**第三层：追求卓越的报酬。** HS300 AND 抄底（只在极端便宜时加仓 1.8x）| 方案 C 教训（不可摊平亏损）
+**第三层：追求卓越的报酬。** 方案 C 教训（不可摊平亏损）；HS300 抄底 1.8x 已撤（2026-11：现行 PB/PE 规则下 21 年只进场 2 次、各加一个月，年化 +0.01~0.04pp，见 experiments/_hs300_nodip_ab.py）
 ## 实施 Checklist
 | # | 步骤 | 内容 |
 |---|------|------|
@@ -96,17 +96,17 @@ CI：`.github/workflows/backtest.yml` 跑 `py main.py`，检查 Sharpe/MDD 边�
 ## 策略速查
 | 策略 | 一句话 |
 |------|--------|
-| V3-B 保守增强(20d) | 逆波动率20d + nonferr75d趋势 + HS300 AND抄底 — Sharpe {BCON_SHARPE} |
-| V3c 多元 | 6资产逆波动率20d + nonferr/gold/sp500趋势75d + HS300 AND抄底 — MDD {V3C_MDD} |
-| V3-B 风险平价(20d) | 4桶HRP + 四重趋势 + 抄底 + target_vol=9% — CAGR {BRP_CAGR} |
+| V3-B 保守增强(20d) | 逆波动率20d + nonferr75d趋势 — Sharpe {BCON_SHARPE} |
+| V3c 多元 | 6资产逆波动率20d + nonferr/gold/sp500趋势75d — MDD {V3C_MDD} |
+| V3-B 风险平价(20d) | 4桶HRP + 四重趋势 + target_vol=9% — CAGR {BRP_CAGR} |
 增长↑(hs300,sp500) | 收益垫(credit) | 增长↓10Y(bond_10y) | 增长↓30Y(bond_30y) | 通胀↑(gold,nonferr)
 ## 策略参考
 
 | 策略 | 引擎 | 核心逻辑 | 资产 | 特点 |
 |------|------|----------|------|------|
-| V3-B 保守增强(20d) | `strategy_b.py::backtest_b` | 逆波动率 20d (max 0.25) + nonferr 75d + HS300 AND抄底 | 7 (含 bond_10y) | Sharpe 最高 |
-| V3-B 风险平价(20d) | `strategy_b.py::backtest_b` | 4 桶等权 HRP + nonferr 75d + gold 75d + sp500 75d + hs300 30d + HS300 AND抄底 | 6 (无 bond_10y) | CAGR 最高 |
-| V3c 多元 | `backtest.py::backtest_iv` | 逆波动率 20d + nonferr 75d + gold 75d + sp500 75d + HS300 AND抄底 | 6 (无 bond_10y) | 最均衡 |
+| V3-B 保守增强(20d) | `strategy_b.py::backtest_b` | 逆波动率 20d (max 0.25) + nonferr 75d | 7 (含 bond_10y) | Sharpe 最高 |
+| V3-B 风险平价(20d) | `strategy_b.py::backtest_b` | 4 桶等权 HRP + nonferr 75d + gold 75d + sp500 75d + hs300 30d | 6 (无 bond_10y) | CAGR 最高 |
+| V3c 多元 | `backtest.py::backtest_iv` | 逆波动率 20d + nonferr 75d + gold 75d + sp500 75d | 6 (无 bond_10y) | 最均衡 |
 
 × 3-4 现金档：100% RP / 85% RP / 70% RP / 动态（仅 V3-B 系列）。
 
@@ -130,8 +130,8 @@ V3-B RP 和 V3c 去掉了 bond_10y（CAGR +1.43pp，Sharpe 仅 -0.02）。
 | `RISK_FREE_ANNUAL` | 0.017 | 无风险利率（10Y 国债 2026.07 实际值） |
 | `GOLD_DIP_THRESHOLD` | 0.15 | 黄金抄底触发 |
 | `GOLD_DIP_BOOST` | 2.5 | 黄金抄底倍数 |
-| `HS300_DIP_THRESHOLD` | 0.25 | HS300 抄底触发 |
-| `HS300_DIP_BOOST` | 1.8 | HS300 抄底倍数 |
+| `HS300_DIP_THRESHOLD` | 0.25 | HS300 抄底触发（策略已不用，仅回测实验） |
+| `HS300_DIP_BOOST` | 1.8 | HS300 抄底倍数（策略已不用，仅回测实验） |
 | `HS300_PB_ENTRY` / `HS300_PE_EXIT` | 30 / 70 | AND 入场PB / 出场PE 分位 |
 | `RISK_PARITY_TARGET_VOL` | 0.09 | 风险平价目标波动率 |
 | `BOOTSTRAP_N_SIM` | 1000 | 蒙特卡洛次数 |

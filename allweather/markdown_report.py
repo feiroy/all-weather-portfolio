@@ -65,8 +65,8 @@ def _section_recommendation(perf_results=None):
     cagr_rp = _fmt(PORTFOLIO_NAMES["rp"], "cagr")
     sharpe_con = _fmt(PORTFOLIO_NAMES["con"], "sharpe", pct=False)
     notes = {
-        PORTFOLIO_NAMES["con"]: f"保守增强 — 逆波动率+nonferr趋势过滤+HS300抄底{'，Sharpe 最高（' + sharpe_con + '）' if sharpe_con else ''}",
-        PORTFOLIO_NAMES["rp"]: f"学院派 — 4桶分层风险平价(30Y) + nonferr/gold/sp500 趋势过滤 + Gold/HS300抄底{f'，CAGR {cagr_rp}' if cagr_rp else ''}",
+        PORTFOLIO_NAMES["con"]: f"保守增强 — 逆波动率+nonferr趋势过滤{'，Sharpe 最高（' + sharpe_con + '）' if sharpe_con else ''}",
+        PORTFOLIO_NAMES["rp"]: f"学院派 — 4桶分层风险平价(30Y) + nonferr/gold/sp500 趋势过滤{f'，CAGR {cagr_rp}' if cagr_rp else ''}",
     }
     rows = [(tag["stars"], port, tag["label"], notes.get(port, ""))
             for port, tag in items]
@@ -385,10 +385,10 @@ def _section_weights(weights_dict):
     if not weights_dict:
         return []
     ports = list(weights_dict.keys())
-    assets = list(weights_dict[ports[0]].index)
+    assets = list(dict.fromkeys(a for p in ports for a in weights_dict[p].index))   # 三策略资产并集
     rows = []
     for a in assets:
-        rows.append([a] + [_pct(weights_dict[p][a]) for p in ports])
+        rows.append([a] + [_pct(weights_dict[p].get(a, 0.0)) for p in ports])
     rows.append(["**合计**"] + [_pct(weights_dict[p].sum()) for p in ports])
     return [
         "## 10. 权重明细",

@@ -304,7 +304,7 @@ def test_frequency_table_subtracts_unrounded_values_and_matches_by_strategy(freq
 
 def expected_strategy_kwargs(strategy, frequency):
     common = dict(cash_ratio=0.0, nonferr_trend_window=75, wti_trend_window=75,
-                  hs300_value_dip=True, gold_dip_threshold=None, rebal_freq=frequency)
+                  hs300_value_dip=False, gold_dip_threshold=None, rebal_freq=frequency)
     if strategy == "V3c 多元":
         params = dict(assets=config.V3C_ASSETS, iv_window=config.STRATEGY_PARAMS["v3c"]["window"],
                       max_w=config.STRATEGY_PARAMS["v3c"]["max_w"], min_w=config.STRATEGY_PARAMS["v3c"]["min_w"],

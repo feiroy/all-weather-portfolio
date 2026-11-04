@@ -38,10 +38,7 @@ if getattr(FL, "_LOADED_MTIME", None) != _fl_mtime:
 from allweather.config import (
     DATA_DIR,
     GOLD_DIP_THRESHOLD,
-    HS300_DIP_THRESHOLD,
     HS300_DIP_SMA,
-    HS300_PB_ENTRY,
-    HS300_PE_EXIT,
     SP500_TREND_WINDOW,
 )
 
@@ -1667,26 +1664,6 @@ SIGNAL_ACTIONS = [
         "strategies": ["B-RP", "V3c"],
         "type": "趋势过滤",
     },
-    {
-        "key": "hs300_dip_ready",
-        "sell_slot": "credit", "buy_slot": "hs300",
-        "desc": f"HS300 回撤>{HS300_DIP_THRESHOLD:.0%} + PB<{HS300_PB_ENTRY}%ile + 价格>SMA{HS300_DIP_SMA}",
-        "condition": lambda s: s.get("hs300_dip_ready", False),
-        "sell": f"{_cr}（筹资）",
-        "buy": f"{_hs} ×1.8",
-        "strategies": ["B-Con", "B-RP", "V3c"],
-        "type": "抄底加仓",
-    },
-    {
-        "key": "hs300_dip_exit",
-        "sell_slot": "hs300", "buy_slot": "credit",
-        "desc": f"PE > {HS300_PE_EXIT}%ile，抄底出场",
-        "condition": lambda s: s.get("hs300_dip_exit", False),
-        "sell": f"{_hs} 恢复原权重",
-        "buy": _cr,
-        "strategies": ["B-Con", "B-RP", "V3c"],
-        "type": "抄底出场",
-    },
 ]
 
 # ============================================================
@@ -1892,9 +1869,9 @@ cash_ratio = 0.0
 # 计算权重
 # ============================================================
 # 三个策略一次算完：账户只用其中一个，但「权重与选基」的目标权重表、换策略预览、
-# 「模型 · 信号」都是三个并排看。persist=False → 纯函数，不碰 rebalance_state。
+# 「模型 · 信号」都是三个并排看。apply_signal_overrides 是纯函数（只做趋势过滤），不读写任何状态。
 _W0_ALL = {k: compute_target_weights(k, prices, cash_ratio) for k in _STRAT_KEYS}
-_W_ALL = {k: apply_signal_overrides(k, _W0_ALL[k], signals, prices, persist=False)
+_W_ALL = {k: apply_signal_overrides(k, _W0_ALL[k], signals, prices)
           for k in _STRAT_KEYS}
 w0 = _W0_ALL[strat_key]
 w = _W_ALL[strat_key]
@@ -4956,24 +4933,6 @@ with tab1:
                 unsafe_allow_html=True)
 
     st.divider()
-    st.subheader("估值分位")
-    pb_col, pe_col = st.columns(2)
-    with pb_col:
-        pb_pct = signals.get("pb_pctile")
-        if pb_pct is not None:
-            st.metric("PB 分位", f"{pb_pct:.0f}%ile",
-                      delta="便宜" if signals.get("pb_entry_ok") else "偏贵",
-                      delta_color="inverse" if not signals.get("pb_entry_ok") else "normal")
-            st.progress(min(pb_pct / 100, 1.0))
-    with pe_col:
-        pe_pct = signals.get("pe_pctile")
-        if pe_pct is not None:
-            st.metric("PE 分位", f"{pe_pct:.0f}%ile",
-                      delta="偏贵" if signals.get("pe_exit_ok") is False else "正常",
-                      delta_color="inverse" if signals.get("pe_exit_ok") is False else "normal")
-            st.progress(min(pe_pct / 100, 1.0))
-
-    st.divider()
     dd_col1, dd_col2 = st.columns(2)
     with dd_col1:
         gold_dd = signals.get("gold_dd_pct", 0)
@@ -4982,7 +4941,7 @@ with tab1:
     with dd_col2:
         hs_dd = signals.get("hs300_dd_pct", 0)
         st.metric("沪深300 3Y 回撤", f"{hs_dd*100:.1f}%",
-                  delta=f"距抄底线 {(-HS300_DIP_THRESHOLD*100):.0f}% 还差 {(hs_dd*100 + HS300_DIP_THRESHOLD*100):.1f}%" if hs_dd > -HS300_DIP_THRESHOLD else "深度回撤")
+                  help="相对近 3 年最高点的跌幅，只作参考 —— 沪深300 抄底加仓规则已撤（回测里几乎没贡献）")
 
     # 四季象限
     st.divider()
@@ -5047,8 +5006,6 @@ def _weight_note(k: str, a: str) -> str:
     b, f = float(s0.get(a, 0) or 0), float(_W_ALL[k].get(a, 0) or 0)
     if b > 0 and f <= 1e-9:
         return "趋势过滤 → 0"
-    if a == "hs300" and f > b * 1.05:
-        return "抄底加仓"
     if f > b * 1.05 + 1e-4:
         return f"接收 +{(f - b) * 100:.1f}pp"
     return ""
@@ -6986,7 +6943,7 @@ def _custom_portfolio_panel():
         _render_table([("年份", "left")] + [(nm, "right") for nm in results], yrows,
                       min_width=max(700, 120 * len(results)))
         st.markdown('<div class="sec-note">自定义策略按所选模式（等权/自定义权重/逆波动率/HRP）在统一区间回测；'
-                    '内置策略含各自趋势过滤与抄底规则，收益口径为累计净值。</div>', unsafe_allow_html=True)
+                    '内置策略含各自趋势过滤规则，收益口径为累计净值。</div>', unsafe_allow_html=True)
 
 # ============================================================
 # Tab 8: 三策略比较 / 调频影响（统一月度、年度、多年视图）
@@ -7010,20 +6967,9 @@ with tab10:
     else:
         with st.container(key="val_table"):
             st.iframe(_valuation_html(_vp), height="content")
-            # 口径说明：策略信号用的沪深300估值与本页口径不同，明确列出避免误读
-            try:
-                from allweather.data import load_hs300_pb, load_hs300_pe
-                _spb, _spe = load_hs300_pb(), load_hs300_pe()
-                _pbp = (_spb < _spb.iloc[-1]).mean() * 100
-                _pep = (_spe < _spe.iloc[-1]).mean() * 100
-                _sig = (f"策略信号另用一套沪深300口径（乐咕乐股 PB 中位数 / 等权 PE，2005 年起）："
-                        f"截至 {_spb.index[-1]:%Y/%m/%d} PB 百分位 {_pbp:.1f}%（抄底需 &lt; {HS300_PB_ENTRY}%），"
-                        f"PE 百分位 {_pep:.1f}%（退出线 {HS300_PE_EXIT}%）。")
-            except Exception:
-                _sig = ""
             st.markdown(
                 '<div class="sec-note">数据源：蛋卷基金指数估值（加权口径，百分位为近10年），随右上角「更新数据」刷新；'
-                '仅作参考展示，不参与策略计算。' + (f'<br>{_sig}' if _sig else '') + '</div>',
+                '仅作参考展示，不参与策略计算。</div>',
                 unsafe_allow_html=True,
             )
 

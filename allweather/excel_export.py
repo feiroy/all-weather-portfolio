@@ -98,7 +98,7 @@ def _sheet_recommendation(wb):
     notes = {
         "V3-B 保守增强(20d)": "逆波动率 20d + max_w=0.25，Sharpe 最高，回撤最浅",
         "V3-B 风险平价(20d)": "4桶等权HRP + Gold/SP500趋势过滤，CAGR 最高，攻守兼备",
-        "V3c 多元": "8资产逆波动率 60d + 有色趋势 + HS300抄底，中位回报",
+        "V3c 多元": "8资产逆波动率 60d + 有色趋势，中位回报",
     }
     # PORTFOLIO_TAGS 的顺序不是推荐顺序，按 stars 数量重排
     items = sorted(PORTFOLIO_TAGS.items(), key=lambda kv: -len(kv[1]["stars"]))
@@ -446,11 +446,12 @@ def _sheet_weights(wb, weights_dict):
     ports = list(weights_dict.keys())
     _write_title(ws, 1, "三策略权重明细", 1 + len(ports))
     _write_headers(ws, 3, ["资产"] + ports)
-    assets = list(weights_dict[ports[0]].index)
+    # 资产取三个策略的并集：B-RP 有短融、B-Con 有 10Y，按第一个策略的列取会 KeyError
+    assets = list(dict.fromkeys(a for p in ports for a in weights_dict[p].index))
     for i, a in enumerate(assets, start=4):
         ws.cell(row=i, column=1, value=a).alignment = LEFT
         for j, p in enumerate(ports, start=2):
-            cell = ws.cell(row=i, column=j, value=float(weights_dict[p][a]))
+            cell = ws.cell(row=i, column=j, value=float(weights_dict[p].get(a, 0.0)))
             cell.number_format = PCT_FMT
             cell.alignment = RIGHT
         for c in range(1, 2 + len(ports)):
