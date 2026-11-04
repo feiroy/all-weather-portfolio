@@ -482,14 +482,43 @@ div[data-testid="stAlert"] p{ color:var(--brand-strong); }
 .hero{ padding-bottom:6px !important; }
 .st-key-hero_meta{ margin:2px 0 14px 50px; }
 @media(max-width:640px){ .st-key-hero_meta{ margin-left:0; } }
-/* 账户切换：做成和策略胶囊同一套的轻按钮 */
-.st-key-acct_sw button{ border-radius:999px !important; min-height:30px !important; padding:3px 12px !important;
-  font-size:13px !important; font-weight:650 !important; color:var(--ink) !important;
-  background:#fff !important; border:1px solid var(--line-strong) !important; }
-.st-key-acct_sw button:hover{ border-color:#A5B4FC !important; background:#F8FAFF !important; }
-.acsw-h{ font-weight:650; color:var(--ink); font-size:13.5px; margin-bottom:6px; }
-.acsw-n{ font-size:12px; color:var(--muted); margin-top:8px; }
-[data-testid="stPopoverBody"] .stButton>button{ justify-content:flex-start; font-size:13px; }
+/* 账户内页头：账户名（最醒目）· 实盘/模拟 · 跟随策略 · [账户设置] [切换账户] */
+.hero-acct{ font-size:15px; font-weight:700; color:var(--ink); margin-right:8px; vertical-align:middle; }
+.lc-real{ display:inline-block; font-size:11.5px; font-weight:600; color:var(--brand); background:#EEF2FF;
+  border:1px solid #E0E7FF; border-radius:999px; padding:3px 9px; margin-right:6px; vertical-align:middle; }
+.st-key-acct_set button, .st-key-acct_out button{ min-height:30px !important; padding:3px 11px !important;
+  font-size:12.5px !important; border-radius:999px !important; color:var(--sub) !important; }
+.st-key-acct_out button:hover{ color:var(--brand) !important; border-color:#A5B4FC !important; }
+.acsw-n{ font-size:12px; color:var(--muted); margin-top:6px; }
+
+/* 页签分两组：账户的 4 个 | 公共的 4 个 */
+.st-key-main_tabs [role="tablist"] > [role="tab"]:nth-child(5){ margin-left:30px !important; position:relative; overflow:visible; }
+.st-key-main_tabs [role="tablist"] > [role="tab"]:nth-child(5)::before{
+  content:''; position:absolute; left:-16px; top:22%; bottom:22%; width:1px; background:var(--line-strong); }
+
+/* ========== 入口页：选择账户 ========== */
+.lc-head{ display:flex; align-items:baseline; justify-content:space-between; margin:6px 0 14px; }
+.lc-head .t{ font-size:18px; font-weight:700; color:var(--ink); }
+.lc-head .r{ font-size:12.5px; color:var(--muted); }
+/* 卡片等高、按钮贴底：账户卡和「新建」卡并排时不高低错落 */
+[class*="st-key-lc_"]:not([class*="st-key-lc_go_"]){ border-radius:16px !important; min-height:300px;
+  justify-content:space-between; }
+.lc-card{ padding:4px 2px 6px; }
+.lc-top{ display:flex; align-items:center; gap:8px; }
+.lc-top .nm{ font-size:16px; font-weight:700; color:var(--ink); }
+.lc-strat{ font-size:12.5px; color:var(--muted); margin-top:3px; }
+.lc-amt{ font-size:26px; font-weight:700; letter-spacing:-.6px; margin:12px 0 2px; color:var(--ink);
+  font-variant-numeric:tabular-nums; }
+.lc-pnl{ display:flex; gap:10px; align-items:baseline; font-size:13.5px; font-weight:600; font-variant-numeric:tabular-nums; }
+.lc-pnl .muted{ font-weight:400; font-size:12px; }
+.lc-spark{ display:block; width:100%; height:44px; margin:10px 0 4px; }
+.lc-spark.empty{ height:44px; display:flex; align-items:center; font-size:12px; color:var(--muted); }
+.lc-foot{ display:flex; justify-content:space-between; font-size:12px; color:var(--muted); margin-bottom:4px; }
+.lc-foot b{ font-weight:650; }
+.lc-new{ text-align:center; padding:40px 6px 10px; color:var(--muted); }
+.lc-new .plus{ font-size:40px; color:#A5B4FC; line-height:1; }
+.lc-new .t{ font-size:15px; font-weight:650; color:var(--ink); margin-top:8px; }
+.lc-new .s{ font-size:12.5px; margin-top:6px; line-height:1.6; }
 .hero-kind{ display:inline-block; font-size:11.5px; font-weight:650; color:#B45309; background:#FFFBEB;
   border:1px solid #FDE68A; border-radius:999px; padding:3px 9px; margin-right:6px; vertical-align:middle; }
 /* 账户跟随：只说「跟的是谁」，去哪换交给悬停提示 + 末尾一个小换向图标 */
@@ -1771,22 +1800,28 @@ _ACCT_IDS = [a["id"] for a in _ACCTS]
 _ACCT_SCOPED = ("tr_", "_tr_", "hg_", "_hg_", "pf_", "_pf_", "strat_", "acct_view", "acm_")
 
 
-def _switch_account(aid: str) -> None:
+def _switch_account(aid: str | None) -> None:
+    """进入某个账户（aid=None：退出到入口页）。清掉上一个账户留下的控件状态。"""
     for _k in [k for k in st.session_state.keys() if str(k).startswith(_ACCT_SCOPED)]:
         del st.session_state[_k]
-    st.session_state["acct_id"] = aid
-    st.query_params["acct"] = aid
+    if aid:
+        st.session_state["acct_id"] = aid
+        st.query_params["acct"] = aid
+    else:
+        st.session_state.pop("acct_id", None)
+        if "acct" in st.query_params:
+            del st.query_params["acct"]
     # 不写 index.json 的 last：账户数据进 git、多端同步，切一下就改一次文件，两台机器各切各的就会冲突。
-    # 当前看哪个账户记在网址 ?acct= 里就够了；新开页面默认第一个（新建 / 恢复时才更新 last）。
 
 
-_aid = st.query_params.get("acct") or st.session_state.get("acct_id") or AC.last()
+# 进哪个账户只看网址 ?acct=：没有（或者账户已删）就停在入口页，像「选择用户」那样先挑一个再进
+_aid = st.query_params.get("acct")
 if _aid not in _ACCT_IDS:
-    _aid = AC.last() if AC.last() in _ACCT_IDS else (_ACCT_IDS[0] if _ACCT_IDS else None)
+    _aid = None
+    if "acct" in st.query_params:
+        del st.query_params["acct"]
 if _aid and st.session_state.get("acct_id") != _aid:
-    _switch_account(_aid)                      # 打开时 / 从网址切过来：同样清一遍
-elif _aid and st.query_params.get("acct") != _aid:
-    st.query_params["acct"] = _aid
+    _switch_account(_aid)                      # 换了账户（或刚打开）：清一遍控件状态
 acct = AC.load(_aid)
 ACCT_INFO = next((a for a in _ACCTS if a["id"] == _aid), None)
 ACCT_FILE = AC.path_of(_aid) if _aid else None
@@ -1924,6 +1959,192 @@ last_date = prices.index[-1].strftime("%Y-%m-%d")
 missing = sorted({a for k in _STRAT_KEYS for a in STRATEGIES[k]["assets"] if a not in prices.columns})
 if missing:
     st.error(f"缺少数据: {missing}")
+    st.stop()
+
+
+# ============================================================
+# 入口页：先选账户再进（像「选择用户」）。网址没带 ?acct= 就停在这里
+# ============================================================
+_LC_MONEY = ("转入", "入金", "转出", "出金")
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _acct_card_stats(aid: str, _mtime: float, _asof: str) -> dict:
+    """入口页卡片上的数：总金额、持有收益、近一个月走势。
+
+    不走账户页那套重放（那套绑着「当前账户」的全局变量），这里按同样的口径单独重放一遍：
+    现金 = 本金 ± 转入转出 − 买入 + 卖出；市值 = 份额 × 当天净值；收益 = 总资产 − 投入本金。
+    _mtime / _asof 只参与缓存：账户文件改了、数据更新了就重算。
+    """
+    a = AC.load(aid) or {}
+    tr = a.get("trades") or []
+    cap = float(a.get("capital") or 0)
+    created = pd.Timestamp(a.get("created") or prices.index[-1])
+    codes = sorted({str(t.get("code")) for t in tr if t.get("side") in ("买入", "卖出") and t.get("code")})
+    navs = {c: v for c in codes if len(v := _HG0.nav_series(c))}
+    panel = pd.DataFrame(navs).sort_index().ffill() if navs else pd.DataFrame(index=prices.index)
+    idx = panel.index[panel.index >= created]
+    if not len(idx):
+        idx = panel.index[-1:]
+    cash = pd.Series(0.0, index=idx)
+    flow = pd.Series(0.0, index=idx)
+    sh = pd.DataFrame(0.0, index=idx, columns=list(navs))
+    for t in tr:
+        try:
+            day = idx[min(int(idx.searchsorted(pd.Timestamp(t.get("date")))), len(idx) - 1)]
+        except Exception:
+            continue
+        side, q = t.get("side"), float(t.get("shares") or 0)
+        c, fee = str(t.get("code") or ""), float(t.get("fee") or 0)
+        nav = float(t.get("nav") or 0)
+        if side in ("买入", "卖出") and nav <= 0 and c in panel.columns:
+            nav = float(panel[c].loc[:day].iloc[-1]) if len(panel[c].loc[:day]) else 0.0
+        if side == "买入":
+            cash[day] -= q * nav + fee
+            if c in sh.columns:
+                sh.loc[day, c] += q
+        elif side == "卖出":
+            cash[day] += q * nav - fee
+            if c in sh.columns:
+                sh.loc[day, c] -= q
+        elif side in ("转入", "入金"):
+            cash[day] += q
+            flow[day] += q
+        elif side in ("转出", "出金"):
+            cash[day] -= q
+            flow[day] -= q
+    cash = cap + cash.cumsum()
+    mv = (sh.cumsum() * panel.reindex(idx)).sum(axis=1) if navs else pd.Series(0.0, index=idx)
+    eq = cash + mv
+    inv = cap + flow.cumsum()
+    pnl = eq - inv
+    peak = float(inv.max()) or 1.0
+    mi = 1 + pnl / peak                       # 收益 / 本金口径的指数，和账户页同一把尺
+    i0 = max(0, int(mi.index.searchsorted(mi.index[-1] - pd.DateOffset(months=1), side="right")) - 1)
+    seg = mi.iloc[i0:]
+    return {"total": float(eq.iloc[-1]), "pnl": float(pnl.iloc[-1]),
+            "pct": float(pnl.iloc[-1] / inv.iloc[-1]) if float(inv.iloc[-1]) > 0 else 0.0,
+            "m1": float(seg.iloc[-1] / seg.iloc[0] - 1) if len(seg) > 1 else 0.0,
+            "spark": [round(float(v), 6) for v in seg], "asof": f"{idx[-1]:%Y/%m/%d}"}
+
+
+def _spark_svg(vals: list, up: bool) -> str:
+    if len(vals) < 2:
+        return '<div class="lc-spark empty">还没有走势</div>'
+    lo, hi = min(vals), max(vals)
+    sp = (hi - lo) or 1e-9
+    W, H = 220, 44
+    pts = " ".join(f"{k * W / (len(vals) - 1):.1f},{H - 3 - (v - lo) / sp * (H - 6):.1f}" for k, v in enumerate(vals))
+    col = "var(--red)" if up else "var(--green)"
+    return (f'<svg class="lc-spark" viewBox="0 0 {W} {H}" preserveAspectRatio="none" aria-hidden="true">'
+            f'<polyline points="{pts}" fill="none" stroke="{col}" stroke-width="1.8" '
+            'stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/></svg>')
+
+
+def _sgn(v: float, d: int = 2) -> str:
+    return f"{0:.{d}f}" if abs(v) < 0.5 * 10 ** (-d) else f"{v:+,.{d}f}"
+
+
+@st.dialog("新建账户")
+def _landing_create_dialog() -> None:
+    """新建：名称 / 类型 / 跟随策略 / 本金 / 起始日 + 选基配置从哪来（默认 8 只或复制某个账户）。"""
+    _src_opts = ["项目默认 8 只基金"] + [f"复制「{a['name']}」的选基" for a in _ACCTS] \
+        + [f"复制「{a['name']}」（选基 + 全部交易）" for a in _ACCTS]
+    _name = st.text_input("账户名称", key="acm_new_name", placeholder="比如：V3c 试一试")
+    c1, c2 = st.columns(2)
+    _kind = c1.selectbox("类型", list(AC.KINDS), index=1 if _ACCTS else 0, key="acm_new_kind",
+                         help="模拟账户在页头带一个「模拟」标签，免得把它的清单当成真的去下单")
+    _stg = c2.selectbox("跟随策略", _STRAT_KEYS, index=0, key="acm_new_strat",
+                        format_func=lambda k: STRATEGIES[k]["name"],
+                        help="保守增强的资产池和 8 个位置一一对上；风险平价有短融没 10Y、V3c 没 10Y")
+    _src = st.selectbox("选基配置", _src_opts, key="acm_new_src",
+                        help="选基配置 = 8 个位置各挂哪些基金。每个账户各一份，互不影响")
+    _from = None
+    if _src != _src_opts[0]:
+        _k = _src_opts.index(_src) - 1
+        _from = _ACCTS[_k % len(_ACCTS)]
+    _copy_tr = _src.endswith("全部交易）")
+    _fa = AC.load(_from["id"]) if _from else None
+    d1, d2 = st.columns(2)
+    _cap = d1.number_input("初始资金（元）", min_value=0.0, step=10000.0, format="%.0f", key="acm_new_cap",
+                           value=float(_fa.get("capital") or 0) if _copy_tr else 500000.0, disabled=_copy_tr)
+    _start = d2.date_input("起始日期", key="acm_new_start", disabled=_copy_tr,
+                           value=(pd.Timestamp(_fa["created"]).date() if _copy_tr else prices.index[-1].date()))
+    if _copy_tr:
+        st.caption("本金、起始日期、全部成交都照搬过来，之后两边各记各的 —— 适合做对照实验。")
+    if st.button("创建并进入", type="primary", key="acm_new_go", width="stretch"):
+        _h = (_fa.get("holdings") if _fa and _fa.get("holdings") else _HG0._default_holdings())
+        _new = AC.create(_name, _kind, _stg, float(_fa.get("capital") or 0) if _copy_tr else float(_cap),
+                         str(_fa["created"]) if _copy_tr else str(_start),
+                         {k: _HG0._norm_slot(v) for k, v in _h.items()},
+                         trades=[dict(t) for t in _fa.get("trades", [])] if _copy_tr else None)
+        _switch_account(_new)
+        st.rerun()
+
+
+def _render_landing() -> None:
+    st.markdown(
+        '<div class="hero"><div>'
+        f'<div class="hero-brand"><span class="hero-mark">{_LOGO_SVG}</span>'
+        '<span class="hero-title">全天候再平衡</span></div>'
+        '</div></div>'
+        f'<div class="lc-head"><span class="t">选择账户</span>'
+        f'<span class="r">数据截止 {_cn_date(last_date)}</span></div>',
+        unsafe_allow_html=True)
+    _cols = st.columns(3, gap="medium")
+    for k, a in enumerate(_ACCTS + [None]):
+        with _cols[k % 3], st.container(border=True, key=f"lc_{a['id'] if a else 'new'}"):
+            if a is None:
+                st.markdown('<div class="lc-new"><div class="plus">＋</div>'
+                            '<div class="s">实盘照着支付宝记；<br>模拟拿来试别的策略、别的基金</div></div>',
+                            unsafe_allow_html=True)
+                if st.button("新建账户", key="lc_go_new", width="stretch"):
+                    _landing_create_dialog()
+                continue
+            try:
+                m = _acct_card_stats(a["id"], AC.path_of(a["id"]).stat().st_mtime, last_date)
+            except Exception:  # noqa: BLE001
+                m = {"total": 0.0, "pnl": 0.0, "pct": 0.0, "m1": 0.0, "spark": [], "asof": "—"}
+            _up = m["pnl"] >= 0
+            st.markdown(
+                '<div class="lc-card">'
+                f'<div class="lc-top"><span class="nm">{html_escape(a["name"])}</span>'
+                + ('<span class="hero-kind">模拟</span>' if a["kind"] == "模拟" else '<span class="lc-real">实盘</span>')
+                + '</div>'
+                f'<div class="lc-strat">跟随 {_strat_display.get(a["strategy"], a["strategy"])} · {a["n_trades"]} 笔</div>'
+                f'<div class="lc-amt">¥{m["total"]:,.2f}</div>'
+                f'<div class="lc-pnl"><span class="{_pf_sign_l(m["pnl"])}">{_sgn(m["pnl"])}</span>'
+                f'<span class="{_pf_sign_l(m["pct"])}">{_sgn(m["pct"] * 100)}%</span>'
+                '<span class="muted">持有收益</span></div>'
+                + _spark_svg(m["spark"], m["m1"] >= 0)
+                + f'<div class="lc-foot"><span>近一个月 <b class="{_pf_sign_l(m["m1"])}">{_sgn(m["m1"] * 100)}%</b></span>'
+                f'<span>起始 {_cn_date(a["created"]) if a.get("created") else "—"}</span></div>'
+                '</div>', unsafe_allow_html=True)
+            if st.button("进入", key=f"lc_go_{a['id']}", type="primary", width="stretch"):
+                _switch_account(a["id"])
+                st.rerun()
+    _tr = AC.trash()
+    if _tr:
+        with st.expander(f"回收站 · {len(_tr)} 个账户", icon=":material/delete:"):
+            for _t in _tr:
+                r1, r2, r3 = st.columns([2.6, 0.7, 0.8], gap="small", vertical_alignment="center")
+                r1.markdown(f'{html_escape(_t["name"])}　<span class="muted">{_t["kind"]} · 删于 '
+                            f'{_cn_date(_t["deleted"]) if pd.notna(_t["deleted"]) else "—"}</span>',
+                            unsafe_allow_html=True)
+                if r2.button("恢复", key=f"acm_rs_{_t['file']}"):
+                    AC.restore(_t["file"])
+                    st.rerun()
+                if r3.button("彻底删除", key=f"acm_pg_{_t['file']}"):
+                    AC.purge(_t["file"])
+                    st.rerun()
+
+
+def _pf_sign_l(v: float) -> str:
+    return "up" if v > 1e-9 else ("down" if v < -1e-9 else "")
+
+
+if _aid is None:
+    _render_landing()
     st.stop()
 
 # 现金档位（100% / 85% / 70% RP）已经从侧边栏撤掉：`compute_target_weights` 乘上
@@ -4620,24 +4841,31 @@ def _update_ctl() -> None:
 _SWAP_SVG = ('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
              'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
              '<path d="M7 7h11l-3-3M17 17H6l3 3"/></svg>')
-_KIND_TAG = {"实盘": "", "模拟": '<span class="hero-kind">模拟</span>'}
+_KIND_TAG = {"实盘": '<span class="lc-real">实盘</span>', "模拟": '<span class="hero-kind">模拟</span>'}
 
 
-def _acct_switcher() -> None:
-    """页头的账户切换：点开列出全部账户，点哪个切哪个；新建 / 改名 / 删除在「交易记录」页顶部。"""
-    _label = (ACCT_INFO or {}).get("name") or "还没有账户"
-    with st.popover(_label, icon=":material/account_balance_wallet:", key="acct_sw"):
-        st.markdown('<div class="acsw-h">切换账户</div>', unsafe_allow_html=True)
-        for _a in _ACCTS:
-            _cur = _a["id"] == _aid
-            _txt = (f'{_a["name"]}　·　{_a["kind"]}　·　跟随 {_strat_display.get(_a["strategy"], _a["strategy"])}'
-                    f'　·　{_a["n_trades"]} 笔')
-            if st.button(_txt, key=f"acsw_{_a['id']}", type="primary" if _cur else "secondary",
-                         disabled=_cur, width="stretch"):
-                _switch_account(_a["id"])
-                st.rerun()
-        st.markdown('<div class="acsw-n">新建、改名、删除：在「交易记录」页顶部的「账户管理」里</div>',
+def _acct_settings() -> None:
+    """当前账户的设置：改名 / 改类型 / 删除（进回收站，在入口页底部恢复）。"""
+    with st.popover("账户设置", icon=":material/settings:", key="acct_set"):
+        _nm = st.text_input("名称", value=ACCT_INFO["name"], key="acm_cur_name")
+        _kd = st.selectbox("类型", list(AC.KINDS), key="acm_cur_kind",
+                           index=list(AC.KINDS).index(ACCT_INFO["kind"]) if ACCT_INFO["kind"] in AC.KINDS else 0)
+        if st.button("保存", key="acm_cur_save", type="primary",
+                     disabled=(_nm.strip() == ACCT_INFO["name"] and _kd == ACCT_INFO["kind"])):
+            AC.update(_aid, name=_nm.strip() or ACCT_INFO["name"], kind=_kd)
+            st.rerun()
+        st.markdown('<div class="acsw-n">跟随哪个策略在「权重与选基」里换（会先给预览）。</div>',
                     unsafe_allow_html=True)
+        st.divider()
+        if len(_ACCTS) <= 1:
+            st.caption("只剩这一个账户，不能删 —— 先在入口页新建一个再来删它。")
+        else:
+            _cf = st.text_input(f"删除：输入「{ACCT_INFO['name']}」确认", key="acm_del_confirm")
+            if st.button("删除这个账户", key="acm_del_go", disabled=_cf.strip() != ACCT_INFO["name"]):
+                AC.delete(_aid)
+                _switch_account(None)
+                st.rerun()
+            st.caption("删掉的账户进回收站，可以在入口页底部恢复。")
 
 
 _hero_cols = st.columns([3, 2], vertical_alignment="center")
@@ -4651,15 +4879,19 @@ with _hero_cols[0]:
         unsafe_allow_html=True,
     )
     with st.container(key="hero_meta", horizontal=True, vertical_alignment="center", gap="small"):
-        _acct_switcher()
         st.markdown(
-            _KIND_TAG.get((ACCT_INFO or {}).get("kind"), "")
+            f'<span class="hero-acct">{html_escape(ACCT_INFO["name"])}</span>'
+            + _KIND_TAG.get(ACCT_INFO.get("kind"), "")
             # 「去哪换」不写成正文：悬停提示 + 一个小换向图标就够了，胶囊只说「跟的是谁」
             + '<span class="hero-strat" title="这个账户按这个策略调仓（帮你算的清单、偏离目标都按它算）'
             '&#10;在「权重与选基」里更换">'
             f'<span class="k">跟随</span><b>{_strat_display[strat_key]}</b>'
             f'<span class="sw">{_SWAP_SVG}</span></span>',
             unsafe_allow_html=True, width="content")
+        _acct_settings()
+        if st.button("切换账户", icon=":material/logout:", key="acct_out"):
+            _switch_account(None)
+            st.rerun()
 with _hero_cols[1], st.container(key="hero_actions"):
     st.fragment(_update_ctl, run_every=1.5 if _bg_running() else None)()
 
@@ -4991,10 +5223,13 @@ def _slot_config_panel() -> None:
 # 「我的账户」一页管完：有什么（持仓）、赚了多少（收益）、跟谁比（对比）、有没有风险（体检）；
 # 「帮你算」是**唯一**给出「该买多少、卖多少」的地方，而且只算不写账。
 # ============================================================
-tab3, tab5, tab_calc, tab7, tab2, tab1, tab8, tab10 = st.tabs(
-    ["我的账户", "交易记录", "帮你算", "基金检索",
-     "权重与选基", "模型 · 信号", "模型 · 回测", "指数估值"]
-)
+# 前 4 个跟着账户走（换账户内容就换），后 4 个是公共的（行情、模型、估值，哪个账户里看都一样），
+# 中间用一道竖线隔开 —— 见 .st-key-main_tabs 的样式
+with st.container(key="main_tabs"):
+    tab3, tab5, tab_calc, tab2, tab7, tab1, tab8, tab10 = st.tabs(
+        ["我的账户", "交易记录", "帮你算", "权重与选基",
+         "基金检索", "模型 · 信号", "模型 · 回测", "指数估值"]
+    )
 
 # ============================================================
 # Tab 1: 信号仪表盘
@@ -6003,89 +6238,6 @@ with tab_calc:
 # ============================================================
 # Tab 5: 交易记录（补录 + 台账）—— 只记录支付宝上实际发生了什么
 # ============================================================
-def _acct_create_form(first: bool = False) -> None:
-    """新建账户。选基配置三选一：项目默认 8 只 / 复制当前账户的选基 / 复制当前账户（选基 + 全部交易）。"""
-    _src_opts = ["项目默认 8 只基金"] + (["复制当前账户的选基", "复制当前账户（选基 + 全部交易）"] if acct else [])
-    c1, c2, c3 = st.columns([1.6, 1, 1.4], gap="small", vertical_alignment="bottom")
-    _name = c1.text_input("账户名称", value="我的账户" if first else "", key="acm_new_name",
-                          placeholder="比如：V3c 试一试")
-    _kind = c2.selectbox("类型", list(AC.KINDS), index=0 if first else 1, key="acm_new_kind",
-                         help="模拟账户在页头带一个「模拟」标签，免得把它的清单当成真的去下单")
-    _src = c3.selectbox("选基配置", _src_opts, index=min(1, len(_src_opts) - 1), key="acm_new_src",
-                        help="选基配置 = 8 个位置各挂哪些基金。每个账户各一份，改这个账户不会动别的账户")
-    _copy_tr = _src.endswith("全部交易）")
-    d1, d2, d3 = st.columns([1.6, 1, 1.4], gap="small", vertical_alignment="bottom")
-    # 默认保守增强：只有它的资产池跟 8 个位置一一对上（B-RP 有短融没 10Y、V3c 没 10Y）
-    _stg = d1.selectbox("跟随策略", _STRAT_KEYS,
-                        index=_STRAT_KEYS.index(strat_key) if (acct and not first) else 0,
-                        format_func=lambda k: STRATEGIES[k]["name"], key="acm_new_strat",
-                        help="决定「帮你算」按哪套目标权重给清单；建好后可在「权重与选基」里换（会先给预览）")
-    _cap = d2.number_input("初始资金（元）", min_value=0.0, step=10000.0, format="%.0f", key="acm_new_cap",
-                           value=float(acct.get("capital") or 0) if _copy_tr else 500000.0, disabled=_copy_tr)
-    _start = d3.date_input("起始日期", key="acm_new_start", disabled=_copy_tr,
-                           value=(pd.Timestamp(acct["created"]).date() if _copy_tr else prices.index[-1].date()))
-    if _copy_tr:
-        st.caption("连交易一起复制：本金、起始日期、全部成交都照搬当前账户，之后两边各记各的 —— 适合做对照实验。")
-    if st.button("创建账户", type="primary", key="acm_new_go"):
-        _h = (holdings if _src != "项目默认 8 只基金" else HG._default_holdings())
-        _new = AC.create(_name, _kind, _stg,
-                         float(acct.get("capital") or 0) if _copy_tr else float(_cap),
-                         str(acct["created"]) if _copy_tr else str(_start),
-                         {k: HG._norm_slot(v) for k, v in _h.items()},
-                         trades=[dict(t) for t in acct.get("trades", [])] if _copy_tr else None)
-        _switch_account(_new)
-        st.toast(f"已创建「{(_name or '新账户').strip() or '新账户'}」并切换过去", icon=":material/check_circle:")
-        st.rerun()
-
-
-def _account_manager() -> None:
-    """交易记录页顶部的「账户管理」：当前账户改名 / 改类型，新建，删除（进回收站），回收站恢复。"""
-    _tr = AC.trash()
-    with st.expander(f"账户管理 · 共 {len(_ACCTS)} 个账户" + (f"，回收站 {len(_tr)} 个" if _tr else ""),
-                     icon=":material/manage_accounts:"):
-        st.markdown('<div class="sec-head"><span class="t">当前账户</span>'
-                    f'<span class="r">文件 data/accounts/{_aid}.json · 随 git 同步</span></div>',
-                    unsafe_allow_html=True)
-        c1, c2, c3 = st.columns([1.6, 1, 1.4], gap="small", vertical_alignment="bottom")
-        _nm = c1.text_input("名称", value=ACCT_INFO["name"], key="acm_cur_name")
-        _kd = c2.selectbox("类型", list(AC.KINDS), index=list(AC.KINDS).index(ACCT_INFO["kind"])
-                           if ACCT_INFO["kind"] in AC.KINDS else 0, key="acm_cur_kind")
-        if c3.button("保存", key="acm_cur_save", disabled=(_nm.strip() == ACCT_INFO["name"] and _kd == ACCT_INFO["kind"])):
-            AC.update(_aid, name=_nm.strip() or ACCT_INFO["name"], kind=_kd)
-            st.toast("已保存", icon=":material/check_circle:")
-            st.rerun()
-
-        st.markdown('<div class="sec-head"><span class="t">新建账户</span></div>', unsafe_allow_html=True)
-        _acct_create_form()
-
-        st.markdown('<div class="sec-head"><span class="t">删除当前账户</span>'
-                    '<span class="r">先进回收站，可以恢复</span></div>', unsafe_allow_html=True)
-        if len(_ACCTS) <= 1:
-            st.caption("只剩这一个账户，不能删 —— 先建一个新的再来删它。")
-        else:
-            e1, e2 = st.columns([2.6, 1.4], gap="small", vertical_alignment="bottom")
-            _cf = e1.text_input(f"输入账户名「{ACCT_INFO['name']}」确认删除", key="acm_del_confirm")
-            if e2.button("删除", key="acm_del_go", disabled=_cf.strip() != ACCT_INFO["name"]):
-                AC.delete(_aid)
-                _switch_account(AC.last())
-                st.toast(f"已把「{ACCT_INFO['name']}」移到回收站", icon=":material/delete:")
-                st.rerun()
-
-        if _tr:
-            st.markdown('<div class="sec-head"><span class="t">回收站</span></div>', unsafe_allow_html=True)
-            for _t in _tr:
-                r1, r2, r3 = st.columns([2.6, 0.7, 0.7], gap="small", vertical_alignment="center")
-                r1.markdown(f'{html_escape(_t["name"])}　<span class="muted">{_t["kind"]} · 删于 '
-                            f'{_cn_date(_t["deleted"]) if pd.notna(_t["deleted"]) else "—"}</span>',
-                            unsafe_allow_html=True)
-                if r2.button("恢复", key=f"acm_rs_{_t['file']}"):
-                    _switch_account(AC.restore(_t["file"]))
-                    st.rerun()
-                if r3.button("彻底删除", key=f"acm_pg_{_t['file']}"):
-                    AC.purge(_t["file"])
-                    st.rerun()
-
-
 with tab5:
     _cash, _mv_all, _total = (float(_plan["cash"]), float(_plan["mv_all"]),
                               float(_plan["total"]))
@@ -6099,15 +6251,9 @@ with tab5:
                "「帮你算」里的那份是策略算出来的计划，记不记、记多少由你。"
                "只有两种类型：**买入** 把现金换成基金，**卖出** 把基金换回现金 —— "
                "卖出的钱自动回到账户现金里，不用另外记一笔。")
-    if acct is not None:
-        _account_manager()
-
     _slot_opts = _hg_slot_options()
     if acct is None:
-        st.markdown('<div class="sec-head"><span class="t">先建一个账户</span></div>',
-                    unsafe_allow_html=True)
-        st.caption("账户就是一笔本金 + 一串成交记录 + 一份选基配置；建完再逐笔补录（也可以在支付宝买完后回来补录）。")
-        _acct_create_form(first=True)
+        st.info("没有选中账户：点右上角「切换账户」回到入口页选一个。")
     elif not _slot_opts:
         st.warning("还没有挂任何基金：先到「权重与选基」给位置加至少一只基金，才能记账。")
     else:

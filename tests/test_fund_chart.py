@@ -496,6 +496,7 @@ def app_regression():
     with unchanged_data(), block_mutations():
         at = AppTest.from_file(str(APP), default_timeout=120)
         at.session_state["auto_fetch_done"] = True
+        at.query_params["acct"] = "main"          # 不带 ?acct= 会停在入口页
         at.run()
 
         sources = {"hs300": "hs300", "gold": "gold", "wti": "wti", "bond_30y": "bond_30y_etf"}
