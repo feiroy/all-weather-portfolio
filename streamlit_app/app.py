@@ -298,25 +298,20 @@ hr{ border-color:var(--line); margin:1.6rem 0; }
 .pf-head .pf-grid .v.down{ color:#86EFAC; }
 /* 头卡上半：左总金额、右月度小柱图（窄屏换行到下面） */
 .pf-head .pf-top{ display:flex; justify-content:space-between; align-items:flex-end; gap:16px 28px; flex-wrap:wrap; }
-.pf-months{ min-width:0; }
-.pf-mh{ font-size:11.5px; opacity:.78; margin-bottom:6px; text-align:right; }
-.pf-mbars{ display:flex; gap:6px; justify-content:flex-end; }
-.pf-mbars .mb{ display:flex; flex-direction:column; align-items:center; width:62px; padding:5px 0 4px;
-  border-radius:10px; background:rgba(255,255,255,.07); cursor:default; color:#fff; }
-.pf-mbars .mb:hover{ background:rgba(255,255,255,.14); }
-.pf-mbars .mv{ font-size:12px; font-weight:650; font-variant-numeric:tabular-nums; }
-.pf-mbars .bw{ position:relative; width:14px; height:56px; margin:3px 0; }
-.pf-mbars .bw::after{ content:''; position:absolute; left:-8px; right:-8px; top:50%; height:1px; background:rgba(255,255,255,.3); }
-.pf-mbars .bw i{ position:absolute; left:0; right:0; border-radius:3px; }
-.pf-mbars .pos .bw i{ bottom:50%; background:#FCA5A5; }
-.pf-mbars .neg .bw i{ top:50%; background:#86EFAC; }
-.pf-mbars .flat .bw i{ top:calc(50% - 1px); background:rgba(255,255,255,.5); }
-.pf-mbars .pos .mv{ color:#FCA5A5; } .pf-mbars .neg .mv{ color:#86EFAC; }
-.pf-mbars .live .bw i{ opacity:.6; }
-.pf-mbars .ml{ font-size:11px; opacity:.85; white-space:nowrap; }
-.pf-mbars .mm{ font-size:10.5px; opacity:.68; font-variant-numeric:tabular-nums; }
-@media(max-width:640px){ .pf-months{ width:100%; } .pf-mh{ text-align:left; } .pf-mbars{ justify-content:flex-start; }
-  .pf-mbars .mb{ flex:1; width:auto; } }
+.pf-curve{ width:300px; max-width:100%; cursor:default; }
+.pf-ch{ display:flex; align-items:baseline; justify-content:flex-end; gap:8px; font-size:11.5px; }
+.pf-ch span{ opacity:.78; }
+.pf-ch b{ font-size:16px; font-weight:700; font-variant-numeric:tabular-nums; letter-spacing:-.3px; }
+.pf-ch b.pos{ color:#FCA5A5; } .pf-ch b.neg{ color:#86EFAC; } .pf-ch b.flat{ color:#fff; }
+.pf-ch .m{ font-variant-numeric:tabular-nums; }
+.pf-cv{ position:relative; height:74px; margin-top:6px; }
+.pf-cv svg{ display:block; width:100%; height:100%; overflow:visible; }
+.pf-cv .dot{ position:absolute; width:8px; height:8px; margin:-4px 0 0 -4px; border-radius:50%;
+  border:2px solid #1E40AF; box-shadow:0 0 0 3px rgba(255,255,255,.18); }
+.pf-cv .dot.pos{ background:#FCA5A5; } .pf-cv .dot.neg{ background:#86EFAC; } .pf-cv .dot.flat{ background:#fff; }
+.pf-cd{ display:flex; justify-content:space-between; font-size:10.5px; opacity:.62; margin-top:3px;
+  font-variant-numeric:tabular-nums; }
+@media(max-width:640px){ .pf-curve{ width:100%; } .pf-ch{ justify-content:flex-start; } }
 /* 现金那格多一个小占比：¥12,714 单放着既看不出是多是少，也不知道该不该管 */
 .pf-head .pf-grid .v .s{ font-size:11.5px; font-weight:500; opacity:.72; margin-left:7px }
 /* 头卡下面那一行：这一轮要不要动手、动手去哪看。只说「有没有事」，金额一律留在「帮你算」 */
@@ -494,10 +489,6 @@ div[data-testid="stAlert"] p{ color:var(--brand-strong); }
 .hero-strat .sw{ display:inline-flex; color:#A5B4FC; }
 .hero-strat .sw svg{ width:13px; height:13px; }
 .hero-strat:hover .sw{ color:#4F46E5; }
-.hero-date{ font-size:12.5px; color:var(--muted); }
-.hero-date::before{ content:''; display:inline-block; width:3px; height:3px; border-radius:50%;
-  background:#CBD5E1; vertical-align:middle; margin:0 10px 0 0; }
-.hero-date.stale{ color:var(--amber); }
 @media(max-width:640px){ .hero-meta{ margin-left:0; } }
 
 /* 更新数据：拉取中图标转圈（按钮禁用），拉完自动停 */
@@ -505,7 +496,8 @@ div[data-testid="stAlert"] p{ color:var(--brand-strong); }
 .st-key-upd_running button [data-testid="stIconMaterial"]{ display:inline-block; animation:aw-spin .9s linear infinite; }
 .st-key-upd_running button{ opacity:1 !important; color:var(--brand) !important; border-color:#C7D2FE !important;
   background:#EEF2FF !important; }
-.upd-ok{ font-size:12px; color:var(--muted); white-space:nowrap; }
+.upd-st{ font-size:12.5px; color:var(--muted); white-space:nowrap; font-variant-numeric:tabular-nums; }
+.upd-st b.stale{ color:var(--amber); font-weight:600; }
 /* 没拉到的项：一个琥珀色小按钮，点开才看是哪几项 —— 不再在页头下面铺一整条红框 */
 .st-key-upd_errs button{ color:var(--amber) !important; border-color:#FDE68A !important; background:#FFFBEB !important;
   font-size:12.5px !important; min-height:34px; padding:2px 10px !important; }
@@ -4461,7 +4453,10 @@ def _update_ctl() -> None:
     # 横排容器要放在 fragment 里面：fragment 自己会包一层，外面那层 horizontal 管不到里面的元素
     row = st.container(horizontal=True, horizontal_alignment="right", vertical_alignment="center",
                        gap="small", key="upd_row")
+    _when = f"数据截止 {_cn_date(last_date)}"
     if _bg_running():
+        row.markdown(f'<span class="upd-st">{_when} · 正在拉取最新数据</span>',
+                     unsafe_allow_html=True, width="content")
         row.button("更新中", icon=":material/sync:", disabled=True, key="upd_running")
         return
     if stt["finished"] and stt["finished"] > st.session_state.get("upd_seen", 0):
@@ -4481,9 +4476,13 @@ def _update_ctl() -> None:
                 f'<div class="upd-pop-i"><b>{html_escape(n)}</b>'
                 f'<span>{html_escape(r[:160])}</span></div>'
                 for n, r in (_err_label(e) for e in _errs)), unsafe_allow_html=True)
+    # 数据截止跟更新按钮放一起：「数据到哪天了」和「要不要再拉一次」本来就是同一件事
+    _tail = ""
+    if _stale >= 1:
+        _tail = f' · <b class="stale">缺 {_stale} 个交易日</b>'
     elif st.session_state.get("upd_done"):
-        row.markdown(f'<span class="upd-ok">已更新 · {_t.strftime("%H:%M", _t.localtime(st.session_state.upd_done))}'
-                     '</span>', unsafe_allow_html=True, width="content")
+        _tail = f' · {_t.strftime("%H:%M", _t.localtime(st.session_state.upd_done))} 已更新'
+    row.markdown(f'<span class="upd-st">{_when}{_tail}</span>', unsafe_allow_html=True, width="content")
     if row.button("更新数据", icon=":material/sync:", key="upd_btn",
                  type="primary" if _stale >= 1 else "secondary"):
         _start_background_fetch(force=True)
@@ -4495,8 +4494,6 @@ def _update_ctl() -> None:
 _SWAP_SVG = ('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
              'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
              '<path d="M7 7h11l-3-3M17 17H6l3 3"/></svg>')
-_date_cls = "hero-date" + (" stale" if _stale >= 1 else "")
-_date_txt = f"数据截止 {_cn_date(last_date)}" + (f" · 缺 {_stale} 个交易日" if _stale >= 1 else "")
 _hero_cols = st.columns([3, 2], vertical_alignment="center")
 with _hero_cols[0]:
     st.markdown(
@@ -4510,7 +4507,6 @@ with _hero_cols[0]:
         '&#10;在「权重与选基」里更换">'
         f'<span class="k">账户跟随</span><b>{_strat_display[strat_key]}</b>'
         f'<span class="sw">{_SWAP_SVG}</span></span>'
-        f'<span class="{_date_cls}">{_date_txt}</span>'
         '</div></div></div>',
         unsafe_allow_html=True,
     )
@@ -5321,41 +5317,58 @@ def _acct_health_view() -> None:
     st.caption("".join(_tail))
 
 
-def _head_months_html(n: int = 6) -> str:
-    """头卡右侧：最近 n 个月每月赚了几个点、多少钱 —— 不用点进「收益」就能看到最近走势。
+def _head_month_curve_html() -> str:
+    """头卡右侧：近一个月的累计收益曲线 —— 不用点进「收益」就看得到最近这一个月怎么走的。
 
-    数据跟「收益」页的按月切段同一个函数（HG.period_performance），口径一致：
-    收益率 = 月末 nav / 上月末 nav − 1（扣掉转入转出），金额 = 月末总资产 − 上月末 − 当月净转入。
-    柱子以 0 为中线，涨往上（浅红）跌往下（浅绿）；本月还没过完，柱子半透明。
+    起点 = 一个月前那天收盘（记 0），之后每天：
+      收益率 = nav / 起点 nav − 1（账户净值已扣掉转入转出）
+      收益额 = 累计收益(元) − 起点累计收益（同「收益」页走势下面那条线的口径）
+    账户还不到一个月就从建仓日画起。线色跟着区间涨跌走：涨浅红、跌浅绿（蓝底上的红涨绿跌）。
     """
-    if acct is None or not len(_acct_daily):
+    if acct is None or len(_acct_daily) < 2:
         return ""
-    try:
-        per = HG.period_performance(_acct_daily, _acct_flows(), freq="M")[:n][::-1]
-    except Exception:
+    nav = _acct_daily["nav"].astype(float).dropna()
+    pnl = _acct_pnl_series().reindex(nav.index)
+    if len(nav) < 2:
         return ""
-    if not per:
-        return ""
-    mx = max(abs(float(p["ret"])) for p in per) or 1e-9
-    _today = pd.Timestamp(_hg_last)
-    cells = []
-    for p in per:
-        r, m = float(p["ret"]), float(p["pnl"])
-        # 类名别用 up/down：全站有 .up/.down 文字色（深红深绿），整格会被染色，蓝底上看不清
-        cls = "pos" if r * 100 >= 0.005 else ("neg" if r * 100 <= -0.005 else "flat")
-        h = max(2.0, abs(r) / mx * 26)
-        e = pd.Timestamp(p["end"])
-        live = (e.year, e.month) == (_today.year, _today.month)
-        mon = p["period"].split("年", 1)[-1]
-        cells.append(
-            f'<div class="mb {cls}{" live" if live else ""}" '
-            f'title="{p["period"]}{"（本月至今）" if live else ""}：{_pf_num(r * 100, 2)}% · {_pf_num(m, 2)} 元">'
-            f'<span class="mv">{_pf_num(r * 100, 2)}%</span>'
-            f'<span class="bw"><i style="height:{h:.0f}px"></i></span>'
-            f'<span class="ml">{mon}{"·至今" if live else ""}</span>'
-            f'<span class="mm">{_pf_num(m, 0)}</span></div>')
-    return ('<div class="pf-months"><div class="pf-mh">近 ' + str(len(per)) + ' 个月 · 每月收益</div>'
-            '<div class="pf-mbars">' + "".join(cells) + '</div></div>')
+    end = nav.index[-1]
+    i0 = int(nav.index.searchsorted(end - pd.DateOffset(months=1), side="right")) - 1
+    i0 = max(0, min(i0, len(nav) - 2))
+    seg, pseg = nav.iloc[i0:], pnl.iloc[i0:]
+    ret = (seg / float(seg.iloc[0]) - 1) * 100
+    money = float(pseg.iloc[-1] - pseg.iloc[0]) if pseg.notna().all() else 0.0
+    last = float(ret.iloc[-1])
+    W, H, PX, PY = 300, 74, 4, 8
+    lo, hi = min(0.0, float(ret.min())), max(0.0, float(ret.max()))
+    span = (hi - lo) or 1e-6
+    n = len(ret)
+    xs = [PX + (W - 2 * PX) * k / (n - 1) for k in range(n)]
+    ys = [PY + (H - 2 * PY) * (hi - float(v)) / span for v in ret]
+    y0 = PY + (H - 2 * PY) * hi / span                     # 0% 那条线
+    line = " ".join(f"{x:.1f},{y:.1f}" for x, y in zip(xs, ys))
+    area = f"{xs[0]:.1f},{y0:.1f} {line} {xs[-1]:.1f},{y0:.1f}"
+    cls = "pos" if last >= 0.005 else ("neg" if last <= -0.005 else "flat")
+    col = {"pos": "#FCA5A5", "neg": "#86EFAC", "flat": "#E2E8F0"}[cls]
+    svg = (f'<svg viewBox="0 0 {W} {H}" preserveAspectRatio="none" aria-hidden="true">'
+           f'<defs><linearGradient id="pfmg" x1="0" x2="0" y1="0" y2="1">'
+           f'<stop offset="0" stop-color="{col}" stop-opacity=".38"/>'
+           f'<stop offset="1" stop-color="{col}" stop-opacity="0"/></linearGradient></defs>'
+           f'<line x1="0" x2="{W}" y1="{y0:.1f}" y2="{y0:.1f}" stroke="rgba(255,255,255,.28)" '
+           f'stroke-dasharray="3 3" vector-effect="non-scaling-stroke"/>'
+           f'<polygon points="{area}" fill="url(#pfmg)"/>'
+           f'<polyline points="{line}" fill="none" stroke="{col}" stroke-width="2" '
+           f'stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>'
+           '</svg>')
+    d0, d1 = seg.index[0], seg.index[-1]
+    return ('<div class="pf-curve" title="'
+            f'{_cn_date(d0)} → {_cn_date(d1)}：{_pf_num(last, 2)}% · {_pf_num(money, 2)} 元'
+            '（起点记 0，已扣除转入转出）">'
+            f'<div class="pf-ch"><span>近一个月</span><b class="{cls}">{_pf_num(last, 2)}%</b>'
+            f'<span class="m">{_pf_num(money, 0)} 元</span></div>'
+            f'<div class="pf-cv">{svg}<i class="dot {cls}" style="left:{xs[-1] / W * 100:.2f}%;'
+            f'top:{ys[-1] / H * 100:.2f}%"></i></div>'
+            f'<div class="pf-cd"><span>{d0.month}/{d0.day}</span><span>{d1.month}/{d1.day}</span></div>'
+            '</div>')
 
 
 # ============================================================
@@ -5377,7 +5390,7 @@ with tab3:
         '<div class="pf-k">总金额（元）</div>'
         f'<div class="pf-amt">¥{_tot:,.2f}</div>'
         f'<div class="pf-sub">{_head_sub}</div>'
-        f'</div>{_head_months_html()}</div>'
+        f'</div>{_head_month_curve_html()}</div>'
         '<div class="pf-grid">'
         f'<div><div class="k">今日收益</div><div class="v {_pf_sign(_plan["today"])}">'
         f'{_pf_num(_plan["today"], 2)}</div></div>'
