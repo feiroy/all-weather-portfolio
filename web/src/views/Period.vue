@@ -175,6 +175,12 @@ void money
 .rr{ padding:10px 0 4px; }
 .note{ font-size:11.5px; color:var(--muted); margin:6px 0 0; line-height:1.6; }
 .nav{ display:flex; align-items:center; gap:4px; font-size:14.5px; white-space:nowrap; }
+.cal .ch{ flex-wrap:wrap; row-gap:8px; }
+/* 窄屏（≤400）：月份切换单独占一行居中，两个切换按钮在下一行左右排 */
+@media (max-width:400px){ .cal .ch .nav{ order:-1; flex-basis:100%; justify-content:center; } }
+.cal .ch{ flex-wrap:wrap; row-gap:8px; }
+/* 窄屏（≤400）：月份切换单独占一行居中，两个切换按钮在下一行左右排 */
+@media (max-width:400px){ .cal .ch .nav{ order:-1; flex-basis:100%; justify-content:center; } }
 .nav .van-icon{ cursor:pointer; padding:4px; } .nav .dis{ opacity:.25; cursor:default; }
 .sumline{ font-size:12.5px; color:var(--sub); margin:10px 0 4px; display:flex; gap:10px; align-items:baseline; }
 .sumline b{ font-size:14px; }

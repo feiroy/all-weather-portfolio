@@ -118,6 +118,10 @@ const bw = v => `${Math.min(100, (v / maxW.value) * 100)}%`
 .mt{ margin-top:12px !important; }
 .slots{ padding:12px 14px; }
 .srow{ display:grid; grid-template-columns:100px 1fr 92px 38px; gap:8px; align-items:center; padding:6px 0; font-size:12.5px; }
+@media (max-width:420px){
+  .srow{ grid-template-columns:1fr auto 38px; grid-template-areas:"l v d" "b b b"; row-gap:5px; padding:7px 0; }
+  .srow .sl{ grid-area:l; } .srow .sv{ grid-area:v; } .srow .sd{ grid-area:d; } .srow .bar{ grid-area:b; }
+}
 .sl{ color:var(--sub); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .bar{ position:relative; height:8px; background:#F1F2F4; border-radius:4px; }
 .bar .now{ position:absolute; left:0; top:0; bottom:0; background:#93C5FD; border-radius:4px; }

@@ -49,6 +49,11 @@ load(); watch(dataVer, () => load(true))
 .k{ font-size:12px; color:var(--muted); line-height:1.6; margin:0; }
 .mx{ margin-top:10px; }
 .mh, .mr{ display:grid; grid-template-columns:1fr 64px 64px 64px; align-items:center; gap:4px; }
+@media (max-width:480px){
+  .mh, .mr{ grid-template-columns:repeat(3,1fr); }
+  .mh span:first-child{ display:none; }
+  .mr .mn{ grid-column:1 / -1; margin-bottom:6px; }
+}
 .mh{ font-size:11.5px; color:var(--muted); text-align:center; padding-bottom:6px; border-bottom:1px solid var(--line); }
 .mr{ padding:10px 0; border-bottom:1px solid var(--line); }
 .mr:last-child{ border-bottom:0; }

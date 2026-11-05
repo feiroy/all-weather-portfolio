@@ -130,6 +130,12 @@ async function add(r) {
 .sc b{ display:block; font-size:15px; } .sc small{ font-size:12px; color:var(--muted); }
 .wt{ padding:8px 12px; }
 .wh, .wr{ display:grid; grid-template-columns:1fr 62px 62px 62px; gap:4px; align-items:center; }
+@media (max-width:480px){
+  .wh, .wr{ grid-template-columns:repeat(3,1fr); }
+  .wh span:first-child{ display:none; }
+  .wr .wn{ grid-column:1 / -1; display:flex; gap:8px; align-items:baseline; margin-bottom:4px; }
+  .wh, .wv{ text-align:center !important; }
+}
 .wh{ font-size:11.5px; color:var(--muted); padding:4px 0 8px; border-bottom:1px solid var(--line); text-align:right; }
 .wh span:first-child{ text-align:left; }
 .wr{ padding:8px 0; border-bottom:1px solid var(--line); } .wr:last-child{ border-bottom:0; }

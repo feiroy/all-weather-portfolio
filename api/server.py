@@ -661,10 +661,12 @@ class Auth(BaseHTTPMiddleware):
 async def spa(request: Request):
     """前端是单页应用：/a/main/fund/511260 这类地址刷新时也回 index.html。"""
     f = (DIST / request.path_params.get("path", "")).resolve()
-    if f.is_file() and f.is_relative_to(DIST.resolve()):
+    if f.is_file() and f.is_relative_to(DIST.resolve()) and f.name != "index.html":
         return FileResponse(f)
     idx = DIST / "index.html"
-    return FileResponse(idx) if idx.exists() else J({"error": "前端还没构建：cd web && npm run build"}, 404)
+    # index.html 不能缓存：重新构建后它指向新的带哈希资源，缓存住旧的就一直是旧页面
+    return (FileResponse(idx, headers={"Cache-Control": "no-cache"}) if idx.exists()
+            else J({"error": "前端还没构建：cd web && npm run build"}, 404))
 
 
 routes = [
