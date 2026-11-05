@@ -202,7 +202,7 @@ void money
 .dv2{ text-align:right; } .dv2 b{ display:block; font-size:14.5px; } .dv2 small{ font-size:12px; }
 
 @media (min-width:900px){
-  /* 曲线是主图占满宽度；日历和当日明细收窄居中，格子才不会被拉散 */
-  .cols2 > div:last-child{ max-width:640px; margin:0 auto; }
+  /* 卡片外框与上方曲线卡同宽；只把日历网格本身收窄居中，格子才不会被拉散 */
+  .cal .ch, .cal .sumline, .cal .wk, .cal .grid7, .cal .grid3{ max-width:460px; margin-left:auto; margin-right:auto; }
 }
 </style>

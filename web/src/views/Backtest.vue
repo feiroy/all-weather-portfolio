@@ -29,6 +29,28 @@
           <div class="ct"><b>累计收益</b><span class="k">{{ cad === 'mine' ? '账户建立起' : start.slice(0, 4) + ' 年起' }}</span></div>
           <MultiLine :series="d.curves" :height="320" :colors="colors" :dashed="Object.keys(d.curves).filter(isBase)" />
         </div>
+        <van-collapse v-model="showMore" class="more">
+          <van-collapse-item name="p" title="月 / 年收益（月末调仓基准）">
+            <span class="seg2 pt"><button v-for="p in [['monthly','月度'],['yearly','年度']]" :key="p[0]"
+              :class="{ on: pk === p[0] }" @click="pk = p[0]">{{ p[1] }}</button></span>
+            <div class="ptab" v-if="shownPeriods.length">
+              <div class="ph"><span>期间</span><span v-for="s in baseNames" :key="s">{{ s.replace(' · 月末', '') }}</span></div>
+              <div v-for="r in shownPeriods" :key="r.k" class="pr">
+                <span class="num">{{ r.k }}</span>
+                <span v-for="s in baseNames" :key="s" class="num" :class="tone(r.v[s])">{{ r.v[s] == null ? '—' : pct(r.v[s]) }}</span>
+              </div>
+            </div>
+            <p v-else class="empty-tip">切换一下调仓节奏就能看到对照数据</p>
+          </van-collapse-item>
+          <van-collapse-item name="g" title="调频影响（相对月末调仓）" v-if="d.gaps?.length">
+            <div v-for="g in d.gaps" :key="g.name" class="grow">
+              <b>{{ g.name }}</b>
+              <span>年化 {{ pct(g.cagr) }} <em :class="tone(g.vs)">{{ signed(g.vs) }}pp</em></span>
+              <span>回撤 {{ g.mdd.toFixed(2) }}% <em :class="tone(g.vs_mdd)">{{ signed(g.vs_mdd) }}pp</em></span>
+            </div>
+            <p class="empty-tip">差值 = 当前节奏 − 月末调仓；绝对值与差值并列，避免只看差多少却不知道原本多少</p>
+          </van-collapse-item>
+        </van-collapse>
       </div>
     </div>
   </div>
@@ -57,6 +79,10 @@ const PAL = { 保守增强: '#1E40AF', 风险平价: '#F59E0B', V3c: '#8B5CF6' }
 const colorOf = n => Object.entries(PAL).find(([k]) => n.includes(k))?.[1] || '#64748B'
 const isBase = n => cad.value !== 'monthly' && n.endsWith('· 月末')
 const colors = computed(() => Object.keys(d.value?.curves || {}).map(colorOf))
+const showMore = ref([]), pk = ref('monthly')
+const baseNames = computed(() => Object.keys(d.value?.periods?.monthly?.[0]?.v || {}).length
+  ? Object.keys(d.value.periods.monthly[0].v) : Object.keys(d.value?.periods?.yearly?.[0]?.v || {}))
+const shownPeriods = computed(() => d.value?.periods?.[pk.value] || [])
 </script>
 <style scoped>
 .ctl .row{ display:flex; align-items:center; gap:8px; margin-bottom:8px; }
@@ -72,6 +98,15 @@ const colors = computed(() => Object.keys(d.value?.curves || {}).map(colorOf))
 .r2{ display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin-top:10px; }
 .r2 span{ display:block; font-size:11.5px; color:var(--muted); } .r2 b{ display:block; font-size:15px; margin-top:2px; }
 .ct{ display:flex; justify-content:space-between; align-items:baseline; font-size:15px; margin-bottom:8px; }
+.more{ margin:16px 12px 0; border-radius:12px; overflow:hidden; }
+.more :deep(.van-collapse-item__content){ padding:10px 12px; }
+.pt{ margin-bottom:8px; }
+.ptab{ font-size:12.5px; }
+.ph, .pr{ display:grid; grid-template-columns:1fr repeat(3,minmax(0,1fr)); gap:4px; padding:6px 0; border-bottom:1px solid var(--line); }
+.ph{ color:var(--muted); font-size:11.5px; }
+.ph span:not(:first-child), .pr span:not(:first-child){ text-align:right; }
+.grow{ display:flex; flex-wrap:wrap; gap:6px 14px; padding:8px 0; border-bottom:1px solid var(--line); font-size:12.5px; }
+.grow b{ flex:0 0 100%; } .grow em{ font-style:normal; margin-left:4px; }
 
 @media (min-width:900px){
   .metric-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }

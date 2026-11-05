@@ -18,6 +18,7 @@
               <span :class="tone(a.pnl_pct)">{{ pct(a.pnl_pct) }}</span><small>持有收益</small></div>
             <div class="ops" @click.stop>
               <a @click="openRename(a)">改名</a>
+              <a @click="openStrategy(a)">换策略</a>
               <a class="red" :class="{ dis: list.length <= 1 }" @click="askDelete(a)">删除</a>
               <span class="enter">进入 <van-icon name="arrow" /></span>
             </div>
@@ -67,6 +68,9 @@
     </van-popup>
     <van-action-sheet v-model:show="showFrom" :actions="fromActs" cancel-text="取消" close-on-click-action
                       description="新账户每个位置买哪几只基金" @select="x => { f.from = x.value; if (!x.value) f.copy_trades = false }" />
+    <van-popup v-model:show="showStgChange" position="bottom" round>
+      <van-picker title="换策略" :columns="stgCols" @confirm="doStrategy" @cancel="showStgChange = false" />
+    </van-popup>
     <van-popup v-model:show="showStg" position="bottom" round>
       <van-picker title="跟随策略" :columns="stgCols" @confirm="({ selectedValues }) => { f.strategy = selectedValues[0]; showStg = false }" @cancel="showStg = false" />
     </van-popup>
@@ -130,6 +134,28 @@ async function askDelete(a) {
   } catch { return }
   try { await del(`/api/acct/${a.id}`); showSuccessToast('已移到回收站'); load(true) } catch (e) { showFailToast(e.message) }
 }
+// 换策略：策略是账户属性，和改名/删除一样放在入口页；先给预览再确认
+const showStgChange = ref(false), stgAcct = ref(null)
+function openStrategy(a) { stgAcct.value = a; showStgChange.value = true }
+async function doStrategy({ selectedValues }) {
+  const to = selectedValues[0], a = stgAcct.value
+  showStgChange.value = false
+  if (!a || to === a.strategy) return
+  let p
+  try { p = await get(`/api/acct/${a.id}/switch-preview?to=${to}`, { fresh: true }) }
+  catch (e) { return showFailToast(e.message) }
+  const lines = [`换过去这一轮要下 ${p.n} 笔（现在是 ${p.n_now} 笔）`,
+                 `卖出 ¥${money(p.sell, 0)} · 买入 ¥${money(p.buy, 0)}`]
+  if (p.liq.length) lines.push(`清仓：${p.liq.map(x => `${x.name} ¥${money(x.amount, 0)}`).join('、')}`)
+  if (p.zero.length) lines.push(`目标为 0 的位置：${p.zero.join('、')}`)
+  if (p.unplaced.length) lines.push(`新策略有、还没配位置的资产：${p.unplaced.map(x => `${x.name} ${x.w}%`).join('、')}`)
+  try {
+    await showConfirmDialog({ title: `「${a.name}」改为跟随「${p.to_name}」？`,
+      message: lines.join('\n'), messageAlign: 'left', confirmButtonText: '确认更换' })
+  } catch { return }
+  try { await post(`/api/acct/${a.id}/strategy`, { to }); showSuccessToast('已更换'); load(true) }
+  catch (e) { showFailToast(e.message) }
+}
 async function restore(t) {
   try { await post(`/api/trash/${t.file}/restore`, {}); showSuccessToast('已恢复'); load(true) } catch (e) { showFailToast(e.message) }
 }
@@ -155,7 +181,7 @@ async function purge(t) {
 .add{ display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; border:1.5px dashed #D1D5DB; background:transparent; color:var(--sub); min-height:120px; }
 .add .van-icon{ font-size:24px; color:var(--brand); } .add span{ font-size:15px; font-weight:600; } .add small{ font-size:12px; color:var(--muted); }
 .lk{ color:var(--brand); margin-left:14px; font-size:13px; cursor:pointer; } .lk.red{ color:var(--up); }
-.ops{ display:flex; align-items:center; gap:16px; margin-top:12px; padding-top:10px; border-top:1px solid var(--line); font-size:13px; }
+.ops{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-top:12px; padding-top:10px; border-top:1px solid var(--line); font-size:13px; }
 .ops a{ color:var(--sub); cursor:pointer; } .ops a.red{ color:var(--up); } .ops a.dis{ opacity:.35; }
 .ops .enter{ margin-left:auto; color:var(--brand); display:flex; align-items:center; gap:3px; }
 .pop{ padding:18px 0 24px; max-width:560px; margin:0 auto; }

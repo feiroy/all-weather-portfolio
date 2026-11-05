@@ -3,32 +3,15 @@
     <SubBar title="选基配置" :fallback="`/a/${aid}`" />
     <div class="wrap">
       <van-skeleton v-if="!d" title :row="10" style="padding:16px" />
-      <div v-else class="cols2 even">
-        <div>
-          <!-- 跟随哪个策略 -->
-          <div class="sec-t"><span>这个账户跟随</span></div>
-          <div class="stg">
-            <div v-for="s in d.strategies" :key="s.key" class="sc" :class="{ on: s.key === d.account.strategy }" @click="pick(s)">
-              <van-icon :name="s.key === d.account.strategy ? 'checked' : 'circle'" /><div><b>{{ s.name }}</b><small>{{ desc[s.key] }}</small></div>
-            </div>
-          </div>
-          <!-- 三个策略今天的目标 -->
-          <div class="sec-t"><span>今天的目标权重</span><span>含趋势过滤</span></div>
-          <div class="card wt">
-            <div class="wh"><span>资产</span><span v-for="s in d.strategies" :key="s.key" :class="{ me: s.key === d.account.strategy }">{{ s.name.replace('V3-B ', '') }}</span></div>
-            <div v-for="r in d.rows" :key="r.asset" class="wr">
-              <div class="wn"><b>{{ r.name }}</b><small :class="{ miss: !r.mine }">{{ r.mine || '没有对应位置 → 同桶分配' }}</small></div>
-              <span v-for="s in d.strategies" :key="s.key" class="wv num" :class="{ me: s.key === d.account.strategy }">
-                <template v-if="r.w[s.key] == null"><em>—</em></template>
-                <template v-else>{{ r.w[s.key].toFixed(1) }}%<small v-if="r.note[s.key]" :class="r.note[s.key].startsWith('趋势') ? 'z' : 'p'">{{ r.note[s.key].replace('趋势过滤 ', '') }}</small></template>
-              </span>
-            </div>
-          </div>
+      <div v-else class="sel-page">
+        <!-- 策略是账户属性，在入口页账户卡片上换；这一页只管选基金 -->
+        <div class="card cur">
+          <div class="cl">当前跟随 <b>{{ d.account.strategy_name }}</b></div>
+          <p>策略决定每个资产该占多少；这一页只管<b>每个位置用哪只基金去买</b>。要换策略，到入口页账户卡片上点「换策略」，会先给预览再确认。</p>
+          <router-link to="/" class="go">去账户页 <van-icon name="arrow" /></router-link>
         </div>
-        <div>
-          <!-- 我的位置：每个位置挂哪几只 -->
-          <div class="sec-t"><span>我的位置 · 每个位置买哪几只</span></div>
-          <div class="slot-grid">
+        <div class="sec-t"><span>我的位置 · 每个位置买哪几只</span><span>{{ d.slots.length }} 个位置</span></div>
+        <div class="slot-grid">
           <div v-for="s in d.slots" :key="s.slot" class="card slot" :class="{ off: !s.on }">
             <div class="s1"><b>{{ s.label }}</b>
               <van-switch :model-value="s.on" size="20px" @update:model-value="v => op(s, { op: 'toggle', on: v })" /></div>
@@ -47,13 +30,10 @@
             </template>
             <p v-else class="offt">关掉的位置不买；它的目标权重按同桶分给别的位置</p>
           </div>
-          </div>
-          <p class="empty-tip">一个位置挂多只时按占比分钱（会自动归一）；场内按股一手 100 股，场外按金额申购</p>
         </div>
+        <p class="empty-tip">一个位置挂多只时按占比分钱（会自动归一）；场内按股一手 100 股，场外按金额申购</p>
       </div>
     </div>
-
-    <!-- 加一只基金 -->
     <van-popup v-model:show="addShow" position="bottom" round closeable :style="{ height: '70vh' }">
       <div class="pop">
         <h4>给「{{ addSlot?.label }}」加一只</h4>
@@ -68,7 +48,7 @@
 <script setup>
 import { ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { showConfirmDialog, showSuccessToast, showFailToast, showLoadingToast, closeToast } from 'vant'
+import { showConfirmDialog, showSuccessToast, showFailToast } from 'vant'
 import { get, peek, post, dataVer } from '../api'
 import { money } from '../fmt'
 import SubBar from '../components/SubBar.vue'
@@ -77,21 +57,6 @@ const url = `/api/acct/${aid}/weights`
 const d = ref(peek(url) || null)
 const load = async (fresh = false) => { d.value = await get(url, { fresh }) }
 load(); watch(dataVer, () => load(true))
-const desc = { 'B-Con': '债为主、波动最小，回撤最浅', 'B-RP': '风险平价，股债商品更均衡', V3c: '资产最多元，收益和波动都高一点' }
-
-async function pick(s) {
-  if (s.key === d.value.account.strategy) return
-  showLoadingToast({ message: '算一下换过去要动多少…', forbidClick: true, duration: 0 })
-  let p
-  try { p = await get(`/api/acct/${aid}/switch-preview?to=${s.key}`, { fresh: true }) } catch (e) { closeToast(); return showFailToast(e.message) }
-  closeToast()
-  const lines = [`换过去这一轮要下 ${p.n} 笔（现在是 ${p.n_now} 笔）`, `卖出 ¥${money(p.sell, 0)} · 买入 ¥${money(p.buy, 0)}`]
-  if (p.liq.length) lines.push(`清仓：${p.liq.map(x => `${x.name} ¥${money(x.amount, 0)}`).join('、')}`)
-  if (p.zero.length) lines.push(`这些位置新策略不用，目标为 0：${p.zero.join('、')}`)
-  if (p.unplaced.length) lines.push(`新策略有、你没配位置的资产：${p.unplaced.map(x => `${x.name} ${x.w}% → ${x.to || '同桶分配'}`).join('、')}`)
-  try { await showConfirmDialog({ title: `改为跟随「${p.to_name}」？`, message: lines.join('\n'), messageAlign: 'left', confirmButtonText: '确认更换' }) } catch { return }
-  try { await post(`/api/acct/${aid}/strategy`, { to: s.key }); showSuccessToast('已更换'); load(true) } catch (e) { showFailToast(e.message) }
-}
 async function op(s, body) {
   try { await post(`/api/acct/${aid}/holdings`, { slot: s.slot, ...body }); await load(true) } catch (e) { showFailToast(e.message) }
 }
@@ -160,6 +125,16 @@ async function add(r) {
 
 @media (min-width:900px){
   .stg{ grid-template-columns:repeat(3,1fr); }
+  .slot-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; padding:0 12px; align-items:start; }
+  .slot-grid .card{ margin:0; }
+}
+
+.sel-page{ max-width:960px; margin:0 auto; }
+.cur{ padding:14px 16px; }
+.cur .cl{ font-size:15px; } .cur .cl b{ color:var(--brand); }
+.cur p{ font-size:12.5px; color:var(--sub); line-height:1.7; margin:6px 0 0; }
+.cur .go{ display:inline-flex; align-items:center; gap:3px; font-size:12.5px; color:var(--brand); margin-top:8px; text-decoration:none; }
+@media (min-width:900px){
   .slot-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; padding:0 12px; align-items:start; }
   .slot-grid .card{ margin:0; }
 }

@@ -8,7 +8,7 @@
             <b>{{ d.account.name }}</b><van-icon name="arrow-down" />
           </div>
           <span v-if="d.account.kind === '模拟'" class="tag sim">模拟</span>
-          <span class="strat">{{ d.account.strategy_name }}</span>
+          <span class="strat" title="策略在入口页的账户卡片上更换">跟随 {{ d.account.strategy_name }}</span>
           <UpdateBtn class="m-only upd" compact />
         </div>
         <van-skeleton v-if="!d" title :row="8" style="padding:20px 16px" />

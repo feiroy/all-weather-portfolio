@@ -563,7 +563,27 @@ async def backtest(request: Request):
         rows.append(row)
         s = nv if len(nv) < 600 else nv.resample("W-FRI").last().dropna()
         curves[k] = {"dates": [f"{d:%Y-%m-%d}" for d in s.index], "ret": [round((float(v) / float(s.iloc[0]) - 1) * 100, 3) for v in s]}
-    return J({"rows": rows, "curves": curves, "cadence": cad, "start": start})
+    # 月 / 年收益：只看基准三策略（月末调仓那条），按期间最后一条净值算，保留期首相对上期末的涨跌
+    base_nv = {k: nv for k, (nv, _n) in out.items() if cad == "monthly" or k.endswith("· 月末")}
+    def _periods(freq, limit):
+        acc = {}
+        for k, nv in base_nv.items():
+            try:
+                s = nv.resample(freq).last().dropna()
+                prev = nv.iloc[0]
+                for d, v in s.items():
+                    key = f"{d:%Y-%m}" if freq == "ME" else f"{d:%Y}"
+                    acc.setdefault(key, {})[k] = _r((float(v) / float(prev) - 1) * 100)
+                    prev = v
+            except Exception:  # noqa: BLE001
+                continue
+        return [{"k": k, "v": v} for k, v in sorted(acc.items(), reverse=True)[:limit]]
+    periods = {"monthly": _periods("ME", 24), "yearly": _periods("YE", 12)}
+    # 调频影响：高频 / 我的操作日 相对月末的年化与回撤差（绝对值与差值并列）
+    gaps = [{"name": r["name"], "cagr": r["cagr"], "mdd": r["mdd"], "vs": r.get("vs"), "vs_mdd": r.get("vs_mdd")}
+            for r in rows if r.get("vs") is not None]
+    return J({"rows": rows, "curves": curves, "cadence": cad, "start": start,
+              "periods": periods, "gaps": gaps})
 
 
 async def valuation(request: Request):
@@ -625,6 +645,82 @@ def _do_update():
         _UPD["errors"] = [f"更新失败：{str(e)[:160]}"]
     finally:
         _UPD["running"], _UPD["finished"] = False, time.time()
+
+
+# ------------------------------------------------------------------ 报告导出
+def _report_rows(P, a):
+    """账户报告共用的数据：汇总 / 持仓 / 交易流水 / 每日收益。"""
+    summ = P.summary()
+    holds = [P.holding(it) for it in P.items() if not it.get("dup")]
+    trades = P.trades_of()
+    daily = P.daily
+    curve = [{"date": f"{d:%Y-%m-%d}", "total": _r(float(daily["equity"].iloc[i])),
+              "pnl": _r(float(daily["pnl"].iloc[i])), "ret": _r((float(daily["nav"].iloc[i]) - 1) * 100)}
+             for i, d in enumerate(daily.index)]
+    return summ, holds, trades, curve
+
+
+async def export_report(request: Request):
+    """导出账户报告：md = Markdown，xlsx = Excel（汇总/持仓/流水/每日收益 四张表）。"""
+    import io
+    from urllib.parse import quote
+    from starlette.responses import Response
+    aid = request.path_params["aid"]
+    if not AC.path_of(aid).exists():
+        return J({"error": "没有这个账户"}, 404)
+    fmt = request.query_params.get("fmt") or "md"
+    try:
+        P, a = _portfolio(aid)
+    except Exception as e:  # noqa: BLE001
+        return J({"error": str(e)}, 500)
+    summ, holds, trades, curve = _report_rows(P, a)
+    name = quote((a.get("name") or aid).replace(" ", ""))
+    if fmt == "md":
+        L = [f"# {a.get('name')} · 账户报告", "",
+             f"- 类型：{a.get('kind')}　跟随：{STRAT_NAME.get(a.get('strategy'), a.get('strategy'))}",
+             f"- 建立：{a.get('created')}　数据截至：{summ['asof']}", "",
+             "## 汇总", "",
+             f"| 总资产 | 今日收益 | 今日收益率 | 持有收益 | 持有收益率 | 现金 |",
+             "|---|---|---|---|---|---|",
+             f"| ¥{summ['total']:,.2f} | ¥{summ['today']:,.2f} | {summ['today_pct']:.2f}% "
+             f"| ¥{summ['pnl']:,.2f} | {summ['pnl_pct']:.2f}% | ¥{summ['cash']:,.2f} |", "",
+             "## 持仓", "", "| 基金 | 代码 | 位置 | 市值 | 持有收益 | 占比 |", "|---|---|---|---|---|---|"]
+        L += [f"| {h['name']} | {h['code']} | {h['slot']} | ¥{h['mv']:,.2f} "
+              f"| {('¥%.2f' % h['hold']) if h['hold'] is not None else '—'} | {h['w_now'] * 100:.2f}% |" for h in holds]
+        L += ["", "## 交易流水", "", "| 日期 | 方向 | 基金 | 数量 | 单价 | 金额 |", "|---|---|---|---|---|---|"]
+        L += [f"| {t['date']} | {t['side']} | {t['name'] or '—'} | {t['shares']:,.2f} "
+              f"| {t['nav']:.4f} | ¥{t['amount']:,.2f} |" for t in trades]
+        L += ["", "## 每日收益（近 60 个交易日）", "", "| 日期 | 总资产 | 累计收益 | 收益率 |", "|---|---|---|---|"]
+        L += [f"| {c['date']} | ¥{c['total']:,.2f} | ¥{c['pnl']:,.2f} | {c['ret']:.2f}% |" for c in curve[-60:]]
+        text = "\n".join(L) + "\n"
+        return Response(text, media_type="text/markdown; charset=utf-8",
+                        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{name}-report.md"})
+    try:
+        from openpyxl import Workbook
+        wb = Workbook()
+        def sheet(title, headers, rows):
+            ws = wb.create_sheet(title)
+            ws.append(headers)
+            for r in rows:
+                ws.append(r)
+            for col in ws.columns:
+                ws.column_dimensions[col[0].column_letter].width = max(12, min(28, max(len(str(c.value or "")) for c in col) + 2))
+        sheet("汇总", ["项目", "数值"], [["账户", a.get("name")], ["类型", a.get("kind")],
+              ["跟随", STRAT_NAME.get(a.get("strategy"), a.get("strategy"))], ["数据截至", summ["asof"]],
+              ["总资产", summ["total"]], ["今日收益", summ["today"]], ["持有收益", summ["pnl"]],
+              ["持有收益率(%)", summ["pnl_pct"]], ["现金", summ["cash"]]])
+        sheet("持仓", ["基金", "代码", "位置", "市值", "持有收益", "占比(%)"],
+              [[h["name"], h["code"], h["slot"], h["mv"], h["hold"], _r(h["w_now"] * 100)] for h in holds])
+        sheet("交易流水", ["日期", "方向", "基金", "数量", "单价", "金额"],
+              [[t["date"], t["side"], t["name"], t["shares"], t["nav"], t["amount"]] for t in trades])
+        sheet("每日收益", ["日期", "总资产", "累计收益", "收益率(%)"],
+              [[c["date"], c["total"], c["pnl"], c["ret"]] for c in curve])
+        del wb["Sheet"]
+        buf = io.BytesIO(); wb.save(buf)
+        return Response(buf.getvalue(), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{name}-report.xlsx"})
+    except ImportError:
+        return J({"error": "没装 openpyxl，只能导出 Markdown"}, 400)
 
 
 async def update(request: Request):
@@ -700,6 +796,7 @@ routes = [
     Route("/api/market/valuation/{code}", valuation_hist),
     Route("/api/market/fund-search", fund_search),
     Route("/api/market/fund/{code}", fund_detail),
+    Route("/api/acct/{aid}/export", export_report),
     Route("/api/update", update, methods=["GET", "POST"]),
 ]
 if (DIST / "assets").exists():

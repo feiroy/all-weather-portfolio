@@ -2,13 +2,21 @@
   <div class="page">
     <div class="wrap">
       <div class="ptitle"><b>交易记录</b>
-        <van-button size="small" round type="primary" icon="plus" class="add" :to="`/a/${aid}/record`">记一笔</van-button></div>
+        <div class="acts">
+          <van-button size="small" round plain icon="down" @click="showExport = true">导出报告</van-button>
+          <van-button size="small" round type="primary" icon="plus" :to="`/a/${aid}/record`">记一笔</van-button>
+        </div></div>
       <van-skeleton v-if="!d" :row="8" style="padding:16px" />
       <template v-else>
         <div class="sum">
           <div><span>买入</span><b class="num up">¥{{ money(tot.buy, 0) }}</b><small>{{ tot.nb }} 笔</small></div>
           <div><span>卖出</span><b class="num down">¥{{ money(tot.sell, 0) }}</b><small>{{ tot.ns }} 笔</small></div>
           <div><span>转入</span><b class="num">¥{{ money(tot.inn, 0) }}</b><small>{{ tot.ni }} 笔</small></div>
+        </div>
+        <div class="card exec" v-if="plan.length">
+          <div class="ch"><b>本轮执行进度</b><span class="num">{{ matched }} / {{ plan.length }} 笔</span></div>
+          <div class="bar"><i :style="{ width: (plan.length ? matched / plan.length * 100 : 0) + '%' }"></i></div>
+          <p>按「基金 + 买卖方向」把最近 7 天的实际记录和当前调仓清单对照；金额以支付宝实际成交为准</p>
         </div>
         <div class="chips filt">
           <span class="chip" :class="{ on: !code }" @click="code = ''">全部</span>
@@ -38,6 +46,8 @@
         <p class="empty-tip" v-else>左滑一笔可删除，点开可修改</p>
       </template>
     </div>
+    <van-action-sheet v-model:show="showExport" :actions="exportActs" cancel-text="取消"
+                      description="导出当前账户的汇总、持仓、流水和每日收益" close-on-click-action @select="doExport" />
     <TabBar :aid="aid" active="trades" />
   </div>
 </template>
@@ -54,6 +64,16 @@ const route = useRoute(), router = useRouter()
 const aid = route.params.aid
 const url = `/api/acct/${aid}/trades`
 const d = ref(peek(url) || null)
+const plan = ref([])
+get(`/api/acct/${aid}/calc`).then(x => { plan.value = x.orders || [] }).catch(() => {})
+const weekAgo = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10)
+const matched = computed(() => {
+  const rows = (d.value?.rows || []).filter(t => t.date >= weekAgo)
+  return plan.value.filter(o => rows.some(t => t.code === o.code && t.side === o.side)).length
+})
+const showExport = ref(false)
+const exportActs = [{ name: 'Markdown 报告' }, { name: 'Excel 报告' }]
+function doExport(x) { window.location.href = `/api/acct/${aid}/export?fmt=${x.name.includes('Excel') ? 'xlsx' : 'md'}` }
 const code = ref('')
 const load = async (fresh = false) => { d.value = await get(url, { fresh }) }
 load(); onActivated(() => load()); watch(dataVer, () => load(true))
@@ -83,6 +103,12 @@ async function remove(t) {
 }
 </script>
 <style scoped>
+.acts{ margin-left:auto; display:flex; gap:8px; }
+.exec{ padding:12px 14px; }
+.exec .ch{ display:flex; justify-content:space-between; font-size:14px; } .exec .ch span{ color:var(--brand); }
+.exec .bar{ height:6px; border-radius:3px; background:#F1F2F4; margin:10px 0 6px; overflow:hidden; }
+.exec .bar i{ display:block; height:100%; background:var(--brand); border-radius:3px; }
+.exec p{ font-size:11.5px; color:var(--muted); line-height:1.6; margin:0; }
 .ptitle{ display:flex; align-items:center; gap:8px; padding:calc(14px + env(safe-area-inset-top)) 16px 2px; font-size:20px; }
 .add{ margin-left:auto; }
 .sum{ display:grid; grid-template-columns:repeat(3,1fr); margin:12px 12px 0; background:#fff; border-radius:14px; padding:12px 8px; text-align:center; }

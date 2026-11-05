@@ -7,12 +7,13 @@
       <template v-else>
         <div class="chips f"><span v-for="m in mkts" :key="m" class="chip" :class="{ on: mkt === m }" @click="mkt = m">{{ m }}</span></div>
         <div class="chips f"><span v-for="l in lvs" :key="l" class="chip" :class="{ on: lv === l }" @click="lv = l">{{ l }}<template v-if="l !== '全部'"> {{ d.rows.filter(r => r.lv === l && (mkt === '全部' || r.mkt === mkt)).length }}</template></span></div>
+        <div class="chips f"><span class="chip static">排序</span><span v-for="s in sorts" :key="s.k" class="chip" :class="{ on: sort === s.k }" @click="sort = s.k">{{ s.t }}</span></div>
         <div class="sec-t"><span>{{ rows.length }} 个指数 · 数据日 {{ d.date?.replace(/-/g, '/') }}</span><span>PE 分位 / PB 分位</span></div>
         <van-cell-group inset>
           <van-cell v-for="r in rows" :key="r.code" is-link @click="open(r)">
             <template #title>
               <div class="n1"><b>{{ r.name }}</b><span class="tag" :class="lvCls(r.lv)">{{ r.lv }}</span></div>
-              <div class="n2 num">{{ r.mkt }} · PE {{ r.pe ?? '—' }} · PB {{ r.pb ?? '—' }}<template v-if="r.dy"> · 股息 {{ r.dy }}%</template></div>
+              <div class="n2 num">{{ r.mkt }} · 评分 {{ r.sc ?? '—' }}/20 · 距 10 年高点 {{ r.dd == null ? '—' : '-' + r.dd + '%' }}</div>
             </template>
             <template #value>
               <div class="pv num"><b :class="pc(r.pep)">{{ r.pep == null ? '—' : r.pep.toFixed(0) + '%' }}</b> / <b :class="pc(r.pbp)">{{ r.pbp == null ? '—' : r.pbp.toFixed(0) + '%' }}</b></div>
@@ -52,9 +53,18 @@ const d = ref(peek('/api/market/valuation') || null)
 get('/api/market/valuation').then(x => { d.value = x })
 const mkts = ['全部', 'A股', '港股', '海外', '中概'], lvs = ['全部', '低估', '适中', '高估']
 const mkt = ref('全部'), lv = ref('全部')
+const sorts = [{ k: 'default', t: '默认' }, { k: 'score', t: '评分高' }, { k: 'pep', t: 'PE 分位低' },
+               { k: 'dd', t: '回撤深' }, { k: 'name', t: '名称' }]
+const sort = ref('default')
 const ORD = { 低估: 0, 适中: 1, 高估: 2 }
 const rows = computed(() => d.value.rows.filter(r => (mkt.value === '全部' || r.mkt === mkt.value) && (lv.value === '全部' || r.lv === lv.value))
-  .sort((a, b) => (ORD[a.lv] - ORD[b.lv]) || ((a.pep ?? a.pbp ?? 50) - (b.pep ?? b.pbp ?? 50))))
+  .sort((a, b) => {
+    if (sort.value === 'score') return (b.sc ?? 0) - (a.sc ?? 0)
+    if (sort.value === 'pep') return (a.pep ?? a.pbp ?? 999) - (b.pep ?? b.pbp ?? 999)
+    if (sort.value === 'dd') return (b.dd ?? 0) - (a.dd ?? 0)
+    if (sort.value === 'name') return a.name.localeCompare(b.name, 'zh-CN')
+    return (ORD[a.lv] - ORD[b.lv]) || ((a.pep ?? a.pbp ?? 50) - (b.pep ?? b.pbp ?? 50))
+  }))
 const lvCls = l => (l === '低估' ? 'sell' : l === '高估' ? 'buy' : 'gray')
 const pc = p => (p == null ? '' : p < 30 ? 'down' : p > 70 ? 'up' : '')
 const show = ref(false), cur = ref(null), hist = ref(null), hk = ref('pe')
@@ -71,6 +81,7 @@ const histSeg = computed(() => {
 </script>
 <style scoped>
 .f{ margin-top:10px; }
+.chip.static{ background:transparent; border:0; color:var(--muted); cursor:default; }
 .n1{ display:flex; align-items:center; gap:6px; font-size:14.5px; } .n1 b{ font-weight:550; }
 .n2{ font-size:11.5px; color:var(--muted); margin-top:3px; }
 .pv{ font-size:14px; color:var(--muted); } .pv b{ color:var(--ink); }

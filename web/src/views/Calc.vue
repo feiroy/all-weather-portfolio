@@ -112,16 +112,16 @@ const bw = v => `${Math.min(100, (v / maxW.value) * 100)}%`
 .ptitle{ display:flex; align-items:center; gap:8px; padding:calc(14px + env(safe-area-inset-top)) 16px 2px; font-size:20px; }
 /* 桌面改为纵向单主列：结论 → 执行清单 → 依据（默认收起），限宽居中建立主次 */
 .calc-page{ max-width:960px; margin:0 auto; }
-.calc-page .sec-t{ margin:18px 4px 8px; }
-.calc-page .verdict{ margin:12px 4px 0; }
+.calc-page .sec-t{ margin:18px 12px 8px; }
+.calc-page .verdict{ margin:12px 12px 0; }
 .calc-sub{ display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
-  margin:8px 6px 0; }
+  margin:8px 14px 0; }
 .calc-sub .hint{ margin:0; display:block; }
 .dca-link{ color:var(--brand); font-size:13px; display:inline-flex; align-items:center; gap:3px;
   text-decoration:none; white-space:nowrap; margin-left:auto; }
-.orders-grid{ display:grid; grid-template-columns:1fr; gap:10px; }
+.orders-grid{ display:grid; grid-template-columns:1fr; gap:10px; padding:0 12px; }
 .orders-grid .ocard{ margin:0; }
-.basis{ margin:18px 4px 0; border-radius:12px; overflow:hidden; }
+.basis{ margin:18px 12px 0; border-radius:12px; overflow:hidden; }
 .basis :deep(.van-collapse-item__title){ font-size:13px; color:var(--sub); }
 .basis :deep(.van-collapse-item__content){ padding:4px 0 8px; }
 .basis .card{ margin:0 8px; }

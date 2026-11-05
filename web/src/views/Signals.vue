@@ -24,6 +24,17 @@
           <div class="ct"><b>三个策略 · 近半年</b><span class="k">回测净值，含趋势过滤</span></div>
           <MultiLine :series="d.curves" :height="260" />
         </div>
+        <van-collapse v-model="showW" class="wts">
+          <van-collapse-item name="w" title="三个策略今天的目标权重（公共信息）">
+            <div class="wt" v-if="w">
+              <div class="wh"><span>资产</span><span v-for="s in w.strategies" :key="s.key">{{ s.name.replace('V3-B ', '') }}</span></div>
+              <div v-for="r in w.rows" :key="r.asset" class="wr">
+                <div class="wn"><b>{{ r.name }}</b><small :class="{ miss: !r.mine }">{{ r.mine || '同桶分配' }}</small></div>
+                <span v-for="s in w.strategies" :key="s.key" class="wv num">{{ r.w[s.key] == null ? '—' : r.w[s.key].toFixed(1) + '%' }}</span>
+              </div>
+            </div>
+          </van-collapse-item>
+        </van-collapse>
       </div>
     </div>
   </div>
@@ -37,6 +48,9 @@ import MultiLine from '../components/MultiLine.vue'
 const aid = useRoute().params.aid
 const url = '/api/market/signals'
 const d = ref(peek(url) || null)
+const w = ref(peek('/api/acct/' + aid + '/weights') || null)
+get('/api/acct/' + aid + '/weights').then(x => { w.value = x })
+const showW = ref([])
 const load = async (fresh = false) => { d.value = await get(url, { fresh }) }
 load(); watch(dataVer, () => load(true))
 </script>
@@ -58,4 +72,38 @@ load(); watch(dataVer, () => load(true))
 .mn i.on{ background:#F59E0B; } .mn i.off{ background:#CBD5E1; }
 .mn b{ display:block; font-size:13.5px; font-weight:550; } .mn small{ font-size:11.5px; color:var(--muted); }
 .mc{ text-align:center; } .mc em{ font-style:normal; font-size:11.5px; color:#CBD5E1; }
+
+.wts{ margin:16px 12px 0; border-radius:12px; overflow:hidden; }
+.wts :deep(.van-collapse-item__content){ padding:8px 12px; }
+.wt{ font-size:13px; }
+.wh, .wr{ display:grid; grid-template-columns:1fr 62px 62px 62px; gap:4px; align-items:center; }
+.wh{ font-size:11.5px; color:var(--muted); padding:4px 0 8px; border-bottom:1px solid var(--line); text-align:right; }
+.wh span:first-child{ text-align:left; }
+.wr{ padding:8px 0; border-bottom:1px solid var(--line); } .wr:last-child{ border-bottom:0; }
+.wn b{ display:block; font-size:13.5px; font-weight:550; } .wn small{ font-size:11px; color:var(--muted); }
+.wn small.miss{ color:#B45309; }
+.wv{ text-align:right; color:var(--sub); }
+@media (max-width:480px){
+  .wh, .wr{ grid-template-columns:repeat(3,1fr); }
+  .wh span:first-child{ display:none; }
+  .wr .wn{ grid-column:1/-1; display:flex; gap:8px; align-items:baseline; }
+  .wh, .wv{ text-align:center !important; }
+}
+
+.wts{ margin:16px 12px 0; border-radius:12px; overflow:hidden; }
+.wts :deep(.van-collapse-item__content){ padding:8px 12px; }
+.wt{ font-size:13px; }
+.wh, .wr{ display:grid; grid-template-columns:1fr 62px 62px 62px; gap:4px; align-items:center; }
+.wh{ font-size:11.5px; color:var(--muted); padding:4px 0 8px; border-bottom:1px solid var(--line); text-align:right; }
+.wh span:first-child{ text-align:left; }
+.wr{ padding:8px 0; border-bottom:1px solid var(--line); } .wr:last-child{ border-bottom:0; }
+.wn b{ display:block; font-size:13.5px; font-weight:550; } .wn small{ font-size:11px; color:var(--muted); }
+.wn small.miss{ color:#B45309; }
+.wv{ text-align:right; color:var(--sub); }
+@media (max-width:480px){
+  .wh, .wr{ grid-template-columns:repeat(3,1fr); }
+  .wh span:first-child{ display:none; }
+  .wr .wn{ grid-column:1/-1; display:flex; gap:8px; align-items:baseline; }
+  .wh, .wv{ text-align:center !important; }
+}
 </style>
