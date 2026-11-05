@@ -2131,7 +2131,8 @@ def _landing_create_dialog() -> None:
     _name = st.text_input("账户名称", key="acm_new_name", placeholder="比如：V3c 试一试")
     c1, c2 = st.columns(2)
     _kind = c1.selectbox("类型", list(AC.KINDS), index=1 if _ACCTS else 0, key="acm_new_kind",
-                         help="模拟账户在页头带一个「模拟」标签，免得把它的清单当成真的去下单")
+                         help="只在新建时选一次，之后不能改；模拟账户在页头带一个「模拟」标签，"
+                              "免得把它的清单当成真的去下单。两种账户的算法完全一样")
     _stg = c2.selectbox("跟随策略", _STRAT_KEYS, index=0, key="acm_new_strat",
                         format_func=lambda k: STRATEGIES[k]["name"],
                         help="保守增强的资产池和 8 个位置一一对上；风险平价有短融没 10Y、V3c 没 10Y")
@@ -4497,17 +4498,19 @@ _KIND_TAG = {"实盘": '<span class="lc-real">实盘</span>', "模拟": '<span c
 
 
 def _acct_settings() -> None:
-    """当前账户的设置：改名 / 改类型 / 删除（进回收站，在入口页底部恢复）。"""
+    """当前账户的设置：改名 / 删除（进回收站，在入口页底部恢复）。
+
+    实盘 / 模拟只在新建时选一次：它只是列表里的一个标签，不影响任何计算，
+    放在设置里会让人以为改了会改变什么。
+    """
     with st.popover("账户设置", icon=":material/settings:", key="acct_set"):
         _nm = st.text_input("名称", value=ACCT_INFO["name"], key="acm_cur_name")
-        _kd = st.selectbox("类型", list(AC.KINDS), key="acm_cur_kind",
-                           index=list(AC.KINDS).index(ACCT_INFO["kind"]) if ACCT_INFO["kind"] in AC.KINDS else 0)
         if st.button("保存", key="acm_cur_save", type="primary",
-                     disabled=(_nm.strip() == ACCT_INFO["name"] and _kd == ACCT_INFO["kind"])):
-            AC.update(_aid, name=_nm.strip() or ACCT_INFO["name"], kind=_kd)
+                     disabled=_nm.strip() == ACCT_INFO["name"]):
+            AC.update(_aid, name=_nm.strip() or ACCT_INFO["name"])
             st.rerun()
-        st.markdown('<div class="acsw-n">跟随哪个策略在「选基配置」里换（会先给预览）。</div>',
-                    unsafe_allow_html=True)
+        st.markdown('<div class="acsw-n">跟随哪个策略在「选基配置」里换（会先给预览）。<br>'
+                    '实盘 / 模拟在新建账户时定，这里不能改。</div>', unsafe_allow_html=True)
         st.divider()
         if len(_ACCTS) <= 1:
             st.caption("只剩这一个账户，不能删 —— 先在入口页新建一个再来删它。")

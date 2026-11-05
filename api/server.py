@@ -166,8 +166,10 @@ async def create_account(request: Request):
 
 async def patch_account(request: Request):
     aid, b = request.path_params["aid"], await request.json()
+    if "kind" in b:
+        return J({"error": "实盘 / 模拟只在新建账户时选一次，建好以后不能改"}, 400)
     try:
-        AC.update(aid, **{k: v for k, v in b.items() if k in ("name", "kind")})
+        AC.update(aid, **{k: v for k, v in b.items() if k == "name"})
     except (KeyError, ValueError) as e:
         return J({"error": str(e)}, 400)
     return J({"ok": True})

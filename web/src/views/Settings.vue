@@ -8,11 +8,8 @@
           <van-field v-model="name" label="账户名" maxlength="20" :label-width="72" placeholder="起个名字">
             <template #button><van-button size="small" type="primary" round :disabled="!name.trim() || name === a.name" @click="save({ name: name.trim() })">保存</van-button></template>
           </van-field>
-          <van-cell title="类型" :label-width="72">
-            <template #value><span class="seg2"><button v-for="k in ['实盘', '模拟']" :key="k" :class="{ on: a.kind === k }" @click="save({ kind: k })">{{ k }}</button></span></template>
-          </van-cell>
           <van-cell title="跟随策略" :value="a.strategy_name" is-link :to="`/a/${aid}/weights`" />
-          <van-cell title="建立日期" :value="a.created" />
+          <van-cell title="建立日期" :value="a.created?.replace(/-/g, '/')" />
           <van-cell title="交易记录" :value="`${a.n_trades} 笔`" is-link :to="`/a/${aid}/trades`" />
         </van-cell-group>
         <van-cell-group inset class="mt">
@@ -21,7 +18,8 @@
         <van-cell-group inset class="mt">
           <van-cell title="删除这个账户" icon="delete-o" class="danger" clickable @click="remove" />
         </van-cell-group>
-        <p class="empty-tip">删除会先放进回收站（账户列表最下面），可以恢复；最后一个账户不能删</p>
+        <p class="empty-tip">实盘 / 模拟只在新建账户时选，它是列表里的一个标签，不影响计算。<br>
+          删除会先放进回收站（账户列表最下面），可以恢复；最后一个账户不能删</p>
       </template>
     </div>
   </div>

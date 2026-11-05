@@ -23,7 +23,7 @@
       <template v-if="trash.length">
         <div class="sec-t"><span>回收站 · {{ trash.length }}</span></div>
         <van-cell-group inset>
-          <van-cell v-for="t in trash" :key="t.file" :title="t.name" :label="`${t.kind} · ${t.deleted || ''} 删除`">
+          <van-cell v-for="t in trash" :key="t.file" :title="t.name" :label="`${t.kind} · ${(t.deleted || '').replace(/-/g, '/')} 删除`">
             <template #value>
               <a class="lk" @click="restore(t)">恢复</a><a class="lk red" @click="purge(t)">彻底删除</a>
             </template>
@@ -50,6 +50,8 @@
             <van-field :model-value="f.created" label="建立日期" readonly is-link :label-width="76" @click="showDate = true" />
           </template>
         </van-cell-group>
+        <p class="tip">类型只在新建时选一次，建好以后不能改；它只是列表里的一个标签，两种账户的算法完全一样。</p>
+        <p class="tip">类型只在新建时选一次，建好以后不能改；它只是列表里的一个标签，两种账户的算法完全一样。</p>
         <p class="tip" v-if="f.from && f.copy_trades">复制后两个账户各记各的，互不影响 —— 适合「如果当时换个策略会怎样」</p>
         <div class="btn-row"><van-button round block type="primary" :loading="saving" @click="create">创建并进入</van-button></div>
       </div>
