@@ -4,42 +4,27 @@
       <div class="wrap">
         <div class="ptitle"><b>调仓</b><span class="tag gray" v-if="d">跟随 {{ d.account.strategy_name }}</span></div>
         <van-skeleton v-if="!d" title :row="8" style="padding:16px" />
-        <div v-else class="cols2">
-          <div>
-            <!-- 结论 -->
-            <div class="verdict" :class="d.status.kind">
-              <van-icon :name="d.status.kind === 'orders' ? 'bell' : d.status.kind === 'stuck' ? 'warning-o' : 'passed'" class="vi" />
-              <div>
-                <div class="vt">{{ title }}</div>
-                <div class="vs" v-if="d.status.kind === 'orders'">
-                  卖出 <b class="num down">¥{{ money(d.sell, 0) }}</b>　买入 <b class="num up">¥{{ money(d.buy, 0) }}</b>
-                </div>
-                <div class="vs" v-else>{{ d.status.kind === 'stuck' ? '有位置偏离超过 0.5%，但缺口不够一手，先不动' : '每个位置都在目标 ±0.5% 以内，不折腾省手续费' }}</div>
+        <div v-else class="calc-page">
+          <div class="verdict" :class="d.status.kind">
+            <van-icon :name="d.status.kind === 'orders' ? 'bell' : d.status.kind === 'stuck' ? 'warning-o' : 'passed'" class="vi" />
+            <div>
+              <div class="vt">{{ title }}</div>
+              <div class="vs" v-if="d.status.kind === 'orders'">
+                卖出 <b class="num down">¥{{ money(d.sell, 0) }}</b>　买入 <b class="num up">¥{{ money(d.buy, 0) }}</b>
               </div>
-            </div>
-            <p class="hint" v-if="d.orders.length">先卖后买；按支付宝里实际成交的金额，每做完一笔点「记一笔」</p>
-
-            <van-cell-group inset class="mt">
-              <van-cell title="有新钱要投？" label="按目标比例算每只该买多少" is-link :to="`/a/${aid}/dca`" icon="gold-coin-o" />
-            </van-cell-group>
-
-            <div class="sec-t"><span>各位置 · 现在 → 目标</span><span>偏离</span></div>
-            <div class="card slots">
-              <div v-for="s in d.slots" :key="s.slot" class="srow">
-                <div class="sl">{{ s.slot }}</div>
-                <div class="bar"><i class="now" :style="{ width: bw(s.now) }"></i><em :style="{ left: bw(s.tgt) }"></em></div>
-                <div class="sv num">{{ s.now.toFixed(1) }} → {{ s.tgt.toFixed(1) }}%</div>
-                <div class="sd num" :class="Math.abs(s.dev) >= 0.5 ? (s.dev > 0 ? 'over' : 'under') : ''">{{ signed(s.dev, 1) }}</div>
-              </div>
-              <div class="legend"><span><i class="now"></i>现在</span><span><em></em>目标</span>偏离 ≥ 0.5pp 才下单</div>
+              <div class="vs" v-else>{{ d.status.kind === 'stuck' ? '有位置偏离超过 0.5%，但缺口不够一手，先不动' : '每个位置都在目标 ±0.5% 以内，不折腾省手续费' }}</div>
             </div>
           </div>
+          <div class="calc-sub">
+            <span class="hint" v-if="d.orders.length">先卖后买；按支付宝里实际成交的金额，每做完一笔点「记一笔」</span>
+            <router-link class="dca-link" :to="`/a/${aid}/dca`">有新钱怎么分 <van-icon name="arrow" /></router-link>
+          </div>
 
-          <div>
-            <template v-if="d.orders.length">
-              <div class="sec-t"><span>要下的单 · {{ d.orders.length }} 笔</span>
-                <span class="seg2"><button v-for="f in ['全部', '卖出', '买入']" :key="f" :class="{ on: filt === f }" @click="filt = f">{{ f }}</button></span>
-              </div>
+          <template v-if="d.orders.length">
+            <div class="sec-t"><span>要下的单 · {{ d.orders.length }} 笔</span>
+              <span class="seg2"><button v-for="f in ['全部', '卖出', '买入']" :key="f" :class="{ on: filt === f }" @click="filt = f">{{ f }}</button></span>
+            </div>
+            <div class="orders-grid">
               <div v-for="o in shown" :key="o.code + o.side" class="ocard">
                 <div class="o1">
                   <span class="tag" :class="o.side === '买入' ? 'buy' : 'sell'">{{ o.side }}</span>
@@ -58,22 +43,38 @@
                               :to="{ path: `/a/${aid}/record`, query: { code: o.code, side: o.side, amount: Math.round(o.amount * 100) / 100 } }">记一笔</van-button>
                 </div>
               </div>
-            </template>
-            <div class="sec-t" v-if="d.hold.length"><span>不用动 · {{ d.hold.length }} 只</span><span>金额 / 占比</span></div>
-            <van-cell-group inset v-if="d.hold.length">
-              <van-cell v-for="h in d.hold" :key="h.code + h.slot" is-link :to="`/a/${aid}/fund/${h.code}`">
-                <template #title><div class="hn">{{ h.name }}</div><div class="hs">{{ h.slot }}<template v-if="h.note"> · {{ h.note }}</template></div></template>
-                <template #value><div class="num hv">¥{{ money(h.mv, 0) }}</div><div class="num hs">{{ h.w_now.toFixed(2) }}%</div></template>
-              </van-cell>
-            </van-cell-group>
-            <template v-if="d.other.length">
-              <div class="sec-t"><span>不在选基配置里的持仓</span></div>
-              <van-cell-group inset>
-                <van-cell v-for="o in d.other" :key="o.code" :title="o.name" :label="o.code" :value="`¥${money(o.mv, 0)}`" />
+            </div>
+          </template>
+
+          <van-collapse v-model="basis" class="basis">
+            <van-collapse-item name="s" title="各位置 · 现在 → 目标（判断依据）">
+              <div class="card slots">
+                <div v-for="s in d.slots" :key="s.slot" class="srow">
+                  <div class="sl">{{ s.slot }}</div>
+                  <div class="bar"><i class="now" :style="{ width: bw(s.now) }"></i><em :style="{ left: bw(s.tgt) }"></em></div>
+                  <div class="sv num">{{ s.now.toFixed(1) }} → {{ s.tgt.toFixed(1) }}%</div>
+                  <div class="sd num" :class="Math.abs(s.dev) >= 0.5 ? (s.dev > 0 ? 'over' : 'under') : ''">{{ signed(s.dev, 1) }}</div>
+                </div>
+                <div class="legend"><span><i class="now"></i>现在</span><span><em></em>目标</span>偏离 ≥ 0.5pp 才下单</div>
+              </div>
+            </van-collapse-item>
+            <van-collapse-item v-if="d.hold.length" name="h" :title="`不用动 · ${d.hold.length} 只`">
+              <van-cell-group>
+                <van-cell v-for="h in d.hold" :key="h.code + h.slot" is-link :to="`/a/${aid}/fund/${h.code}`">
+                  <template #title><div class="hn">{{ h.name }}</div><div class="hs">{{ h.slot }}<template v-if="h.note"> · {{ h.note }}</template></div></template>
+                  <template #value><div class="num hv">¥{{ money(h.mv, 0) }}</div><div class="num hs">{{ h.w_now.toFixed(2) }}%</div></template>
+                </van-cell>
               </van-cell-group>
-              <p class="hint">这些不参与调仓计算；想纳入就去「选基配置」把它挂到某个位置</p>
-            </template>
-          </div>
+            </van-collapse-item>
+          </van-collapse>
+
+          <template v-if="d.other.length">
+            <div class="sec-t"><span>不在选基配置里的持仓</span></div>
+            <van-cell-group inset>
+              <van-cell v-for="o in d.other" :key="o.code" :title="o.name" :label="o.code" :value="`¥${money(o.mv, 0)}`" />
+            </van-cell-group>
+            <p class="hint">这些不参与调仓计算；想纳入就去「选基配置」把它挂到某个位置</p>
+          </template>
         </div>
       </div>
     </van-pull-refresh>
@@ -93,6 +94,7 @@ const url = `/api/acct/${aid}/calc`
 const d = ref(peek(url) || null)
 const refreshing = ref(false)
 const filt = ref('全部')
+const basis = ref([])   // 依据 / 不用动 默认收起
 async function load(fresh = false) { try { d.value = await get(url, { fresh }) } finally { refreshing.value = false } }
 load(); watch(dataVer, () => load(true))
 const title = computed(() => {
@@ -108,6 +110,26 @@ const bw = v => `${Math.min(100, (v / maxW.value) * 100)}%`
 </script>
 <style scoped>
 .ptitle{ display:flex; align-items:center; gap:8px; padding:calc(14px + env(safe-area-inset-top)) 16px 2px; font-size:20px; }
+/* 桌面改为纵向单主列：结论 → 执行清单 → 依据（默认收起），限宽居中建立主次 */
+.calc-page{ max-width:960px; margin:0 auto; }
+.calc-page .sec-t{ margin:18px 4px 8px; }
+.calc-page .verdict{ margin:12px 4px 0; }
+.calc-sub{ display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
+  margin:8px 6px 0; }
+.calc-sub .hint{ margin:0; display:block; }
+.dca-link{ color:var(--brand); font-size:13px; display:inline-flex; align-items:center; gap:3px;
+  text-decoration:none; white-space:nowrap; margin-left:auto; }
+.orders-grid{ display:grid; grid-template-columns:1fr; gap:10px; }
+.orders-grid .ocard{ margin:0; }
+.basis{ margin:18px 4px 0; border-radius:12px; overflow:hidden; }
+.basis :deep(.van-collapse-item__title){ font-size:13px; color:var(--sub); }
+.basis :deep(.van-collapse-item__content){ padding:4px 0 8px; }
+.basis .card{ margin:0 8px; }
+@media (min-width:900px){
+  .orders-grid{ grid-template-columns:1fr 1fr; gap:12px; }
+  .calc-page .verdict{ padding:20px 24px; }
+  .calc-page .verdict .vt{ font-size:19px; }
+}
 .verdict{ display:flex; gap:12px; align-items:center; margin:12px 12px 0; padding:16px; border-radius:16px; background:#fff; }
 .verdict.orders{ background:linear-gradient(135deg,#1E3A8A,#1E40AF 60%,#3B82F6); color:#fff; }
 .verdict.orders .up{ color:#FCA5A5 } .verdict.orders .down{ color:#86EFAC }
