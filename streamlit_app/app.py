@@ -2310,137 +2310,9 @@ def _hg_nav_on(slot, day, code=None):
     return float(sub.iloc[-1]) if len(sub) else None
 
 
-_raw_dates_memo: dict[str, pd.DatetimeIndex] = {}
-
-
-def _raw_nav_dates(code: str) -> pd.DatetimeIndex:
-    """这只基金**真正公布过净值**的日子（不做 ffill）。每次重跑重新取，别跨重跑缓存：拉完新净值就过期。"""
-    if code not in _raw_dates_memo:
-        try:
-            s = HG.nav_series(code)
-            _raw_dates_memo[code] = pd.DatetimeIndex(s.dropna().index) if len(s) else pd.DatetimeIndex([])
-        except Exception:  # noqa: BLE001 - 取不到就当没净值，不挡账户重放
-            _raw_dates_memo[code] = pd.DatetimeIndex([])
-    return _raw_dates_memo[code]
-
-
-def _replay_holdings(trades, capital, created, by_day: dict | None = None):
-    """按份额记账重放成交，得到日度净值/持仓/成本/现金。
-
-    与 allweather.sim_account.replay 的差别：
-    - 持仓以**基金代码**为键（原来以策略资产 key 为键，换基金就记不进去）；
-    - 买入/卖出按份额 × 单位净值成交（场外基金的口径）；
-    - 净值 = (持仓市值 + 现金) / units，转入转出按当时净值折算份额，不虚增收益。
-
-    ``by_day``：传一个空 dict 进来，就顺手把「每天每只基金赚了多少」填进去 ——
-    ``{日期: {代码: (收益元, 收益率%, ""/"待更新"/"无净值", 买入/卖出/清仓/"")}}``，
-    给收益日历点开某一天看明细用。
-    单只当天收益 = 收盘市值 − 昨收市值 − 当天净买入（买入含手续费、卖出扣手续费），
-    所以各只加起来**恰好**等于日历格子里那天的「总资产变化 − 转入转出」，两边对得上账。
-    """
-    idx = _hg_panel.index[_hg_panel.index >= pd.Timestamp(created)] if len(_hg_panel) else pd.DatetimeIndex([])
-    if len(idx) == 0:
-        idx = _hg_panel.index[-1:] if len(_hg_panel) else pd.DatetimeIndex([])
-    if len(idx) == 0:
-        return pd.DataFrame(), {}, {}, float(capital or 0), float(capital or 0)
-
-    buckets: dict[pd.Timestamp, list] = {}
-    for t in trades or []:
-        try:
-            d = pd.Timestamp(t.get("date"))
-        except Exception:
-            continue
-        i = int(idx.searchsorted(d))
-        i = min(i, len(idx) - 1)
-        buckets.setdefault(idx[i], []).append(t)
-
-    cash, units = float(capital or 0), float(capital or 0)
-    pos: dict[str, float] = {}
-    cost: dict[str, float] = {}
-    rows, last_nav = [], 1.0
-    _navmap: dict[str, pd.Series] = {}
-
-    def _nav_at(code: str, day):
-        """重放里被调用上万次，每个代码只取一次净值序列（别在循环里反复 dropna）。"""
-        if code not in _navmap:
-            _navmap[code] = _nav_of_code(code)
-        col = _navmap[code]
-        if not len(col):
-            return None
-        sub = col.loc[:pd.Timestamp(day)]
-        return float(sub.iloc[-1]) if len(sub) else None
-
-    prev_mv: dict[str, float] = {}          # 昨收：每只基金的市值
-    for d in idx:
-        flow: dict[str, float] = {}         # 当天每只基金的净买入（买入为正、卖出回款为负）
-        for t in buckets.get(d, []):
-            code = str(t.get("code", "") or "")
-            sh = float(t.get("shares", 0) or 0)
-            px = float(t.get("nav", 0) or 0)
-            fee = float(t.get("fee", 0) or 0)
-            side = t.get("side")
-            if side == "买入" and code and sh > 0:
-                if px <= 0:
-                    px = _nav_at(code, d) or 0
-                cash -= sh * px + fee
-                flow[code] = flow.get(code, 0.0) + sh * px + fee
-                prev = pos.get(code, 0.0)
-                cost[code] = ((prev * cost.get(code, 0.0) + sh * px + fee) / (prev + sh)) if (prev + sh) > 0 else px
-                pos[code] = prev + sh
-            elif side == "卖出" and code and sh > 0:
-                if px <= 0:
-                    px = _nav_at(code, d) or 0
-                cash += sh * px - fee
-                flow[code] = flow.get(code, 0.0) - (sh * px - fee)
-                pos[code] = pos.get(code, 0.0) - sh
-                if pos[code] <= 1e-9:
-                    pos.pop(code, None)
-                    cost.pop(code, None)
-            elif side in ("转入", "入金"):
-                base = last_nav if last_nav > 0 else 1.0
-                units += sh / base
-                cash += sh
-            elif side in ("转出", "出金"):
-                base = last_nav if last_nav > 0 else 1.0
-                units = max(1e-9, units - sh / base)
-                cash -= sh
-        mv = 0.0
-        cur_mv: dict[str, float] = {}
-        for code, sh in pos.items():
-            v = _nav_at(code, d)
-            if v:
-                mv += sh * v
-                cur_mv[code] = sh * v
-        if by_day is not None:
-            day: dict[str, tuple] = {}
-            for code in set(prev_mv) | set(cur_mv) | set(flow):
-                if code in pos and code not in cur_mv:
-                    continue                # 有份额却没净值：算不出来就不编
-                a, b, f = prev_mv.get(code, 0.0), cur_mv.get(code, 0.0), flow.get(code, 0.0)
-                pnl = b - a - f
-                # 收益率的分母 = 昨收市值 + 今天新投进去的钱（卖出不加：钱是出去的）
-                base = a + max(f, 0.0)
-                # 当天这只有没有**自己的**净值：得看原始序列 —— `_hg_panel` 做过 ffill，
-                # 拿它判断永远「有」，场外基金净值没拉到时会冒充「今天 0.00」
-                raw = _raw_nav_dates(code)
-                state = ("" if d in raw else
-                         "待更新" if (not len(raw) or d > raw[-1]) else "无净值")
-                # 当天动过这只：买入 / 卖出 / 卖光（清仓）—— 明细里打个标签，免得「怎么多了一行」
-                act = ("" if abs(f) < 1e-9 else "买入" if f > 0
-                       else ("清仓" if code not in pos else "卖出"))
-                day[code] = (pnl, (pnl / base * 100) if base > 0 else None, state, act)
-            by_day[d] = day
-        prev_mv = cur_mv
-        eq = cash + mv
-        nav = eq / units if units > 0 else 1.0
-        last_nav = nav
-        rows.append({"date": d, "equity": eq, "nav": nav, "cash": cash, "market": mv})
-    daily = pd.DataFrame(rows).set_index("date") if rows else pd.DataFrame()
-    return daily, pos, cost, cash, units
-
-
-_hg_panel = HG.nav_panel(holdings)
-# acct 已在文件前部（算权重之前）按 ?acct= 加载：账户策略决定目标权重
+# 账户重放（按份额记账）、今日收益、调仓计划、结论、收益/本金指数、按入金节奏折算基准：
+# 全在 allweather/portfolio.py（H5 版共用同一份），这里只建一个 PF、把结果摊给页面用。
+from allweather.portfolio import Portfolio, close_trade_idx as _close_trade_idx  # noqa: E402
 
 
 def _migrate_trades(a: dict) -> bool:
@@ -2476,266 +2348,46 @@ _ACCT_ASSETS = [a for a in ["hs300", "us_sp500", "credit", "bond_short", "bond_1
 _ASSET_LABEL = {a: f"{ETF_META.get(a, {}).get('name', a)} ({ETF_META.get(a, {}).get('code', '')})"
                 for a in _ACCT_ASSETS}
 
-# 账户重放结果（按份额记账）：我的持仓 / 帮你算 / 收益对比 / 持仓详情共用
+# 账户重放结果（按份额记账）：我的持仓 / 帮你算 / 收益对比 / 持仓详情共用。
+# PF 在迁移旧成交（上面 _migrate_trades）之后建，否则老格式的成交读不进去。
+PF = Portfolio({**acct, "holdings": holdings} if acct else None, w)
+_hg_panel = PF.panel
 # _acct_by_day：每天每只基金的收益（收益日历点开某天的「当日收益明细」）
-_acct_by_day: dict = {}
+_acct_by_day: dict = PF.by_day if acct else {}
 _acct_daily, _acct_pos, _acct_cost, _acct_cash, _acct_units = (
-    _replay_holdings(acct.get("trades", []), acct.get("capital", 0), acct.get("created"),
-                     by_day=_acct_by_day)
-    if acct else (pd.DataFrame(), {}, {}, 0.0, 0.0)
-)
-# 代码 → 第一笔成交日（每次重跑重算，别用模块级缓存：录一笔新成交后缓存就过期了）
-_acct_first_trade: dict[str, pd.Timestamp] = {}
-for _t in ((acct or {}).get("trades") or []):
-    if _t.get("side") not in ("买入", "卖出"):
-        continue
-    try:
-        _td = pd.Timestamp(_t["date"])
-    except Exception:  # noqa: BLE001 - 日期写坏就跳过
-        continue
-    _tc = str(_t.get("code") or "")
-    if _tc and (_tc not in _acct_first_trade or _td < _acct_first_trade[_tc]):
-        _acct_first_trade[_tc] = _td
+    (PF.daily, PF.pos, PF.cost, PF.cash, PF.units) if acct else (pd.DataFrame(), {}, {}, 0.0, 0.0))
 
 
-def _held_day(code: str, shares: float, px: float, px_prev: float,
-              prev_day=None) -> tuple[float, float | None]:
-    """这只基金的「今日」涨跌（元, %）—— **建仓那天之前的变化不算这笔持仓的收益**。
-
-    `px_prev` 只是净值序列的倒数第二个点，对刚建仓的基金来说那个点还落在建仓之前：
-    000006 是 10/26 按 2.7612 买的，列表却把 10/22→10/26 那 0.0273 的下跌算成「今日 -51」，
-    而同一个面板里的累计盈亏是 0.00 —— 一边亏 51 一边不动，看着就是算错了。
-    建仓日不早于 prev_day 那天时，没有「上一交易日的持仓」可比，今日收益只能是 0。
-    """
-    shares, px, px_prev = float(shares or 0), float(px or 0), float(px_prev or 0)
-    if shares <= 0 or px <= 0:
-        return 0.0, None
-    _f = _acct_first_trade.get(str(code))
-    if _f is not None and prev_day is not None and _f > pd.Timestamp(prev_day):
-        return 0.0, None
-    return (px - px_prev) * shares, ((px / px_prev - 1) * 100 if px_prev > 0 else None)
+# 这只基金的「今日」涨跌（元, %）—— 建仓那天之前的变化不算这笔持仓的收益（见 Portfolio.held_day）
+_held_day = PF.held_day
 _hg_w = HG.slot_weights(w, holdings)            # 目标权重（按我启用的位置归一）
 _hg_last = _hg_panel.index[-1] if len(_hg_panel) else prices.index[-1]
 
 
-def _hg_mv_by_slot():
-    """位置 → 当前市值（按该位置下**每只**持仓基金的净值分别估值后相加）。
-
-    同一只基金可能被挂在两个位置，但份额只有一份：第二个位置不再重复计入 ——
-    否则 sum(_hg_mv.values()) 会比账户净值多出整整一只，总资产跟着虚高。
-    """
-    out, seen = {}, set()
-    for s in HG.active(holdings):
-        v = 0.0
-        for code in HG.codes(holdings[s]):
-            if code in seen:
-                continue
-            sh = float(_acct_pos.get(code, 0) or 0)
-            if sh <= 0 or code not in _hg_panel.columns:
-                continue
-            col = _hg_panel[code].dropna()
-            if len(col):
-                v += sh * float(col.iloc[-1])
-                seen.add(code)
-        if v > 0:
-            out[s] = v
-    return out
-
-
-_hg_mv = _hg_mv_by_slot()
-_hg_configured_codes = set(HG.all_codes(holdings))
-# 「不在启用位置里」的份额：配置里删掉的旧代码，以及**位置被关掉、但账上还留着**的基金。
-# 只按 all_codes 判断会把第二种漏掉 —— 那样这笔钱既不在列表里、也不进总金额，账就对不上了。
-_hg_active_slot_codes = {c for s in HG.active(holdings) for c in HG.codes(holdings[s])}
-_hg_other_mv = {
-    c: sh * float(_hg_nav_on(None, _hg_panel.index[-1], c) or 0) if len(_hg_panel) else 0.0
-    for c, sh in _acct_pos.items()
-    if sh > 0 and c not in _hg_active_slot_codes
-}
-
-
-def _min_order(tgt_amt: float) -> float:
-    """单只基金值不值得单独下一笔：**目标金额**的 5%，至少 1 元。
-
-    位置级门槛（0.5%）只回答「这个位置要不要动」；真动起来之后还要拆到位置内的每只基金，
-    那里原来只挡 1 元以下，于是 8 只均分的位置会一次切出 7 笔「卖出 ¥3」——
-    金额小到连净值都能抹平它，却要多做 7 次赎回。5% 对应位置内均分 8 只时的 0.6%，
-    和位置级那条 0.5% 基本齐平。
-
-    注意传的是「这只基金本该有多少钱」（tgt × 位置内占比），不是差多少 ——
-    拿差额自己乘自己当门槛，`|差| < |差| × 5%` 永远不成立，等于没设。
-    """
-    return max(1.0, abs(tgt_amt) * 0.05)
-
-
-def _acct_invested_now() -> float:
-    """投入本金 = 初始资金 + 转入 − 转出（不含买卖：买卖只是钱换了个形态，还在账上）。"""
-    if acct is None:
-        return 0.0
-    v = float(acct.get("capital") or 0)
-    for t in acct.get("trades", []):
-        if t.get("side") in ("转入", "入金"):
-            v += float(t.get("shares") or 0)
-        elif t.get("side") in ("转出", "出金"):
-            v -= float(t.get("shares") or 0)
-    return v
+# 位置 → 当前市值（同一只基金挂两个位置只算第一次）
+_hg_mv: dict[str, float] = {}
+for _it in PF.plan["rows"]:
+    if not _it["dup"] and _it["mv"] > 0:
+        _hg_mv[_it["slot"]] = _hg_mv.get(_it["slot"], 0.0) + _it["mv"]
 
 
 def _hg_plan(tgt_by_slot: dict | None = None) -> dict:
-    """按策略目标权重算「该买多少 / 该卖多少」—— 全站唯一一份调仓计划。
+    """全站唯一一份调仓计划（Portfolio._plan，H5 版同一份）。
 
     tgt_by_slot：换一套位置目标权重算（「选基配置」换策略前的预览），缺省用账户跟随的策略。
-
-    「我的账户」的持仓表、「调仓」的两份清单都读这一份，
-    两处不再各算一遍，避免数字对不上。
-
-    口径：**调仓基数 = 配置内持仓市值 + 现金**，不含「其他」（位置已关/已删、账上还有份额的代码）。
-    那些钱我们不能替你卖，算进基数只会把目标金额撑大，最后给出「要买 29 万而现金只有 1 万」
-    这种执行不了的清单（真实踩过）。总资产另用 total，含「其他」。
-    位置整体偏离 < 0.5% 视为不用动（省手续费），要动的位置再按位置内占比拆到每只基金。
+    口径：调仓基数 = 配置内持仓市值 + 现金；位置偏离 < 0.5% 不动；位置内单只门槛 = 目标金额的 5%；
+    持有收益 = 总资产 − 投入本金（初始资金 + 转入 − 转出）。
     """
-    cash = float(_acct_cash or 0)
-    asset = float(sum(_hg_mv.values())) + cash
-    rows, orders, by_code = [], [], {}
-    buy_total = sell_total = mv_total = today_pnl = 0.0
-    _counted: dict[str, str] = {}          # code → 第一次出现的那个位置
-    for s in HG.active(holdings):
-        funds = HG.funds(holdings[s])
-        if not funds:
-            continue
-        # 别叫 slot_w：循环里下面就有个 slot_w（位置当前权重），第二轮会被覆盖成 float
-        tgt_w = float((_hg_w if tgt_by_slot is None else tgt_by_slot).get(s, 0) or 0)
-        tgt = tgt_w * asset
-        items = []
-        for f, x in zip(funds, HG.share_of(holdings[s])):
-            code = f["code"]
-            col = _hg_panel[code].dropna() if code in _hg_panel.columns else pd.Series(dtype=float)
-            px = float(col.iloc[-1]) if len(col) else 0.0
-            px_prev = float(col.iloc[-2]) if len(col) > 1 else px
-            sh = float(_acct_pos.get(code, 0) or 0)
-            cst = float(_acct_cost.get(code, 0) or 0)
-            items.append({"f": f, "x": float(x), "code": code, "px": px, "px_prev": px_prev,
-                          "px_prev_day": (col.index[-2] if len(col) > 1 else None),
-                          "shares": sh, "cost": cst, "mv": sh * px,
-                          # 同一只基金可以同时挂在两个位置（比如拿它充当两个角色的仓位），
-                          # 但份额只有一份：第二次出现时记下第一次的位置，市值不再重复计
-                          "dup": _counted.get(code),
-                          "pl": ((px / cst - 1) if (cst > 0 and px > 0) else None)})
-            _counted.setdefault(code, s)
-        # 市值和今日收益按「份额」只算一次。重复累加会让总资产凭空多出整整一只基金，
-        # 跟账户净值曲线（按 code 聚合份额）差出几万块 —— 首页和你看到的走势会互相打架。
-        slot_mv = sum(it["mv"] for it in items if not it["dup"])
-        mv_total += slot_mv
-        today_pnl += sum(_held_day(it["code"], it["shares"], it["px"], it["px_prev"],
-                                   it.get("px_prev_day"))[0] for it in items if not it["dup"])
-        slot_w = (slot_mv / asset) if asset else 0.0
-        moved = abs(tgt - slot_mv) >= max(1.0, asset * 0.005)
-        for i, it in enumerate(items):
-            f = it["f"]
-            diff = (tgt * it["x"] - it["mv"]) if moved else 0.0
-            _floor = _min_order(tgt * it["x"])       # 这只基金目标金额的 5%
-            side, qty, amt, note = "", 0.0, 0.0, ""
-            liq = False      # 这一笔卖出会不会把份额卖光 —— 清仓和减仓是两回事，要单独标
-            if it["px"] <= 0:
-                note = "缺净值"
-            elif it["dup"]:
-                # 这只基金的钱已经在别的位置里算过了，这里再下一单就会真的重复买卖
-                note = f'已在「{HG.SLOT_LABEL.get(it["dup"], it["dup"])}」计入'
-            elif not moved or abs(diff) < _floor:
-                # 位置内也要有门槛：位置级只管到 0.5%，一旦「动了」就把每只基金按目标份额
-                # 重算一遍，1 块钱的差也下单 —— 8 只均分的位置会一次冒出 7 笔「卖出 ¥3 · 1.23 份」，
-                # 支付宝里够做，但为了 0.06% 的偏差赎回一次纯属瞎折腾（真跑一遍才看得见）
-                note = ""
-            else:
-                qty, amt = HG.order_quantity(f, abs(diff), it["px"])
-                if qty <= 0:
-                    note = "不足一手"
-                elif diff > 0:
-                    side, buy_total = "买入", buy_total + amt
-                else:
-                    side, sell_total = "卖出", sell_total + amt
-                    # 卖出量 ≥ 手上份额 = 清仓。留着 0.1% 的余量给场外「金额÷净值」的舍入，
-                    # 但场内卖不掉的零股（份额不是整手）不算清仓 —— 那确实还剩几股在账上
-                    liq = bool(it["shares"] > 0 and qty >= it["shares"] * (1 - 1e-9))
-            it.update({"slot": s, "side": side, "qty": qty, "amount": amt, "note": note,
-                       "liq": liq, "otc": HG.is_otc(f),
-                       "w_now": (0.0 if it["dup"] else it["mv"] / asset) if asset else 0.0,
-                       "w_tgt": tgt_w * it["x"],
-                       # 位置级偏离只在该位置首行有意义，同位置其余行留 0 不显示
-                       "dev": ((slot_w - tgt_w) if i == 0 else 0.0),
-                       "slot_w": slot_w, "slot_tgt_w": tgt_w,
-                       "slot_first": i == 0, "slot_n": len(items)})
-            if side:
-                orders.append({"date": _hg_last.strftime("%Y-%m-%d"), "slot": s, "code": it["code"],
-                               "side": side, "shares": round(float(qty), 4),
-                               "nav": round(it["px"], 4), "fee": 0.0, "liq": liq})
-                by_code[it["code"]] = {"side": side, "amount": amt, "qty": qty}
-            rows.append(it)
-    # 不在启用位置里、但账上还留着份额的代码：占着总资产却不在目标权重里
-    other = [{"code": c, "mv": v, "in_cfg": c in _hg_configured_codes}
-             for c, v in (_hg_other_mv or {}).items() if v > 0]
-    # 「其他」的今日涨跌也要算进头卡的「今日收益」：它们不参与调仓，但钱还是我的，
-    # 漏掉的话 28 万持仓一天的波动在页面上完全看不见。
-    for _c, _sh in (_acct_pos or {}).items():
-        if float(_sh or 0) <= 0 or _c in _hg_active_slot_codes:
-            continue
-        _nv = _nav_of_code(_c)
-        if len(_nv) > 1:
-            today_pnl += _held_day(_c, float(_sh), float(_nv.iloc[-1]), float(_nv.iloc[-2]),
-                                   _nv.index[-2])[0]
-    total = mv_total + sum(o["mv"] for o in other) + cash
-    # 持有收益 = 总资产 − 投入本金（初始资金 + 转入 − 转出），持有收益率 = 收益 / 投入本金 —— 支付宝口径。
-    # 不能写成 total − capital：每次「转入」都会被当成赚到的钱（真踩过：转入 1 万后 +184 → +10,184）。
-    # 也不能写成 total − units：units 是「份额」不是钱，只在转入那天账户净值恰好是 1 时才等于本金。
-    # 原来本金填了个虚的 50 万、长期挂着现金，净值一直≈1 看不出来；改成按实际转入以后，
-    # 9/4 那笔 ¥164 跌了 9%，10/26 转入 48.7 万时净值 0.91 → units 多出 4.8 万，持有收益算成 −5 万。
-    base = _acct_invested_now()
-    return {"asset": asset, "cash": cash, "mv": mv_total,
-            "mv_all": mv_total + sum(o["mv"] for o in other), "total": total,
-            "other": other,
-            "rows": rows, "orders": orders, "by_code": by_code,
-            "buy": buy_total, "sell": sell_total, "today": today_pnl,
-            "pnl": (total - base) if base > 0 else 0.0,
-            "pnl_pct": ((total / base - 1) if base > 0 else 0.0),
-            "has_acct": acct is not None}
+    return PF.plan if tgt_by_slot is None else PF._plan(tgt_by_slot)
 
 
 _plan = _hg_plan()
 
 
 def _plan_status() -> dict:
-    """这一轮到底要不要动手 —— 「我的账户」顶部和「调仓」顶部共用这一份结论。
-
-    三种情况分开说，因为用户接下来要做的事完全不同：
-      orders  有单要下（买 / 卖多少）    → 去「调仓」看清单
-      stuck   偏离超标但下不了单          → 一手太大 / 缺口太小，只能等下次一起买
-      calm    都在 0.5% 阈值内            → 什么都不用做
-
-    「没有单」不等于「没偏离」：中间还隔着整手取整、缺净值、重复计入三种「算出来但下不了手」。
-    两处页面各写一遍判断迟早会分叉，所以只留这一份。
-
-    orders 里另带 `liq` / `liq_amt`：这一轮有几笔是把份额卖光的（清仓），金额多少。
-    清仓和减仓在清单上原本长得一样，只有这一处先把它们分开数。
-    """
-    if _plan["orders"]:
-        # 清仓要单独数一眼：一轮清单里混进一两笔「全卖」，和十几笔微调完全是两种性质的操作
-        _liq = [o for o in _plan["orders"] if o.get("liq")]
-        return {"kind": "orders", "n": len(_plan["orders"]),
-                "buy": float(_plan["buy"]), "sell": float(_plan["sell"]),
-                "liq": len(_liq),
-                "liq_amt": sum(float(o.get("shares") or 0) * float(o.get("nav") or 0)
-                               for o in _liq)}
-    _over = [it for it in _plan["rows"]
-             if it.get("slot_first") and abs(it.get("dev") or 0) >= 0.005]
-    if not _over:
-        return {"kind": "calm"}
-    _over.sort(key=lambda it: -abs(it["dev"]))
-    _w = _over[0]
-    return {"kind": "stuck", "n": len(_over), "max_dev": abs(_w["dev"]),
-            "slots": [it["slot"] for it in _over],
-            "gap": abs(_w["dev"]) * float(_plan["asset"]),
-            "lot": float(_w["px"]) * int(_w["f"].get("lot") or 100),
-            "note": _w.get("note") or ""}
+    """这一轮到底要不要动手：orders 有单要下 / stuck 偏离超标但下不了单 / calm 都在 0.5% 内
+    （Portfolio.status，「我的账户」顶部和「调仓」顶部共用这一份）。"""
+    return PF.status()
 
 
 def _plan_stuck_tail(st: dict) -> str:
@@ -2750,64 +2402,17 @@ def _plan_stuck_tail(st: dict) -> str:
 
 
 def _acct_flows() -> pd.Series:
-    """日频净入金（正=进钱，负=出钱）：转入/入金为正，转出/出金为负。
-
-    成交日先顺延到交易日（周末、节假日的转账算到下一个净值日），与 `_replay_holdings` 同一口径 ——
-    否则按年切段时这笔钱会落在「那天没有净值」的日子上，收益就被算歪了。
-    """
+    """日频净入金（正=进钱，负=出钱），成交日顺延到交易日（Portfolio.flows）。"""
     if acct is None or not len(_acct_daily):
         return pd.Series(dtype=float)
-    idx = _acct_daily.index
-    out = pd.Series(0.0, index=idx)
-    for t in acct.get("trades", []):
-        side = t.get("side")
-        if side not in ("转入", "入金", "转出", "出金"):
-            continue
-        try:
-            d = pd.Timestamp(t.get("date"))
-        except Exception:
-            continue
-        i = min(int(idx.searchsorted(d)), len(idx) - 1)
-        amt = float(t.get("shares", 0) or 0)
-        out.iloc[i] += -amt if side in ("转出", "出金") else amt
-    return out
-
-
-def _money_index(equity: pd.Series, flows: pd.Series, capital: float) -> tuple[pd.Series, float]:
-    """按「收益 / 投入本金」算的账户收益率指数：1 + 累计收益 ÷ 投入本金的最高值。
-
-    为什么不用时间加权（重放里那个 equity / units）：它把每一段时间等权 —— 9/4 只买了 ¥164，
-    那一个半月跌了 9%，时间加权就永远背着这 −9%，而 10/26 才转进来的 48.7 万根本没经历过。
-    支付宝看的是「收益 / 本金」。分母取**本金最高值**（不是当天本金）：本金小的时候那几块钱
-    的涨跌不会被放大成 ±5%，转入当天也不会出现一个假的大涨/大跌；今天的值 = 持有收益率。
-    """
-    inv = float(capital) + flows.reindex(equity.index).fillna(0.0).cumsum()
-    peak = float(inv.max()) if len(inv) else 0.0
-    if peak <= 0:
-        return pd.Series(1.0, index=equity.index), 0.0
-    return 1.0 + (equity.astype(float) - inv) / peak, peak
+    return PF.flows(_acct_daily.index)
 
 
 def _bench_money_index(bench: pd.Series) -> pd.Series:
-    """把账户的入金节奏原样搬到基准上：同一天、同样多的钱买基准 —— 和账户比才是同一把尺子。
-
-    原来基准从建仓日按 1.0 归一（时间加权）：等于假设 9/4 就把 48.7 万全买了基准，
-    跟实际只投了 ¥164 的账户比，比出来的差距大部分是「钱什么时候进来的」，不是选基。
-    """
-    if acct is None or bench is None or len(bench.dropna()) < 2 or not len(_acct_daily):
+    """把账户的入金节奏原样搬到基准上：同一天、同样多的钱买基准（Portfolio.bench_index）。"""
+    if acct is None:
         return pd.Series(dtype=float)
-    b = bench.dropna().sort_index()
-    idx = _acct_daily.index[_acct_daily.index >= b.index[0]]
-    if len(idx) < 2:
-        return pd.Series(dtype=float)
-    bb = b.reindex(b.index.union(idx)).ffill().reindex(idx)
-    fl = _acct_flows().reindex(idx).fillna(0.0)
-    fl.iloc[0] += float(acct.get("capital") or 0)        # 初始资金算第一天的入金
-    units = (fl / bb).cumsum()
-    val = units * bb
-    inv = fl.cumsum()
-    peak = float(inv.max()) or 1.0
-    return 1.0 + (val - inv) / peak
+    return PF.bench_index(bench)
 
 
 def _acct_pnl_series() -> pd.Series:
@@ -2823,11 +2428,7 @@ def _acct_pnl_series() -> pd.Series:
     return eq - (float(acct.get("capital") or 0) + fl.cumsum())
 
 
-# 账户「nav」统一换成收益/本金口径；时间加权那份留在 nav_twr，备查
-if acct is not None and len(_acct_daily):
-    _acct_daily["nav_twr"] = _acct_daily["nav"]
-    _acct_daily["nav"], _acct_invest_peak = _money_index(
-        _acct_daily["equity"], _acct_flows(), float(acct.get("capital") or 0))
+# 账户 daily 的 nav 已是「收益 / 本金」口径（Portfolio._replay），时间加权那份在 nav_twr，备查
 
 
 def _acct_equity_series() -> pd.Series:
@@ -2862,7 +2463,7 @@ def _acct_calendar_payload():
 def _acct_day_detail(days) -> dict:
     """收益日历「当日收益明细」：选中那天，每只持仓赚了多少钱、涨了百分之几。
 
-    和支付宝「收益明细」那页同一个意思。数据来自 `_replay_holdings` 顺手记下的 `_acct_by_day`，
+    和支付宝「收益明细」那页同一个意思。数据来自账户重放（Portfolio._replay）顺手记下的 `_acct_by_day`，
     各只加起来等于格子里那天的金额（同一次重放、同一个口径，不另算一遍）。
 
     返回 ``{"funds": [[代码, 名称, 位置], ...], "detail": {"2026/10/28": [[序号, 元, %, 状态, 动作], ...]}}``，
@@ -3631,34 +3232,7 @@ def _trade_list(rows: list[dict], funds: list[dict] | None = None, key: str = "t
     return res.get("save"), res.get("del")
 
 
-def _close_trade_idx(trades: list[dict], tol: float = 1e-6) -> set[int]:
-    """哪些卖出把这只基金的份额清成了 0 —— 台账里给那一笔打「清仓」。
-
-    口径和 `sim_account.rounds()` 一致（同一份份额、同一天按录入顺序、卖出后 ≤ tol 算清空），
-    只是它记的是「哪一笔」，好让标签落在具体那一行上 —— 清仓不是单独一件事，
-    它本来就是某笔卖出的结果，记在别处反而要人去对日期。
-    """
-    out: set[int] = set()
-    held: dict[str, float] = {}
-    items = []
-    for k, t in enumerate(trades or []):
-        if t.get("side") not in ("买入", "卖出") or float(t.get("shares") or 0) <= 0:
-            continue
-        try:
-            items.append((pd.Timestamp(t.get("date")), k, t))
-        except Exception:  # noqa: BLE001
-            continue
-    for _d, k, t in sorted(items, key=lambda x: (x[0], x[1])):
-        code = str(t.get("code") or "")
-        sh = float(t.get("shares") or 0)
-        if t.get("side") == "买入":
-            held[code] = held.get(code, 0.0) + sh
-            continue
-        after = held.get(code, 0.0) - sh
-        if held.get(code, 0.0) > tol and after <= tol:      # 这一笔正好把份额卖光
-            out.add(k)
-        held[code] = 0.0 if after <= tol else after
-    return out
+# _close_trade_idx：哪些卖出把份额清成 0（台账打「清仓」标）—— 见 allweather/portfolio.py::close_trade_idx
 
 
 def _trade_row(i: int, t: dict, closed: bool = False) -> dict:
