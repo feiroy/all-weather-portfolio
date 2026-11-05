@@ -14,7 +14,7 @@ html,body{ margin:0; background:var(--bg); color:var(--ink);
 .wrap{ max-width:720px; margin:0 auto; }
 .sec-t{ font-size:13px; color:var(--muted); margin:18px 18px 8px; display:flex; justify-content:space-between; }
 .card{ background:var(--card); border-radius:14px; margin:12px 12px 0; padding:14px 16px; }
-.tag{ display:inline-block; font-size:11px; line-height:18px; padding:0 7px; border-radius:9px; font-weight:500; }
+.tag{ display:inline-block; font-size:11px; line-height:18px; padding:0 7px; border-radius:9px; font-weight:500; white-space:nowrap; flex-shrink:0; }
 .tag.sim{ color:#B45309; background:#FEF3C7; }
 .tag.real{ color:var(--brand); background:var(--brand-soft); }
 .tag.buy{ color:var(--up); background:#FEECEC; } .tag.sell{ color:var(--down); background:#E8F7EE; }
@@ -26,8 +26,25 @@ html,body{ margin:0; background:var(--bg); color:var(--ink);
 .fade-enter-active,.fade-leave-active{ transition:opacity .15s; } .fade-enter-from,.fade-leave-to{ opacity:0; }
 .view-stack{ display:grid; } .view-stack > *{ grid-area:1/1; min-width:0; }
 .van-nav-bar{ background:var(--bg) !important; } .van-hairline--bottom:after{ border:0 !important; }
-@media (min-width:900px){ .wrap{ max-width:1080px; } }
-/* 电脑上底部导航跟内容一样宽，别横贯整个屏幕（正式版电脑端改成顶部导航） */
+.btn-row{ margin:18px 16px 0; display:flex; gap:10px; } .btn-row > *{ flex:1; }
+.empty-tip{ font-size:12.5px; color:var(--muted); text-align:center; margin:18px 16px; line-height:1.7; }
+.chips{ display:flex; gap:8px; overflow-x:auto; padding:2px 12px 2px; scrollbar-width:none; }
+.chips::-webkit-scrollbar{ display:none; }
+.chip{ flex:0 0 auto; padding:5px 12px; border-radius:15px; font-size:13px; background:#fff; color:var(--sub); border:1px solid var(--line); cursor:pointer; white-space:nowrap; }
+.chip.on{ background:var(--brand-soft); color:var(--brand); border-color:#C7D2FE; font-weight:600; }
+.seg2{ display:inline-flex; background:#EEF0F3; border-radius:9px; padding:2px; }
+.seg2 button{ border:0; background:transparent; padding:4px 12px; border-radius:7px; font-size:12.5px; color:var(--sub); cursor:pointer; }
+.seg2 button.on{ background:#fff; color:var(--ink); font-weight:600; box-shadow:0 1px 2px rgba(0,0,0,.08); }
+.d-only{ display:none !important; }
+/* 电脑端：顶部导航 + 内容 1080 宽；手机底部导航隐藏；二级页面的「返回」栏留着当面包屑 */
 @media (min-width:900px){
-  .van-tabbar{ max-width:1080px; left:50% !important; transform:translateX(-50%); border-radius:14px 14px 0 0; box-shadow:0 -2px 12px rgba(0,0,0,.05); }
+  .wrap{ max-width:1080px; }
+  .d-only{ display:revert !important; }
+  .m-only{ display:none !important; }
+  .has-desk{ padding-top:56px; }
+  .has-desk .page{ min-height:calc(100vh - 56px); }
+  .page{ padding-bottom:32px; }
+  .van-nav-bar.subbar{ top:56px; max-width:1080px; margin:0 auto; }
+  .cols2{ display:grid; grid-template-columns:420px 1fr; gap:4px; align-items:start; }
+  .cols2.even{ grid-template-columns:1fr 1fr; }
 }

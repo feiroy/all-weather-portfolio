@@ -1,9 +1,8 @@
 """账户视图：一个账户的持仓、收益、调仓计划 —— 不依赖 Streamlit 的纯计算层。
 
-H5 前端（api/server.py）用它；口径逐行照搬 streamlit_app/app.py 里的同名函数
-（_replay_holdings / _hg_plan / _held_day / _money_index / _plan_status / _pf_row …），
-两边数字必须一模一样 —— tests/test_portfolio.py 拿主账户对过。
-等 H5 版补齐功能后，Streamlit 版也改成调这里，删掉那份重复实现。
+H5 前端（api/server.py）和 Streamlit 版（streamlit_app/app.py）共用这一份：
+账户重放、今日收益、调仓计划、结论、收益/本金指数、按入金节奏折算基准 —— 只在这里算，
+两个前端只管展示，数字天然一致。
 """
 from __future__ import annotations
 
@@ -31,6 +30,7 @@ class Portfolio:
     """acct：账户文件内容（含 trades / holdings）；target_w：资产 key → 目标权重（策略算好的）。"""
 
     def __init__(self, acct: dict, target_w):
+        self.has_acct = acct is not None
         self.acct = acct or {}
         self.holdings = ({s: HG._norm_slot(v) for s, v in self.acct["holdings"].items()}
                          if self.acct.get("holdings") else HG._default_holdings())
@@ -66,6 +66,16 @@ class Portfolio:
             self._navcache[code] = HG.nav_series(code)
         return self._navcache[code]
 
+    def raw_dates(self, code: str) -> pd.DatetimeIndex:
+        """真正公布过净值的日子（面板做过 ffill，拿它判断「当天有没有净值」永远为真）。"""
+        if code not in self._rawcache:
+            try:
+                s = HG.nav_series(code)
+                self._rawcache[code] = pd.DatetimeIndex(s.dropna().index) if len(s) else pd.DatetimeIndex([])
+            except Exception:  # noqa: BLE001
+                self._rawcache[code] = pd.DatetimeIndex([])
+        return self._rawcache[code]
+
     def nav_on(self, code: str, day) -> float | None:
         col = self.nav(code)
         if not len(col):
@@ -94,7 +104,10 @@ class Portfolio:
         pos: dict[str, float] = {}
         cost: dict[str, float] = {}
         rows = []
+        prev_mv: dict[str, float] = {}
+        self.by_day = {}          # 日期 → {代码: (收益元, 收益率%, 状态, 动作)}（收益日历点开某天用）
         for d in idx:
+            flow: dict[str, float] = {}
             for t in buckets.get(d, []):
                 code = str(t.get("code", "") or "")
                 sh = float(t.get("shares", 0) or 0)
@@ -105,6 +118,7 @@ class Portfolio:
                     if px <= 0:
                         px = self.nav_on(code, d) or 0
                     cash -= sh * px + fee
+                    flow[code] = flow.get(code, 0.0) + sh * px + fee
                     prev = pos.get(code, 0.0)
                     cost[code] = ((prev * cost.get(code, 0.0) + sh * px + fee) / (prev + sh)) if (prev + sh) > 0 else px
                     pos[code] = prev + sh
@@ -112,6 +126,7 @@ class Portfolio:
                     if px <= 0:
                         px = self.nav_on(code, d) or 0
                     cash += sh * px - fee
+                    flow[code] = flow.get(code, 0.0) - (sh * px - fee)
                     pos[code] = pos.get(code, 0.0) - sh
                     if pos[code] <= 1e-9:
                         pos.pop(code, None)
@@ -122,10 +137,24 @@ class Portfolio:
                 elif side in MONEY_OUT:
                     units = max(1e-9, units - sh / (last_nav if last_nav > 0 else 1.0))
                     cash -= sh
-            mv = sum(sh * v for c, sh in pos.items() if (v := self.nav_on(c, d)))
+            cur_mv = {c: sh * v for c, sh in pos.items() if (v := self.nav_on(c, d))}
+            mv = sum(cur_mv.values())
+            day = {}
+            for code in set(prev_mv) | set(cur_mv) | set(flow):
+                if code in pos and code not in cur_mv:
+                    continue
+                a, b, f = prev_mv.get(code, 0.0), cur_mv.get(code, 0.0), flow.get(code, 0.0)
+                pnl, base = b - a - f, a + max(f, 0.0)
+                raw = self.raw_dates(code)
+                act = "" if abs(f) < 1e-9 else ("买入" if f > 0 else ("清仓" if code not in pos else "卖出"))
+                state = "" if (act or d in raw) else ("待更新" if (not len(raw) or d > raw[-1]) else "无净值")
+                day[code] = (pnl, (pnl / base * 100) if base > 0 else None, state, act)
+            self.by_day[d] = day
+            prev_mv = cur_mv
             eq = cash + mv
             last_nav = eq / units if units > 0 else 1.0
-            rows.append({"date": d, "equity": eq, "cash": cash, "market": mv})
+            # nav_twr：时间加权单位净值（转入按当时净值折份额），备查；页面上的 nav 是「收益 / 本金」口径
+            rows.append({"date": d, "equity": eq, "cash": cash, "market": mv, "nav_twr": last_nav})
         daily = pd.DataFrame(rows).set_index("date")
         fl = self.flows(daily.index)
         inv = capital + fl.cumsum()
@@ -171,7 +200,9 @@ class Portfolio:
         return (px - px_prev) * shares, ((px / px_prev - 1) * 100 if px_prev > 0 else None)
 
     # ------------------------------------------------------------ 调仓计划（app.py::_hg_plan）
-    def _plan(self) -> dict:
+    def _plan(self, slot_w: dict | None = None) -> dict:
+        """slot_w：换一套位置目标权重算（「换策略」前的预览）；缺省用账户跟随的策略。"""
+        sw = self.slot_w if slot_w is None else slot_w
         h, cash = self.holdings, float(self.cash or 0)
         mv_by_slot, seen = {}, set()
         for s in HG.active(h):
@@ -189,14 +220,14 @@ class Portfolio:
             if v > 0:
                 mv_by_slot[s] = v
         asset = float(sum(mv_by_slot.values())) + cash
-        rows, orders = [], []
+        rows, orders, by_code = [], [], {}
         buy_total = sell_total = mv_total = today = 0.0
         counted: dict[str, str] = {}
         for s in HG.active(h):
             funds = HG.funds(h[s])
             if not funds:
                 continue
-            tgt_w = float(self.slot_w.get(s, 0) or 0)
+            tgt_w = float(sw.get(s, 0) or 0)
             tgt = tgt_w * asset
             items = []
             for f, x in zip(funds, HG.share_of(h[s])):
@@ -241,8 +272,10 @@ class Portfolio:
                            "w_tgt": tgt_w * it["x"], "dev": ((slot_w - tgt_w) if i == 0 else 0.0),
                            "slot_w": slot_w, "slot_tgt_w": tgt_w, "slot_first": i == 0, "slot_n": len(items)})
                 if side:
-                    orders.append({"slot": s, "code": it["code"], "side": side, "shares": round(float(qty), 4),
-                                   "nav": round(it["px"], 4), "amount": amt, "liq": liq})
+                    orders.append({"date": f"{self.last:%Y-%m-%d}", "slot": s, "code": it["code"], "side": side,
+                                   "shares": round(float(qty), 4), "nav": round(it["px"], 4), "fee": 0.0,
+                                   "amount": amt, "liq": liq})
+                    by_code[it["code"]] = {"side": side, "amount": amt, "qty": qty}
                 rows.append(it)
         other_mv = {c: sh * float(self.nav_on(c, self.last) or 0)
                     for c, sh in self.pos.items() if sh > 0 and c not in self.active_codes}
@@ -256,7 +289,8 @@ class Portfolio:
         total = mv_total + sum(o["mv"] for o in other) + cash
         base = self.invested_now()
         return {"asset": asset, "cash": cash, "mv": mv_total, "mv_all": mv_total + sum(o["mv"] for o in other),
-                "total": total, "other": other, "rows": rows, "orders": orders,
+                "total": total, "other": other, "rows": rows, "orders": orders, "by_code": by_code,
+                "has_acct": self.has_acct,
                 "buy": buy_total, "sell": sell_total, "today": today,
                 "pnl": (total - base) if base > 0 else 0.0,
                 "pnl_pct": ((total / base - 1) if base > 0 else 0.0)}
@@ -273,7 +307,7 @@ class Portfolio:
         if not over:
             return {"kind": "calm"}
         w = over[0]
-        return {"kind": "stuck", "n": len(over), "max_dev": abs(w["dev"]),
+        return {"kind": "stuck", "n": len(over), "max_dev": abs(w["dev"]), "slots": [it["slot"] for it in over],
                 "gap": abs(w["dev"]) * p["asset"], "lot": w["px"] * int(w["f"].get("lot") or 100),
                 "note": w.get("note") or ""}
 
@@ -375,6 +409,139 @@ class Portfolio:
                         "name": (FL.fund_name(str(t.get("code"))) or t.get("code") or "") if t.get("code") else "",
                         "shares": sh, "nav": nv, "fee": fee, "amount": amt})
         return sorted(out, key=lambda r: (str(r["date"]), r["i"]), reverse=True)
+
+
+    # ------------------------------------------------------------ 新钱怎么分（app.py::_calc_dca）
+    def dca(self, amount: float) -> dict:
+        slots, meta, dead = {}, {}, []
+        for it in self.plan["rows"]:
+            g = slots.setdefault(it["slot"], {"slot": it["slot"], "w": float(it["slot_tgt_w"]), "mv": 0.0, "items": []})
+            g["mv"] += float(it["mv"])
+            if it["px"] <= 0:
+                dead.append(it["code"])
+                continue
+            g["items"].append({"code": it["code"], "x": float(it["x"])})
+            meta[it["code"]] = it
+        rows, buy, lost = [], 0.0, 0.0
+        for a in HG.plan_invest(list(slots.values()), float(amount)):
+            m = meta.get(a["code"])
+            if not m:
+                continue
+            want = float(a["amount"])
+            qty, amt = HG.order_quantity(m["f"], want, float(m["px"]))
+            note = ""
+            if qty <= 0:
+                note = (f'低于最低申购 ¥{float(m["f"].get("min_amount") or 1):,.0f}' if HG.is_otc(m["f"])
+                        else f'不足一手（一手 ≈ ¥{int(m["f"].get("lot") or 100) * float(m["px"]):,.0f}）')
+                lost += want
+            else:
+                buy += amt
+            rows.append({"code": m["code"], "name": str(m["f"].get("name") or FL.fund_name(m["code"]) or m["code"]),
+                         "slot": HG.SLOT_LABEL.get(a["slot"], a["slot"]), "otc": bool(m["otc"]),
+                         "unit": "份" if m["otc"] else "股", "want": want, "amount": amt, "qty": float(qty),
+                         "px": m["px"], "w_tgt": m["slot_tgt_w"], "x": a["x"], "slot_n": m["slot_n"], "note": note})
+        return {"rows": rows, "buy": buy, "lost": lost, "n": sum(1 for r in rows if r["qty"] > 0),
+                "after": self.plan["total"] + float(amount), "dead": dead}
+
+    # ------------------------------------------------------------ 体检（app.py::_acct_health_view）
+    def health(self) -> dict:
+        rows = [r for r in self.plan["rows"] if float(r["shares"] or 0) > 0]
+        if not rows:
+            return {"items": [], "bad": [], "days": 0}
+        nm = lambda r: str(r["f"].get("name") or r["code"])
+        big = max(rows, key=lambda r: float(r["w_now"] or 0))
+        slot_w: dict[str, float] = {}
+        for r in rows:
+            slot_w[r["slot"]] = slot_w.get(r["slot"], 0.0) + float(r["w_now"] or 0)
+        sk, smax = max(slot_w.items(), key=lambda kv: kv[1])
+        worst = min((r for r in rows if r.get("pl") is not None), key=lambda r: r["pl"], default=None)
+        dev = max((r for r in rows if r.get("slot_first")), key=lambda r: abs(float(r["dev"])), default=None)
+        nav = self.daily["nav"].astype(float) if len(self.daily) else pd.Series(dtype=float)
+        mdd = float((nav / nav.cummax() - 1).min()) if len(nav) > 1 else None
+        cash_r = self.plan["cash"] / self.plan["total"] if self.plan["total"] else 0.0
+        items = []
+
+        def add(label, now, line, over, why, bad):
+            items.append({"label": label, "now": now, "line": line, "over": over if bad else "正常", "why": why, "bad": bool(bad)})
+
+        if any(sum(1 for r in rows if r["slot"] == k) > 1 for k in slot_w):
+            add("单只最大占比", f"{big['w_now'] * 100:.1f}%（{nm(big)}）", "25%", "偏高",
+                "一只基金的涨跌就能左右整个账户；想分散就给这个位置再挂一只同类基金", float(big["w_now"]) > 0.25)
+            add("单一位置最大占比", f"{smax * 100:.1f}%（{HG.SLOT_LABEL.get(sk, sk)}）", "50%", "偏高",
+                "整个位置同涨同跌，相当于半个账户压在一个资产上", smax > 0.50)
+        else:
+            add("最大仓位", f"{smax * 100:.1f}%（{nm(big)}）", "25%", "偏高",
+                "一只基金就占了账户这么多，它自己出问题等于账户出问题", smax > 0.25)
+        if cash_r >= 0.005:
+            add("现金占比", f"{cash_r * 100:.1f}%", "15%", "偏多", "钱还没买成基金，闲着拖低收益；到「调仓 · 新钱怎么分」买掉", cash_r > 0.15)
+        add("最大回撤", f"{mdd * 100:.2f}%（账户 {len(self.daily)} 天）" if mdd is not None else "—", "12%", "超线",
+            "从最高点回落的最大幅度，越深越考验能不能拿住", mdd is not None and mdd <= -0.12)
+        if worst is not None:
+            add("单只最大浮亏", f"{worst['pl'] * 100:.2f}%（{nm(worst)}）", "15%", "超线",
+                "只说明这一只买贵了，不等于该卖；先看是整体下跌还是它自己的问题", float(worst["pl"]) <= -0.15)
+        if dev is not None:
+            add("偏离目标最大", f"{float(dev['dev']) * 100:+.1f}pp（{HG.SLOT_LABEL.get(dev['slot'], dev['slot'])}）", "±5pp",
+                "该调了", "和策略目标已经拉开距离；调多少看「调仓」", abs(float(dev["dev"])) >= 0.05)
+        return {"items": items, "bad": [i for i in items if i["bad"]], "days": len(self.daily)}
+
+    # ------------------------------------------------------------ 收益：每天的数 + 当日明细
+    def period(self) -> dict:
+        d = self.daily
+        if len(d) < 1:
+            return {"dates": [], "nav": [], "pnl": [], "day": [], "detail": {}, "funds": {}}
+        fl = self.flows(d.index)
+        day = d["equity"].astype(float).diff() - fl
+        names, detail = {}, {}
+        for dt, rows in self.by_day.items():
+            out = []
+            for c, (pnl, pct, state, act) in rows.items():
+                if c not in names:
+                    names[c] = FL.fund_name(c) or c
+                out.append([c, round(float(pnl), 2), None if pct is None else round(float(pct), 4), state, act])
+            if out:
+                detail[f"{dt:%Y-%m-%d}"] = sorted(out, key=lambda r: -r[1])
+        return {"dates": [f"{x:%Y-%m-%d}" for x in d.index],
+                "nav": [round(float(v), 6) for v in d["nav"]],
+                "pnl": [round(float(v), 2) for v in d["pnl"]],
+                "day": [None if pd.isna(v) or i == 0 else round(float(v), 2) for i, v in enumerate(day)],
+                "detail": detail, "funds": names}
+
+    # ------------------------------------------------------------ 对比：同样的入金节奏买基准
+    def bench_index(self, bench) -> pd.Series:
+        if bench is None or len(bench.dropna()) < 2 or not len(self.daily):
+            return pd.Series(dtype=float)
+        b = bench.dropna().sort_index()
+        idx = self.daily.index[self.daily.index >= b.index[0]]
+        if len(idx) < 2:
+            return pd.Series(dtype=float)
+        bb = b.reindex(b.index.union(idx)).ffill().reindex(idx)
+        fl = self.flows(idx)
+        fl.iloc[0] += float(self.acct.get("capital") or 0)
+        val = (fl / bb).cumsum() * bb
+        inv = fl.cumsum()
+        return 1.0 + (val - inv) / (float(inv.max()) or 1.0)
+
+
+def close_trade_idx(trades: list[dict], tol: float = 1e-6) -> set[int]:
+    """哪些卖出把这只基金的份额清成了 0（台账打「清仓」标；同 app.py::_close_trade_idx）。"""
+    out, held, items = set(), {}, []
+    for k, t in enumerate(trades or []):
+        if t.get("side") not in ("买入", "卖出") or float(t.get("shares") or 0) <= 0:
+            continue
+        try:
+            items.append((pd.Timestamp(t.get("date")), k, t))
+        except Exception:  # noqa: BLE001
+            continue
+    for _d, k, t in sorted(items, key=lambda x: (x[0], x[1])):
+        c, sh = str(t.get("code") or ""), float(t.get("shares") or 0)
+        if t.get("side") == "买入":
+            held[c] = held.get(c, 0.0) + sh
+            continue
+        after = held.get(c, 0.0) - sh
+        if held.get(c, 0.0) > tol and after <= tol:
+            out.add(k)
+        held[c] = 0.0 if after <= tol else after
+    return out
 
 
 def asset_meta(asset: str) -> dict:

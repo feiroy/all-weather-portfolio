@@ -1,0 +1,152 @@
+<template>
+  <div class="page no-tab">
+    <SubBar title="选基配置" :fallback="`/a/${aid}`" />
+    <div class="wrap">
+      <van-skeleton v-if="!d" title :row="10" style="padding:16px" />
+      <div v-else class="cols2 even">
+        <div>
+          <!-- 跟随哪个策略 -->
+          <div class="sec-t"><span>这个账户跟随</span></div>
+          <div class="stg">
+            <div v-for="s in d.strategies" :key="s.key" class="sc" :class="{ on: s.key === d.account.strategy }" @click="pick(s)">
+              <van-icon :name="s.key === d.account.strategy ? 'checked' : 'circle'" /><div><b>{{ s.name }}</b><small>{{ desc[s.key] }}</small></div>
+            </div>
+          </div>
+          <!-- 三个策略今天的目标 -->
+          <div class="sec-t"><span>今天的目标权重</span><span>含趋势过滤</span></div>
+          <div class="card wt">
+            <div class="wh"><span>资产</span><span v-for="s in d.strategies" :key="s.key" :class="{ me: s.key === d.account.strategy }">{{ s.name.replace('V3-B ', '') }}</span></div>
+            <div v-for="r in d.rows" :key="r.asset" class="wr">
+              <div class="wn"><b>{{ r.name }}</b><small :class="{ miss: !r.mine }">{{ r.mine || '没有对应位置 → 同桶分配' }}</small></div>
+              <span v-for="s in d.strategies" :key="s.key" class="wv num" :class="{ me: s.key === d.account.strategy }">
+                <template v-if="r.w[s.key] == null"><em>—</em></template>
+                <template v-else>{{ r.w[s.key].toFixed(1) }}%<small v-if="r.note[s.key]" :class="r.note[s.key].startsWith('趋势') ? 'z' : 'p'">{{ r.note[s.key].replace('趋势过滤 ', '') }}</small></template>
+              </span>
+            </div>
+          </div>
+        </div>
+        <div>
+          <!-- 我的位置：每个位置挂哪几只 -->
+          <div class="sec-t"><span>我的位置 · 每个位置买哪几只</span></div>
+          <div v-for="s in d.slots" :key="s.slot" class="card slot" :class="{ off: !s.on }">
+            <div class="s1"><b>{{ s.label }}</b>
+              <van-switch :model-value="s.on" size="20px" @update:model-value="v => op(s, { op: 'toggle', on: v })" /></div>
+            <template v-if="s.on">
+              <div v-for="f in s.funds" :key="f.code" class="fr">
+                <div class="fn"><div>{{ f.name }}</div><small>{{ f.code }}</small></div>
+                <span class="seg2 u"><button :class="{ on: f.unit === '股' }" @click="op(s, { op: 'unit', code: f.code, unit: '股' })">场内</button>
+                  <button :class="{ on: f.unit !== '股' }" @click="op(s, { op: 'unit', code: f.code, unit: '份额' })">场外</button></span>
+                <input v-if="s.funds.length > 1" class="sh num" type="number" :value="Math.round(f.share * 100)" @change="e => setShare(s, f, e.target.value)" /><span v-if="s.funds.length > 1" class="pc">%</span>
+                <van-icon name="cross" class="rm" @click="remove(s, f)" />
+              </div>
+              <div class="s3">
+                <a @click="openAdd(s)"><van-icon name="plus" /> 加一只</a>
+                <a @click="reset(s)">恢复默认</a>
+              </div>
+            </template>
+            <p v-else class="offt">关掉的位置不买；它的目标权重按同桶分给别的位置</p>
+          </div>
+          <p class="empty-tip">一个位置挂多只时按占比分钱（会自动归一）；场内按股一手 100 股，场外按金额申购</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 加一只基金 -->
+    <van-popup v-model:show="addShow" position="bottom" round closeable :style="{ height: '70vh' }">
+      <div class="pop">
+        <h4>给「{{ addSlot?.label }}」加一只</h4>
+        <van-search v-model="aq" placeholder="名称或 6 位代码" shape="round" />
+        <van-cell-group>
+          <van-cell v-for="r in aRows" :key="r.code" :title="r.name" :label="r.code + ' · ' + r.src" clickable @click="add(r)" />
+        </van-cell-group>
+      </div>
+    </van-popup>
+  </div>
+</template>
+<script setup>
+import { ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
+import { showConfirmDialog, showSuccessToast, showFailToast, showLoadingToast, closeToast } from 'vant'
+import { get, peek, post, dataVer } from '../api'
+import { money } from '../fmt'
+import SubBar from '../components/SubBar.vue'
+const aid = useRoute().params.aid
+const url = `/api/acct/${aid}/weights`
+const d = ref(peek(url) || null)
+const load = async (fresh = false) => { d.value = await get(url, { fresh }) }
+load(); watch(dataVer, () => load(true))
+const desc = { 'B-Con': '债为主、波动最小，回撤最浅', 'B-RP': '风险平价，股债商品更均衡', V3c: '资产最多元，收益和波动都高一点' }
+
+async function pick(s) {
+  if (s.key === d.value.account.strategy) return
+  showLoadingToast({ message: '算一下换过去要动多少…', forbidClick: true, duration: 0 })
+  let p
+  try { p = await get(`/api/acct/${aid}/switch-preview?to=${s.key}`, { fresh: true }) } catch (e) { closeToast(); return showFailToast(e.message) }
+  closeToast()
+  const lines = [`换过去这一轮要下 ${p.n} 笔（现在是 ${p.n_now} 笔）`, `卖出 ¥${money(p.sell, 0)} · 买入 ¥${money(p.buy, 0)}`]
+  if (p.liq.length) lines.push(`清仓：${p.liq.map(x => `${x.name} ¥${money(x.amount, 0)}`).join('、')}`)
+  if (p.zero.length) lines.push(`这些位置新策略不用，目标为 0：${p.zero.join('、')}`)
+  if (p.unplaced.length) lines.push(`新策略有、你没配位置的资产：${p.unplaced.map(x => `${x.name} ${x.w}% → ${x.to || '同桶分配'}`).join('、')}`)
+  try { await showConfirmDialog({ title: `改为跟随「${p.to_name}」？`, message: lines.join('\n'), messageAlign: 'left', confirmButtonText: '确认更换' }) } catch { return }
+  try { await post(`/api/acct/${aid}/strategy`, { to: s.key }); showSuccessToast('已更换'); load(true) } catch (e) { showFailToast(e.message) }
+}
+async function op(s, body) {
+  try { await post(`/api/acct/${aid}/holdings`, { slot: s.slot, ...body }); await load(true) } catch (e) { showFailToast(e.message) }
+}
+function setShare(s, f, v) {
+  const shares = Object.fromEntries(s.funds.map(x => [x.code, x.code === f.code ? Math.max(0, +v || 0) : Math.round(x.share * 100)]))
+  op(s, { op: 'shares', shares })
+}
+async function remove(s, f) {
+  try { await showConfirmDialog({ title: `从「${s.label}」拿掉？`, message: `${f.name}（${f.code}）\n已有的持仓和记录不受影响，只是之后调仓不再算它` }) } catch { return }
+  op(s, { op: 'remove', code: f.code })
+}
+async function reset(s) {
+  try { await showConfirmDialog({ title: `「${s.label}」恢复默认？`, message: '换回项目默认的那一只 ETF' }) } catch { return }
+  op(s, { op: 'reset' })
+}
+const addShow = ref(false), addSlot = ref(null), aq = ref(''), aRows = ref([])
+function openAdd(s) { addSlot.value = s; aq.value = ''; aRows.value = []; addShow.value = true }
+let t = null
+watch(aq, v => {
+  clearTimeout(t)
+  if (!v.trim()) { aRows.value = []; return }
+  t = setTimeout(async () => {
+    const r = (await get(`/api/market/fund-search?q=${encodeURIComponent(v.trim())}`)).rows
+    aRows.value = r.length || !/^\d{6}$/.test(v.trim()) ? r : [{ code: v.trim(), name: `代码 ${v.trim()}`, src: '直接加' }]
+  }, 300)
+})
+async function add(r) {
+  addShow.value = false
+  await op(addSlot.value, { op: 'add', code: r.code })
+  showSuccessToast(`已加 ${r.name}`)
+}
+</script>
+<style scoped>
+.stg{ display:grid; gap:8px; padding:0 12px; }
+.sc{ display:flex; gap:10px; align-items:flex-start; background:#fff; border-radius:14px; padding:12px 14px; cursor:pointer; border:1.5px solid transparent; }
+.sc.on{ border-color:var(--brand); background:var(--brand-soft); }
+.sc .van-icon{ font-size:20px; color:var(--muted); margin-top:1px; } .sc.on .van-icon{ color:var(--brand); }
+.sc b{ display:block; font-size:15px; } .sc small{ font-size:12px; color:var(--muted); }
+.wt{ padding:8px 12px; }
+.wh, .wr{ display:grid; grid-template-columns:1fr 62px 62px 62px; gap:4px; align-items:center; }
+.wh{ font-size:11.5px; color:var(--muted); padding:4px 0 8px; border-bottom:1px solid var(--line); text-align:right; }
+.wh span:first-child{ text-align:left; }
+.wr{ padding:8px 0; border-bottom:1px solid var(--line); } .wr:last-child{ border-bottom:0; }
+.wn b{ display:block; font-size:13.5px; font-weight:550; } .wn small{ font-size:11px; color:var(--muted); } .wn small.miss{ color:#B45309; }
+.wv{ text-align:right; font-size:13.5px; color:var(--sub); } .wv em{ font-style:normal; color:#CBD5E1; }
+.wv small{ display:block; font-size:10.5px; } .wv small.z{ color:#B45309; } .wv small.p{ color:var(--brand); }
+.me{ color:var(--brand) !important; font-weight:600; }
+.slot{ padding:12px 14px; } .slot.off{ opacity:.75; }
+.s1{ display:flex; justify-content:space-between; align-items:center; font-size:15px; }
+.fr{ display:flex; align-items:center; gap:8px; padding:9px 0; border-top:1px solid var(--line); margin-top:8px; }
+.fn{ flex:1; min-width:0; font-size:13.5px; } .fn div{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; } .fn small{ font-size:11.5px; color:var(--muted); }
+.u button{ padding:3px 8px; font-size:11.5px; }
+.sh{ width:40px; border:1px solid var(--line); border-radius:6px; padding:3px 4px; text-align:right; font-size:13px; }
+.pc{ font-size:12px; color:var(--muted); margin-left:-4px; }
+.rm{ color:var(--muted); font-size:16px; cursor:pointer; padding:4px; }
+.s3{ display:flex; gap:18px; font-size:13px; margin-top:6px; } .s3 a{ color:var(--brand); cursor:pointer; display:flex; align-items:center; gap:3px; }
+.s3 a:last-child{ color:var(--muted); margin-left:auto; }
+.offt{ font-size:12px; color:var(--muted); margin:8px 0 0; }
+.pop{ padding:18px 4px; } .pop h4{ margin:0 12px 6px; font-size:16px; }
+</style>

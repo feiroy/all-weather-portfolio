@@ -1,11 +1,10 @@
 <template>
-  <van-tabbar :model-value="active" fixed placeholder safe-area-inset-bottom>
-    <van-tabbar-item name="home" icon="balance-o" :to="`/a/${aid}`" replace>资产</van-tabbar-item>
-    <van-tabbar-item name="calc" icon="exchange" :to="`/a/${aid}/calc`" replace>调仓</van-tabbar-item>
-    <van-tabbar-item name="trades" icon="orders-o" :to="`/a/${aid}/trades`" replace>记录</van-tabbar-item>
-    <van-tabbar-item name="market" icon="chart-trending-o" :to="`/a/${aid}/market`" replace>市场</van-tabbar-item>
+  <!-- 手机底部导航；电脑上隐藏（顶部导航在 App.vue） -->
+  <van-tabbar :model-value="active" fixed placeholder safe-area-inset-bottom class="m-only">
+    <van-tabbar-item v-for="t in tabsOf(aid)" :key="t.k" :name="t.k" :icon="t.icon" :to="t.to" replace>{{ t.label }}</van-tabbar-item>
   </van-tabbar>
 </template>
 <script setup>
+import { tabsOf } from './tabs'
 defineProps({ aid: String, active: String })
 </script>

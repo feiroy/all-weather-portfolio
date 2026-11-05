@@ -1,4 +1,4 @@
-"""allweather/portfolio.py：H5 用的计算层。用主账户跑一遍，核对账目自洽（不依赖具体某天的数字）。"""
+"""allweather/portfolio.py：H5 和 Streamlit 共用的计算层。用主账户跑一遍，核对账目自洽（不依赖具体某天的数字）。"""
 import pandas as pd
 import pytest
 
@@ -43,3 +43,30 @@ def test_held_on_and_month_curve(P):
         assert abs(P.held_on(c, "2099-12-31") - sh) < 1e-6
     m = P.month_curve()
     assert len(m["dates"]) == len(m["ret"]) == len(m["money"]) and m["ret"][0] == 0
+
+
+def test_period_detail_matches_day(P):
+    """收益日历：某天各只基金的收益加起来 = 那天格子里的金额（同一次重放、同一口径）。"""
+    d = P.period()
+    for i, day in enumerate(d["dates"]):
+        if i == 0 or d["day"][i] is None or day not in d["detail"]:
+            continue
+        assert abs(sum(r[1] for r in d["detail"][day]) - d["day"][i]) < 0.05, day
+
+
+def test_plan_with_other_weights(P):
+    """换策略预览：传同一套位置权重 = 原计划；传全 0 = 只卖不买。"""
+    same = P._plan(P.slot_w)
+    assert abs(same["buy"] - P.plan["buy"]) < 1e-6 and abs(same["sell"] - P.plan["sell"]) < 1e-6
+    zero = P._plan({s: 0.0 for s in P.slot_w})
+    assert zero["buy"] == 0 and all(o["side"] == "卖出" for o in zero["orders"])
+    assert P.plan is not same           # 预览不改动账户自己的那份计划
+
+
+def test_streamlit_fields(P):
+    """Streamlit 版读的字段：时间加权净值、has_acct、by_code、stuck 的 slots。"""
+    assert "nav_twr" in P.daily.columns and P.plan["has_acct"] is True
+    assert set(P.plan["by_code"]) == {o["code"] for o in P.plan["orders"]}
+    st = P.status()
+    if st["kind"] == "stuck":
+        assert st["slots"]
