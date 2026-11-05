@@ -33,7 +33,7 @@
                   <div class="mh"><span>近一个月</span>
                     <b class="num" :class="toneD(last(d.month.ret))">{{ pct(last(d.month.ret)) }}</b>
                     <span class="num">{{ signed(last(d.month.money), 0) }} 元</span></div>
-                  <LineChart :dates="d.month.dates" :values="d.month.ret" :height="130" dark zero
+                  <LineChart :dates="d.month.dates" :values="d.month.ret" :height="130" dark zero :zoom="false"
                              :fmt-tip="i => `${d.month.dates[i]}<br/><b>${pct(d.month.ret[i])}</b>　${signed(d.month.money[i], 0)} 元`" />
                 </div>
               </div>

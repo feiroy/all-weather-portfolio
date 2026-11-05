@@ -4,9 +4,9 @@
 import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import * as echarts from 'echarts/core'
 import { LineChart } from 'echarts/charts'
-import { GridComponent, TooltipComponent, LegendComponent, MarkLineComponent } from 'echarts/components'
+import { GridComponent, TooltipComponent, LegendComponent, MarkLineComponent, DataZoomComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
-echarts.use([LineChart, GridComponent, TooltipComponent, LegendComponent, MarkLineComponent, CanvasRenderer])
+echarts.use([LineChart, GridComponent, TooltipComponent, LegendComponent, MarkLineComponent, DataZoomComponent, CanvasRenderer])
 
 const props = defineProps({
   series: Object,            // { 名字: { dates:[], ret:[] } }
@@ -36,7 +36,12 @@ function option() {
   return {
     animation: false,
     legend: { top: 0, left: 0, itemWidth: 14, itemHeight: 3, icon: 'rect', textStyle: { fontSize: 11, color: '#4B5563' } },
-    grid: { left: 46, right: 10, top: names.length > 3 ? 48 : 30, bottom: 24 },
+    grid: { left: 46, right: 10, top: names.length > 3 ? 48 : 30, bottom: 46 },
+    dataZoom: [
+      { type: 'inside', xAxisIndex: 0, zoomOnMouseWheel: true, moveOnMouseMove: true, moveOnMouseWheel: false },
+      { type: 'slider', xAxisIndex: 0, height: 16, bottom: 6, borderColor: 'transparent',
+        backgroundColor: '#F1F2F4', fillerColor: 'rgba(30,64,175,.10)', handleSize: 0, showDetail: false, brushSelect: false },
+    ],
     tooltip: {
       trigger: 'axis', confine: true, backgroundColor: 'rgba(17,24,39,.9)', borderWidth: 0, textStyle: { color: '#fff', fontSize: 12 },
       valueFormatter: v => v == null ? '—' : `${v >= 0 ? '+' : ''}${(+v).toFixed(2)}${props.unit}`,

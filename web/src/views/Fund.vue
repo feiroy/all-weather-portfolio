@@ -25,9 +25,12 @@
           <van-tabs v-model:active="range" type="card" shrink class="rtabs">
             <van-tab v-for="r in ranges" :key="r.k" :title="r.k" :name="r.k" />
           </van-tabs>
-          <LineChart :dates="seg.dates" :values="seg.values" :height="220" unit="" :marks="segMarks"
-                     :fmt-tip="i => `${seg.dates[i]}<br/>净值 <b>${seg.values[i].toFixed(4)}</b>`" />
-          <div class="legend"><span><i class="b">B</i>买入</span><span><i class="s">S</i>卖出</span>手指按住图看每天的净值</div>
+          <div class="chips rr"><span class="seg2"><button v-for="p in periods" :key="p" :class="{ on: period === p }" @click="period = p">{{ p }}</button></span>
+            <span class="hint">拖动平移 · 滚轮缩放 · 双击复位</span></div>
+          <LineChart :dates="chart.dates" :values="chart.values" :labels="chart.labels" :height="220" unit="" :marks="segMarks"
+                     :reset-key="range + period"
+                     :fmt-tip="i => `${chart.dates[i].replace(/-/g, '/')}<br/>净值 <b>${chart.values[i].toFixed(4)}</b>`" />
+          <div class="legend"><span><i class="b">B</i>买入</span><span><i class="s">S</i>卖出</span>月/年线的买卖点落在该期最后一条记录</div>
         </div>
 
         <div class="sec-t"><span>它的成交 · {{ d.trades.length }} 笔</span></div>
@@ -57,6 +60,7 @@ import { showFailToast } from 'vant'
 import { get, peek } from '../api'
 import { money, signed, pct, tone } from '../fmt'
 import LineChart from '../components/LineChart.vue'
+import { aggregate } from '../utils/series'
 
 const route = useRoute(), router = useRouter()
 const aid = route.params.aid, code = route.params.code
@@ -79,12 +83,15 @@ const seg = computed(() => {
   return { dates: n.dates.slice(i), values: n.values.slice(i) }
 })
 const rangeRet = computed(() => { const v = seg.value.values; return v.length > 1 ? (v[v.length - 1] / v[0] - 1) * 100 : null })
+const periods = ['日线', '月线', '年线'], period = ref('日线')
+const chart = computed(() => aggregate(seg.value.dates, seg.value.values,
+  period.value === '日线' ? '日' : period.value === '月线' ? '月' : '年'))
 const segMarks = computed(() => {
-  const s = seg.value
+  const s = chart.value
   if (!d.value || !s.dates.length) return []
   return d.value.trades.filter(t => t.date >= s.dates[0]).map(t => {
     const i = s.dates.findIndex(x => x >= t.date)
-    return i < 0 ? null : { date: s.dates[i], value: s.values[i], side: t.side }
+    return i < 0 ? null : { date: s.labels[i] || s.dates[i], value: s.values[i], side: t.side }
   }).filter(Boolean)
 })
 </script>
@@ -98,6 +105,8 @@ const segMarks = computed(() => {
 .rg{ font-size:14px; font-weight:600; }
 .rtabs{ margin:10px -4px 4px; }
 .rtabs :deep(.van-tabs__nav--card){ margin:0; border-radius:8px; overflow:hidden; }
+.rr{ padding:0 4px 4px; align-items:center; gap:10px; }
+.rr .hint{ font-size:11.5px; color:var(--muted); }
 .legend{ display:flex; gap:12px; font-size:11.5px; color:var(--muted); margin-top:4px; }
 .legend i{ display:inline-block; width:14px; height:14px; border-radius:7px; color:#fff; font-style:normal; font-size:9px; text-align:center; line-height:14px; margin-right:3px; }
 .legend i.b{ background:#E23B3B } .legend i.s{ background:#16A34A }

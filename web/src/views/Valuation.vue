@@ -35,7 +35,7 @@
         </div>
         <span class="seg2"><button :class="{ on: hk === 'pe' }" @click="hk = 'pe'">PE 历史</button><button :class="{ on: hk === 'pb' }" @click="hk = 'pb'">PB 历史</button></span>
         <van-loading v-if="!hist" style="margin:30px 0" />
-        <LineChart v-else-if="histSeg.dates.length" :dates="histSeg.dates" :values="histSeg.values" :height="220" unit=""
+        <LineChart v-else-if="histSeg.dates.length" :dates="histSeg.dates" :values="histSeg.values" :height="220" unit="" :zoom="false"
                    :fmt-tip="i => `${histSeg.dates[i]}<br/>${hk.toUpperCase()} <b>${histSeg.values[i]}</b>`" />
         <p v-else class="empty-tip">没有{{ hk.toUpperCase() }}历史</p>
       </div>

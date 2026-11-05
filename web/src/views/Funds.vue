@@ -32,8 +32,8 @@
             <div class="chips rr">
               <span v-for="r in defRanges" :key="r.k" class="chip" :class="{ on: defRange === r.k }" @click="defRange = r.k">{{ r.k }} {{ defRet(r.m) }}</span>
             </div>
-            <LineChart :dates="defSeg.dates" :values="defSeg.values" :height="170" unit=""
-                       :fmt-tip="i => `${defSeg.dates[i]}<br/>净值 <b>${defSeg.values[i]?.toFixed(4)}</b>`" />
+            <LineChart :dates="defSeg.dates" :values="defSeg.values" :height="170" unit="" :zoom="false"
+                       :fmt-tip="i => `${defSeg.dates[i].replace(/-/g, '/')}<br/>净值 <b>${defSeg.values[i]?.toFixed(4)}</b>`" />
             <router-link class="goto" :to="`/a/${aid}/market/fund/${defCode}`">查看完整走势 <van-icon name="arrow" /></router-link>
           </div>
           <template v-if="recent.length">
