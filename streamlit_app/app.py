@@ -507,19 +507,20 @@ div[data-testid="stAlert"] p{ color:var(--brand-strong); }
 .st-key-subhead [data-testid="stPageLink"] a p{ color:var(--brand) !important; font-size:14px !important; }
 .subhead-t{ font-size:17px; font-weight:700; color:var(--ink); }
 /* 市场入口页：四行大入口 */
-[class*="st-key-mk_"]{ border-radius:14px !important; border-left:3px solid var(--mk) !important;
+[class*="st-key-mk_"]{ border-radius:14px !important; border-left:1px solid var(--line) !important;
   padding:10px 14px !important; }
-/* 四个入口各一种颜色：避开红绿（那是涨跌的语义色） */
-.st-key-mk_funds{ --mk:#1D4ED8; }
-.st-key-mk_signals{ --mk:#B45309; }
-.st-key-mk_backtest{ --mk:#7C3AED; }
-.st-key-mk_valuation{ --mk:#0E7490; }
+/* 四个入口只在图标底色上留一点区分，其余统一黑白灰：名称/说明/图标/边框全上色太花 */
+.st-key-mk_funds{ --mk-bg:#EEF2FF; }
+.st-key-mk_signals{ --mk-bg:#FEF3C7; }
+.st-key-mk_backtest{ --mk-bg:#F3E8FF; }
+.st-key-mk_valuation{ --mk-bg:#CFFAFE; }
 [class*="st-key-mk_"] [data-testid="stPageLink"]{ flex:0 0 auto !important; width:auto !important; }
 [class*="st-key-mk_"] [data-testid="stPageLink"] a{ padding:0 !important; background:transparent !important; }
-[class*="st-key-mk_"] [data-testid="stPageLink"] a p{ font-size:15px !important; font-weight:650; color:var(--mk) !important; }
-[class*="st-key-mk_"] [data-testid="stIconMaterial"]{ color:var(--mk) !important; }
+[class*="st-key-mk_"] [data-testid="stPageLink"] a p{ font-size:15px !important; font-weight:650; color:var(--ink) !important; }
+[class*="st-key-mk_"] [data-testid="stIconMaterial"]{ color:var(--sub) !important;
+  background:var(--mk-bg); border-radius:7px; padding:4px; }
 /* 说明紧跟名称，不另起一行 */
-.mk-d{ font-size:12.5px; color:var(--mk); opacity:.78; white-space:nowrap;
+.mk-d{ font-size:12.5px; color:var(--muted); white-space:nowrap;
   overflow:hidden; text-overflow:ellipsis; }
 @media(max-width:700px){
   /* 窄屏也保持「名称 · 说明」同一行：说明占剩余宽度，放不下就省略，不再整行掉到名称下面 */
