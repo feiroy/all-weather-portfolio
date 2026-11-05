@@ -40,7 +40,7 @@
               <template v-if="mode === '日'">
                 <div class="wk"><span v-for="w in '一二三四五六日'" :key="w">{{ w }}</span></div>
                 <div class="grid7">
-                  <div v-for="(c, k) in dayCells" :key="k" class="cell" :class="[c && c.v != null ? (c.v > 0 ? 'pos' : c.v < 0 ? 'neg' : '') : '', { sel: c && c.date === sel, empty: !c }]"
+                  <div v-for="(c, k) in dayCells" :key="k" class="cell" :class="[c ? (c.v == null ? 'none' : c.v > 0 ? 'pos' : c.v < 0 ? 'neg' : '') : '', { sel: c && c.date === sel, empty: !c }]"
                        @click="c && c.v != null && (sel = c.date)">
                     <template v-if="c"><span class="dd">{{ c.d }}</span><span class="dv num">{{ c.v == null ? '' : cu === '¥' ? short(c.v) : pctS(c.p) }}</span></template>
                   </div>
@@ -195,6 +195,8 @@ void money
 .cell{ border-radius:8px; background:#F7F8FA; min-height:46px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; cursor:pointer; border:1.5px solid transparent; }
 .cell.big{ min-height:58px; }
 .cell.empty{ background:transparent; cursor:default; }
+/* 有日期但那天没有净值：压淡底色，别让空格子铺满后抢走有收益那几天的注意力 */
+.cell.none{ background:#FCFCFD; }
 .cell.pos{ background:#FDECEC; } .cell.pos .dv{ color:var(--up); }
 .cell.neg{ background:#E7F6EC; } .cell.neg .dv{ color:var(--down); }
 .cell.sel{ border-color:var(--brand); }
@@ -210,8 +212,15 @@ void money
 .trend-div{ height:1px; background:var(--line); margin:16px 0 14px; }
 .cal-tip{ font-size:11.5px; color:var(--muted); text-align:center; line-height:1.6; margin:12px 0 0; }
 @media (min-width:900px){
-  .cal-inner{ max-width:520px; margin:0 auto; background:#F8FAFC; border:1px solid var(--line);
-    border-radius:12px; padding:14px 18px 16px; }
+  /* 日历铺满整张卡；格子变宽后同步加高、放大字号，避免变成一排扁横条 */
+  .cal-inner{ max-width:none; margin:0; background:transparent; border:0; padding:0; }
   .cal .sumline{ justify-content:center; }
+  .cal .wk{ font-size:12px; margin:10px 0 6px; }
+  .cal .grid7{ gap:8px; }
+  .cal .grid3{ gap:10px; }
+  .cal .cell{ min-height:78px; border-radius:10px; gap:6px; }
+  .cal .cell.big{ min-height:88px; }
+  .cal .dd{ font-size:13px; } .cal .dv{ font-size:14px; }
+  .cal .cell.big .dd{ font-size:14px; } .cal .cell.big .dv{ font-size:16px; }
 }
 </style>
