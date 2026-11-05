@@ -38,19 +38,40 @@
               {{ mode === '日' ? '本月' : '本年' }}收益 <b class="num" :class="tone(curSum.v)">{{ signed(curSum.v) }}</b>
               <b class="num" :class="tone(curSum.p)">{{ pct(curSum.p) }}</b>
             </div>
-            <template v-if="mode === '日'">
-              <div class="wk"><span v-for="w in '一二三四五六日'" :key="w">{{ w }}</span></div>
-              <div class="grid7">
-                <div v-for="(c, k) in dayCells" :key="k" class="cell" :class="[c && c.v != null ? (c.v > 0 ? 'pos' : c.v < 0 ? 'neg' : '') : '', { sel: c && c.date === sel, empty: !c }]"
-                     @click="c && c.v != null && (sel = c.date)">
-                  <template v-if="c"><span class="dd">{{ c.d }}</span><span class="dv num">{{ c.v == null ? '' : cu === '¥' ? short(c.v) : pctS(c.p) }}</span></template>
+            <div class="cal-body" :class="{ 'with-side': mode === '日' }">
+              <!-- 桌面：左侧填本月涨跌天数，避免日历缩在 460px 中间、两边大片留白 -->
+              <div class="cal-side" v-if="mode === '日'">
+                <div class="sh">本月交易日</div>
+                <div class="srow"><span>上涨</span><b class="num up">{{ dayStat.up }} 天</b></div>
+                <div class="srow"><span>下跌</span><b class="num down">{{ dayStat.down }} 天</b></div>
+                <div class="srow"><span>持平</span><b class="num">{{ dayStat.flat }} 天</b></div>
+                <div class="sbar"><i class="u" :style="{ width: dayStat.upPct + '%' }"></i><i class="d" :style="{ width: dayStat.downPct + '%' }"></i></div>
+                <p class="sn">按账户口径的每日涨跌，不是单只基金</p>
+              </div>
+              <div class="cal-mid">
+                <template v-if="mode === '日'">
+                  <div class="wk"><span v-for="w in '一二三四五六日'" :key="w">{{ w }}</span></div>
+                  <div class="grid7">
+                    <div v-for="(c, k) in dayCells" :key="k" class="cell" :class="[c && c.v != null ? (c.v > 0 ? 'pos' : c.v < 0 ? 'neg' : '') : '', { sel: c && c.date === sel, empty: !c }]"
+                         @click="c && c.v != null && (sel = c.date)">
+                      <template v-if="c"><span class="dd">{{ c.d }}</span><span class="dv num">{{ c.v == null ? '' : cu === '¥' ? short(c.v) : pctS(c.p) }}</span></template>
+                    </div>
+                  </div>
+                </template>
+                <div v-else class="grid3">
+                  <div v-for="c in periodCells" :key="c.key" class="cell big" :class="c.v == null ? 'empty' : c.v > 0 ? 'pos' : c.v < 0 ? 'neg' : ''"
+                       @click="c.v != null && drill(c)">
+                    <span class="dd">{{ c.label }}</span><span class="dv num">{{ c.v == null ? '—' : cu === '¥' ? signed(c.v, 0) : pct(c.p) }}</span>
+                  </div>
                 </div>
               </div>
-            </template>
-            <div v-else class="grid3">
-              <div v-for="c in periodCells" :key="c.key" class="cell big" :class="c.v == null ? 'empty' : c.v > 0 ? 'pos' : c.v < 0 ? 'neg' : ''"
-                   @click="c.v != null && drill(c)">
-                <span class="dd">{{ c.label }}</span><span class="dv num">{{ c.v == null ? '—' : cu === '¥' ? signed(c.v, 0) : pct(c.p) }}</span>
+              <!-- 桌面：右侧填单日极值，同时告诉用户点格子能看明细 -->
+              <div class="cal-side" v-if="mode === '日'">
+                <div class="sh">单日波动</div>
+                <div class="srow"><span>最好</span><b class="num" :class="tone(dayStat.best?.p)">{{ dayStat.best ? pctS(dayStat.best.p) : '—' }}</b></div>
+                <div class="srow"><span>最差</span><b class="num" :class="tone(dayStat.worst?.p)">{{ dayStat.worst ? pctS(dayStat.worst.p) : '—' }}</b></div>
+                <div class="srow"><span>最好那天</span><b class="num">{{ dayStat.best?.date?.slice(5).replace('-', '/') || '—' }}</b></div>
+                <p class="sn">点日历里任意一天，下面展开每只基金各赚多少</p>
               </div>
             </div>
           </div>
@@ -156,6 +177,18 @@ const periodCells = computed(() => {
   return ys.map(y => ({ key: y, label: `${y}年`, y, ...periodStat(String(y)) }))
 })
 const curSum = computed(() => periodStat(mode.value === '日' ? `${cur.value.y}-${pad(cur.value.m)}` : String(cur.value.y)))
+// 日历两侧的月度概览：涨跌天数 + 单日极值（只统计有数据的交易日）
+const dayStat = computed(() => {
+  const cs = dayCells.value.filter(c => c && c.v != null)
+  const up = cs.filter(c => c.v > 0), down = cs.filter(c => c.v < 0)
+  const ext = (cmp, init) => cs.reduce((m, c) => m == null || cmp(c.p ?? 0, m.p ?? 0) ? c : m, init)
+  return {
+    up: up.length, down: down.length, flat: cs.length - up.length - down.length,
+    upPct: cs.length ? up.length / cs.length * 100 : 0,
+    downPct: cs.length ? down.length / cs.length * 100 : 0,
+    best: ext((a, b) => a > b, null), worst: ext((a, b) => a < b, null),
+  }
+})
 const months = computed(() => [...new Set(d.value.dates.map(v => v.slice(0, 7)))])
 function canStep(k) {
   const { y, m } = cur.value
@@ -185,9 +218,6 @@ void money
 .cal .ch{ flex-wrap:wrap; row-gap:8px; }
 /* 窄屏（≤400）：月份切换单独占一行居中，两个切换按钮在下一行左右排 */
 @media (max-width:400px){ .cal .ch .nav{ order:-1; flex-basis:100%; justify-content:center; } }
-.cal .ch{ flex-wrap:wrap; row-gap:8px; }
-/* 窄屏（≤400）：月份切换单独占一行居中，两个切换按钮在下一行左右排 */
-@media (max-width:400px){ .cal .ch .nav{ order:-1; flex-basis:100%; justify-content:center; } }
 .nav .van-icon{ cursor:pointer; padding:4px; } .nav .dis{ opacity:.25; cursor:default; }
 .sumline{ font-size:12.5px; color:var(--sub); margin:10px 0 4px; display:flex; gap:10px; align-items:baseline; }
 .sumline b{ font-size:14px; }
@@ -208,8 +238,19 @@ void money
 .dn{ min-width:0; font-size:14px; } .dn small{ display:flex; gap:4px; align-items:center; font-size:11.5px; color:var(--muted); margin-top:2px; }
 .dv2{ text-align:right; } .dv2 b{ display:block; font-size:14.5px; } .dv2 small{ font-size:12px; }
 
+/* 桌面：日历卡外框与上方曲线卡同宽（936），两侧留白用月度概览填上，不再让日历孤零零居中 */
+.cal-side{ display:none; }
 @media (min-width:900px){
-  /* 卡片外框与上方曲线卡同宽；只把日历网格本身收窄居中，格子才不会被拉散 */
-  .cal .ch, .cal .sumline, .cal .wk, .cal .grid7, .cal .grid3{ max-width:460px; margin-left:auto; margin-right:auto; }
+  .cal .sumline{ justify-content:center; }
+  .cal-body.with-side{ display:grid; grid-template-columns:1fr 460px 1fr; gap:16px; align-items:start; }
+  .cal-body:not(.with-side){ max-width:460px; margin:0 auto; }
+  .cal-side{ display:block; background:#F8FAFC; border-radius:10px; padding:12px 14px; }
+  .cal-side .sh{ font-size:12px; color:var(--muted); margin-bottom:8px; }
+  .cal-side .srow{ display:flex; justify-content:space-between; align-items:baseline; padding:5px 0; font-size:12.5px; color:var(--sub); }
+  .cal-side .srow b{ font-size:15px; }
+  .cal-side .sbar{ display:flex; height:6px; border-radius:3px; overflow:hidden; background:#E9EBEF; margin-top:10px; }
+  .cal-side .sbar i{ display:block; height:100%; }
+  .cal-side .sbar .u{ background:var(--up); } .cal-side .sbar .d{ background:var(--down); }
+  .cal-side .sn{ font-size:11px; color:var(--muted); line-height:1.6; margin:10px 0 0; }
 }
 </style>
