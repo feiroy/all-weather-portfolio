@@ -45,9 +45,10 @@ watch(() => [props.aid, dataVer.value], async () => {
   padding-left:14px; border-left:1px solid var(--line); }
 .acct:hover{ color:var(--brand); }
 .acct .van-icon{ color:var(--muted); font-size:12px; }
-.second{ height:42px; display:flex; align-items:stretch; gap:4px; border-top:1px solid var(--line); }
-.second a{ display:flex; align-items:center; gap:6px; padding:0 18px; font-size:14px; color:var(--sub);
-  text-decoration:none; border-bottom:2px solid transparent; }
+.second{ height:42px; display:flex; align-items:stretch; justify-content:center; gap:4px;
+  border-top:1px solid var(--line); max-width:960px; }
+.second a{ display:flex; align-items:center; justify-content:center; gap:6px; min-width:116px;
+  padding:0 14px; font-size:14px; color:var(--sub); text-decoration:none; border-bottom:2px solid transparent; }
 .second a:hover{ color:var(--brand); }
 .second a.on{ color:var(--brand); border-bottom-color:var(--brand); font-weight:600; }
 </style>

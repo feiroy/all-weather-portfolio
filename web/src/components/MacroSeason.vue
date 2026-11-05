@@ -28,8 +28,9 @@ const short = { 复苏: '复', 过热: '过', 滞胀: '滞', 衰退: '衰' }
 .mm-k{ font-size:12px; color:var(--muted); white-space:nowrap; }
 .macro-mini b{ font-size:14px; font-weight:600; white-space:nowrap; }
 .mm-ax{ font-size:12px; color:var(--sub); white-space:nowrap; }
-.mm-a{ font-size:12px; color:var(--muted); margin-left:auto; white-space:nowrap;
+.mm-a{ font-size:12px; color:var(--muted); margin-left:auto; min-width:0; white-space:nowrap;
   overflow:hidden; text-overflow:ellipsis; }
+@media (min-width:900px){ .sb-quad{ margin-left:14px; } }
 .sb-quad{ display:grid; grid-template-columns:repeat(2,17px); grid-template-rows:repeat(2,17px);
   gap:2px; flex:0 0 auto; }
 .sb-quad i{ display:grid; place-items:center; font-size:10px; font-style:normal; border-radius:3px;
