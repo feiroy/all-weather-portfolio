@@ -81,15 +81,16 @@ def compute_signal_states(prices):
 
 
 # 宏观季节（增长 × 通胀 四象限）：纯展示，不参与目标权重；两端共用这一份判断
+# 顺序按 2×2 的阅读顺序：上排增长↑（通胀↓→↑），下排增长↓（通胀↓→↑）
 MACRO_QUADRANTS = [
     {"label": "复苏", "sub": "增长↑ 通胀↓", "growth": True, "inflation": False,
      "color": "#16703B", "assets": "沪深300 · 标普500"},
     {"label": "过热", "sub": "增长↑ 通胀↑", "growth": True, "inflation": True,
      "color": "#C52828", "assets": "黄金 · 有色金属"},
-    {"label": "滞胀", "sub": "增长↓ 通胀↑", "growth": False, "inflation": True,
-     "color": "#B45309", "assets": "黄金（避险）"},
     {"label": "衰退", "sub": "增长↓ 通胀↓", "growth": False, "inflation": False,
      "color": "#1E40AF", "assets": "10Y国债 · 30Y国债"},
+    {"label": "滞胀", "sub": "增长↓ 通胀↑", "growth": False, "inflation": True,
+     "color": "#B45309", "assets": "黄金（避险）"},
 ]
 
 

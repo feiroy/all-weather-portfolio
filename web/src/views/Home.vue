@@ -13,7 +13,9 @@
         </div>
         <van-skeleton v-if="!d" title :row="8" style="padding:20px 16px" />
         <template v-else>
-          <div class="cols">
+          <!-- 宏观季节横幅：蓝色头卡上方通栏，一眼看到当前大环境 -->
+        <MacroSeason />
+        <div class="cols">
             <div class="col">
               <!-- 资产卡 -->
               <div class="hero">
@@ -37,8 +39,6 @@
                              :fmt-tip="i => `${d.month.dates[i]}<br/><b>${pct(d.month.ret[i])}</b>　${signed(d.month.money[i], 0)} 元`" />
                 </div>
               </div>
-              <!-- 宏观季节：头卡正下方，一眼能看到当前大环境 -->
-              <MacroSeason />
               <!-- 快捷入口：收益 / 对比 / 体检 / 选基 -->
               <div class="quick">
                 <router-link v-for="q in quick" :key="q.to" :to="`/a/${aid}/${q.to}`">

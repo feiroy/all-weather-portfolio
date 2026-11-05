@@ -668,28 +668,27 @@ div[data-testid="stAlert"] p{ color:var(--brand-strong); }
 .st-key-trend_mode_switch button[aria-checked="true"],.st-key-rb_mode_switch button[aria-checked="true"]{background:var(--card) !important;
   box-shadow:0 1px 2px rgba(15,23,42,.08)}
 .st-key-trend_mode_switch button[aria-checked="true"] p,.st-key-rb_mode_switch button[aria-checked="true"] p{color:var(--brand) !important;font-weight:600}
-/* 资产页头卡下的宏观季节条：一行紧凑，点「四个象限」才展开 */
-.st-key-macro_row{ margin:10px 0 4px; }
-.macro-bar{ display:flex; align-items:center; gap:10px; min-width:0; flex:1;
-  background:var(--card); border:1px solid var(--line); border-radius:14px; padding:9px 14px; }
-.macro-ic{ width:32px; height:32px; border-radius:9px; display:inline-flex; align-items:center;
-  justify-content:center; flex:0 0 auto; }
-.macro-ic svg{ width:18px; height:18px; }
-.macro-t{ font-size:12.5px; color:var(--muted); white-space:nowrap; }
-.macro-cur{ font-size:17px; font-weight:700; white-space:nowrap; }
-.macro-axis{ font-size:12.5px; color:var(--sub); white-space:nowrap; }
-.macro-a{ font-size:12.5px; color:var(--muted); margin-left:auto; white-space:nowrap;
+/* 宏观季节横幅：蓝色头卡上方，通栏淡色底 + 左侧色条 + 右侧微缩四象限 */
+.season-banner{ display:flex; align-items:center; gap:14px; padding:10px 16px; margin:0 0 12px;
+  background:var(--sbg); border-left:4px solid var(--sc); border-radius:12px; min-width:0; }
+.sb-mark{ width:36px; height:36px; border-radius:10px; background:var(--sc); color:#fff;
+  display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; }
+.sb-mark svg{ width:21px; height:21px; }
+.sb-txt{ display:flex; align-items:baseline; gap:10px; min-width:0; flex:1; flex-wrap:wrap; }
+.sb-k{ font-size:12px; color:var(--sub); }
+.sb-txt b{ font-size:19px; font-weight:700; color:var(--sc); letter-spacing:-.3px; }
+.sb-ax{ font-size:12.5px; color:var(--sub); white-space:nowrap; }
+.sb-a{ font-size:12.5px; color:var(--muted); margin-left:auto; white-space:nowrap;
   overflow:hidden; text-overflow:ellipsis; }
-.macro-grid{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
-.macro-q{ border:1px solid var(--line); border-radius:10px; padding:10px; background:var(--card);
-  display:flex; flex-direction:column; gap:3px; }
-.macro-q.on{ border:2px solid var(--q); background:#F8FAFC; }
-.macro-q b{ font-size:14px; color:var(--q); } .macro-q small{ font-size:11.5px; color:var(--muted); }
-.macro-q span{ font-size:12px; color:var(--sub); }
+.sb-quad{ display:grid; grid-template-columns:repeat(2,20px); grid-template-rows:repeat(2,20px);
+  gap:3px; flex:0 0 auto; }
+.sb-quad i{ display:grid; place-items:center; font-size:11px; font-style:normal; border-radius:4px;
+  background:#fff; color:#94A3B8; border:1px solid #E2E8F0; }
+.sb-quad i.on{ background:var(--qi); border-color:var(--qi); color:#fff; font-weight:650; }
 @media(max-width:700px){
-  .macro-bar{ flex-wrap:wrap; gap:6px 10px; }
-  .macro-a{ margin-left:0; width:100%; }
-  .macro-grid{ grid-template-columns:1fr; }
+  .season-banner{ gap:10px; padding:9px 12px; }
+  .sb-a{ margin-left:0; width:100%; }
+  .sb-quad{ grid-template-columns:repeat(2,18px); grid-template-rows:repeat(2,18px); }
 }
 /* 入口页账户卡：进入下面的「改名 / 删除」，弱化成一个小操作行 */
 [class*="st-key-lc_ops_"] { margin-top:6px !important; }
@@ -5418,6 +5417,22 @@ def _pg_assets() -> None:
     # 标题和一大段「一页四看」说明撤掉：头卡自己就说明了这是哪儿，
     # 四个子页签各管什么写在切换器的悬停提示里，不用每次进来都读一遍
 
+    # ---- 宏观季节横幅：放在蓝色头卡上方，通栏、带色、一眼看到当前大环境 ----
+    _ms = macro_season(prices, signals)
+    _q = {(True, False): "复", (True, True): "过", (False, False): "衰", (False, True): "滞"}
+    _mini = "".join(
+        f'<i class="{"on" if (q["growth"], q["inflation"]) == (_ms["growth"], _ms["inflation"]) else ""}" '
+        f'style="--qi:{q["color"]}" title="{q["label"]} · {q["sub"]} · {q["assets"]}">'
+        f'{_q[(q["growth"], q["inflation"])]}</i>'
+        for q in _ms["quadrants"])
+    st.markdown(
+        f'<div class="season-banner" style="--sc:{_ms["color"]};--sbg:{_ms["color"]}12">'
+        f'<span class="sb-mark">{_QUAD_ICONS[_ms["current"]]}</span>'
+        '<span class="sb-txt"><span class="sb-k">宏观季节</span>'
+        f'<b>{_ms["current"]}</b><span class="sb-ax">{_ms["axis"]}</span>'
+        f'<span class="sb-a">对应 {_ms["assets"]}</span></span>'
+        f'<span class="sb-quad">{_mini}</span></div>', unsafe_allow_html=True)
+
     # ---- 头卡：全站唯一一处「总金额 / 今日 / 持有收益」----
     _tot = _plan["total"]
     # 只数「账上有份额」的：表头那句「16 只基金」和下面列表的「共 N 只」得是同一个数，
@@ -5454,27 +5469,6 @@ def _pg_assets() -> None:
         '</div>'),
         unsafe_allow_html=True,
     )
-
-    # ---- 头卡正下方：宏观季节（大环境背景，一眼能看见；点开才展开四象限）----
-    _ms = macro_season(prices, signals)
-    with st.container(key="macro_row", horizontal=True, vertical_alignment="center", gap="small"):
-        st.markdown(
-            '<div class="macro-bar">'
-            f'<span class="macro-ic" style="color:{_ms["color"]};background:{_ms["color"]}1A">'
-            f'{_QUAD_ICONS[_ms["current"]]}</span>'
-            '<span class="macro-t">宏观季节</span>'
-            f'<b class="macro-cur" style="color:{_ms["color"]}">{_ms["current"]}</b>'
-            f'<span class="macro-axis">{_ms["axis"]}</span>'
-            f'<span class="macro-a">对应 {_ms["assets"]}</span>'
-            '</div>', unsafe_allow_html=True, width="stretch")
-        with st.popover("四个象限", icon=":material/grid_view:", key="macro_quads"):
-            _cells = "".join(
-                f'<div class="macro-q{" on" if q["label"] == _ms["current"] else ""}" '
-                f'style="--q:{q["color"]}"><b>{q["label"]}</b><small>{q["sub"]}</small>'
-                f'<span>{q["assets"]}</span></div>' for q in _ms["quadrants"])
-            st.markdown(f'<div class="macro-grid">{_cells}</div>', unsafe_allow_html=True)
-            st.caption("增长看沪深300 是否站上 120 日均线，通胀看黄金是否站上 75 日均线。"
-                       "这是调仓前的宏观背景；具体买卖仍看「调仓」页的清单。")
 
     # ---- 头卡下面一行结论：这一轮要不要动手 ----
     # 只说「有没有事、去哪看」，一个金额都不报 —— 该买该卖多少只存在「调仓」一处，
