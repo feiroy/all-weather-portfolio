@@ -511,8 +511,7 @@ async def signals(request: Request):
                 curves[STRAT_NAME[k]] = {"dates": [f"{d:%Y-%m-%d}" for d in s.index],
                                          "ret": [round((float(v) / float(s.iloc[0]) - 1) * 100, 4) for v in s]}
     return J({"rows": rows, "strategies": [{"key": k, "name": STRAT_NAME[k]} for k in KEYS], "curves": curves,
-              "asof": f"{prices.index[-1]:%Y-%m-%d}", "hs300_dd": _r(sg.get("hs300_dd_pct", 0) * 100),
-              "gold_dd": _r(sg.get("gold_dd_pct", 0) * 100), "pb": _r(sg.get("pb_pctile")), "pe": _r(sg.get("pe_pctile"))})
+              "asof": f"{prices.index[-1]:%Y-%m-%d}"})
 
 
 async def backtest(request: Request):

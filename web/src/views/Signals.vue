@@ -19,10 +19,6 @@
               </div>
             </div>
           </div>
-          <div class="card stat" v-if="d.pe != null || d.pb != null">
-            <div><span>沪深300 PE 分位</span><b class="num">{{ d.pe }}%</b></div>
-            <div><span>沪深300 PB 分位</span><b class="num">{{ d.pb }}%</b></div>
-          </div>
         </div>
         <div class="card">
           <div class="ct"><b>三个策略 · 近半年</b><span class="k">回测净值，含趋势过滤</span></div>
@@ -62,6 +58,4 @@ load(); watch(dataVer, () => load(true))
 .mn i.on{ background:#F59E0B; } .mn i.off{ background:#CBD5E1; }
 .mn b{ display:block; font-size:13.5px; font-weight:550; } .mn small{ font-size:11.5px; color:var(--muted); }
 .mc{ text-align:center; } .mc em{ font-style:normal; font-size:11.5px; color:#CBD5E1; }
-.stat{ display:grid; grid-template-columns:1fr 1fr; text-align:center; }
-.stat span{ display:block; font-size:12px; color:var(--muted); } .stat b{ display:block; font-size:18px; margin-top:4px; }
 </style>

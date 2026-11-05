@@ -19,7 +19,6 @@ from pathlib import Path
 from .config import (
     ROOT, DATA_DIR, ASSETS, ETF_META, PORTFOLIO_NAMES, STRATEGY_PARAMS,
     RISK_PARITY_WINDOW, RISK_PARITY_MAX_WEIGHT, RISK_PARITY_MIN_WEIGHT,
-    GOLD_DIP_THRESHOLD,
     HS300_DIP_SMA,
     SP500_TREND_WINDOW, HS300_TREND_WINDOW,
     V3B_RP_ASSETS, V3B_RP_BUCKETS,
@@ -62,21 +61,8 @@ def _sma_filter(prices, asset, window):
     return pd.notna(sma) and s.iloc[-1] < sma
 
 
-def _drawdown(prices, asset, lookback=252):
-    """当前从 N 日高点的回撤。"""
-    if asset not in prices.columns or len(prices) < lookback:
-        return 0.0
-    s = prices[asset].iloc[-lookback:]
-    peak = s.max()
-    return s.iloc[-1] / peak - 1
-
-
 def compute_signal_states(prices):
     """返回当前所有风控信号状态。"""
-    rets = prices.pct_change().dropna()
-    latest = prices.index[-1]
-    d = latest
-
     signals = {}
 
     # --- SMA trend filters ---
@@ -87,41 +73,9 @@ def compute_signal_states(prices):
     signals["wti_below_sma75"] = _sma_filter(prices, "wti", 75)
     signals["hs300_below_sma30"] = _sma_filter(prices, "hs300", HS300_TREND_WINDOW)
 
-    # --- Gold dip ---
-    gold_dd = _drawdown(prices, "gold", 252)
-    signals["gold_dd_pct"] = gold_dd
-    signals["gold_dip_active"] = gold_dd <= -GOLD_DIP_THRESHOLD
-
-    # --- HS300 3 年回撤（展示用；抄底规则已撤）---
-    hs300_dd = _drawdown(prices, "hs300", 756)
-    signals["hs300_dd_pct"] = hs300_dd
-
     # HS300 是否站上 SMA120（「宏观季节」判断增长方向用，shift(1) 与回测一致）
     hs300_sma120 = prices["hs300"].rolling(HS300_DIP_SMA).mean().shift(1).iloc[-1]
     signals["hs300_above_sma120"] = pd.notna(hs300_sma120) and prices["hs300"].iloc[-1] > hs300_sma120
-
-    # HS300 PB/PE percentile
-    try:
-        pb_data = load_hs300_pb()
-        pe_data = load_hs300_pe()
-        if pb_data is not None and len(pb_data[pb_data.index <= d]) >= 252:
-            pb_to = pb_data[pb_data.index <= d]
-            pb_val = pb_to.iloc[-1]
-            pb_pct = (pb_to < pb_val).sum() / len(pb_to) * 100
-            signals["pb_pctile"] = float(pb_pct)
-        else:
-            signals["pb_pctile"] = None
-
-        if pe_data is not None and len(pe_data[pe_data.index <= d]) >= 252:
-            pe_to = pe_data[pe_data.index <= d]
-            pe_val = pe_to.iloc[-1]
-            pe_pct = (pe_to < pe_val).sum() / len(pe_to) * 100
-            signals["pe_pctile"] = float(pe_pct)
-        else:
-            signals["pe_pctile"] = None
-    except (FileNotFoundError, OSError):
-        signals["pb_pctile"] = None
-        signals["pe_pctile"] = None
 
     return signals
 
@@ -168,19 +122,9 @@ def display_signal_dashboard(signals):
     print("  当前市场信号状态")
     print(LINE)
 
-    au_dd = signals.get("gold_dd_pct", 0)
-    hs_dd = signals.get("hs300_dd_pct", 0)
-
     print(f"  nonferr vs SMA75:  {_fmt_bool(signals['nonferr_below_sma75'])}")
     print(f"  gold vs SMA75:     {_fmt_bool(signals['gold_below_sma75'])}")
     print(f"  SP500 vs SMA{SP500_TREND_WINDOW}:   {_fmt_bool(signals['sp500_below_sma75'])}")
-    print(f"  Gold 回撤:         {au_dd*100:>5.1f}%  ({_fmt_bool(signals['gold_dip_active'], '深度回撤', '正常')})")
-    print(f"  HS300 3年回撤:     {hs_dd*100:>5.1f}%")
-
-    pb = signals.get("pb_pctile")
-    pe = signals.get("pe_pctile")
-    print(f"  HS300 PB 分位:     {f'{pb:.0f}%ile' if pb is not None else 'n/a'}（仅展示，不参与权重）")
-    print(f"  HS300 PE 分位:     {f'{pe:.0f}%ile' if pe is not None else 'n/a'}（仅展示，不参与权重）")
 
 
 def display_weight_table(strat_key, w, signals):
@@ -343,14 +287,6 @@ def parse_holdings_input(strat_key=None):
 # 数据加载
 # ============================================================
 
-def load_hs300_pb():
-    from .data import load_hs300_pb as _load
-    return _load()
-
-def load_hs300_pe():
-    from .data import load_hs300_pe as _load
-    return _load()
-
 def load_prices():
     from .data import load_panel
     # 实盘用最新行情，不截断到 BACKTEST_END
@@ -486,8 +422,6 @@ def _check_and_alert(signals, date_str):
         alerts.append("gold 跌破 SMA75 → 已清仓转移至 credit")
     if signals.get("sp500_below_sma75", False):
         alerts.append(f"SP500 跌破 SMA{SP500_TREND_WINDOW} → 已清仓转移至 credit")
-    if signals.get("gold_dip_active", False):
-        alerts.append(f"黄金深度回撤 {signals['gold_dd_pct']*100:.1f}%（无抄底规则，趋势信号为准）")
 
     if alerts:
         print(f"[{date_str}] 风控信号提醒:")

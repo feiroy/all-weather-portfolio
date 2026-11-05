@@ -35,8 +35,6 @@ if getattr(FL, "_LOADED_MTIME", None) != _fl_mtime:
     FL._LOADED_MTIME = _fl_mtime
 from allweather.config import (
     DATA_DIR,
-    GOLD_DIP_THRESHOLD,
-    HS300_DIP_SMA,
     SP500_TREND_WINDOW,
 )
 
@@ -4933,7 +4931,7 @@ def _slot_config_panel() -> None:
 # Tab 1: 信号仪表盘
 # ============================================================
 def _pg_signals() -> None:
-    st.caption("这一页是**项目自带策略模型**算出来的信号（估值分位、宏观季节、趋势过滤），"
+    st.caption("这一页是**项目自带策略模型**算出来的信号（趋势过滤、宏观季节、三个策略的历史走势），"
                "跟你自己买了什么无关；你的钱这一轮该不该动，看「调仓」页。")
     # ---- ① 三个策略的回测净值同图：原来只画侧边栏选的那一条，现在并排 ----
     _bm = {_strat_display[k]: c for k in _STRAT_KEYS
@@ -4973,17 +4971,6 @@ def _pg_signals() -> None:
                 '「生效」是这个策略的规则里有这一条、而且这一轮用上了 —— 比如黄金、标普的趋势过滤，'
                 '保守增强回测否决过，所以对它「不适用」。生效的信号已经算进「选基配置」的目标权重里。</div>',
                 unsafe_allow_html=True)
-
-    st.divider()
-    dd_col1, dd_col2 = st.columns(2)
-    with dd_col1:
-        gold_dd = signals.get("gold_dd_pct", 0)
-        st.metric("黄金 1Y 回撤", f"{gold_dd*100:.1f}%",
-                  delta=f"距深度回撤线 {(-GOLD_DIP_THRESHOLD*100):.0f}% 还差 {(gold_dd*100 + GOLD_DIP_THRESHOLD*100):.1f}%" if gold_dd > -GOLD_DIP_THRESHOLD else "深度回撤")
-    with dd_col2:
-        hs_dd = signals.get("hs300_dd_pct", 0)
-        st.metric("沪深300 3Y 回撤", f"{hs_dd*100:.1f}%",
-                  help="相对近 3 年最高点的跌幅，只作参考 —— 沪深300 抄底加仓规则已撤（回测里几乎没贡献）")
 
     # 四季象限
     st.divider()
