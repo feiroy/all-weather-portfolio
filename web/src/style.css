@@ -41,10 +41,10 @@ html,body{ margin:0; background:var(--bg); color:var(--ink);
   .wrap{ max-width:1080px; }
   .d-only{ display:revert !important; }
   .m-only{ display:none !important; }
-  .has-desk{ padding-top:56px; }
-  .has-desk .page{ min-height:calc(100vh - 56px); }
+  .has-desk{ padding-top:92px; }
+  .has-desk .page{ min-height:calc(100vh - 92px); }
   .page{ padding-bottom:32px; }
-  .van-nav-bar.subbar{ top:56px; max-width:1080px; margin:0 auto; }
+  .van-nav-bar.subbar{ top:92px; max-width:1080px; margin:0 auto; }
   /* 桌面不再左右同级分屏：所有页面统一限宽单主列，靠纵向顺序建立主次 */
   .cols2{ max-width:960px; margin:0 auto; }
   .cols2 > div{ min-width:0; }
