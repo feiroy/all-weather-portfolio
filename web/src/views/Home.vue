@@ -10,7 +10,6 @@
           <span class="tag" :class="d.account.kind === '模拟' ? 'sim' : 'real'">{{ d.account.kind }}</span>
           <span class="tag gray">{{ d.account.strategy_name }}</span>
           <UpdateBtn class="m-only upd" compact />
-          <router-link :to="`/a/${aid}/settings`" class="gear"><van-icon name="setting-o" /></router-link>
         </div>
         <van-skeleton v-if="!d" title :row="8" style="padding:20px 16px" />
         <template v-else>
@@ -134,9 +133,7 @@ const statusLabel = computed(() => {
 .mh span{ opacity:.8 } .mh b{ font-size:15px; }
 .status{ margin-top:12px !important; }
 .upd{ margin-left:auto; }
-.gear{ color:var(--sub); font-size:20px; display:flex; margin-left:4px; }
 .top .tag.gray{ max-width:40vw; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-@media (min-width:900px){ .gear{ margin-left:auto; } }
 .quick{ display:grid; grid-template-columns:repeat(4,1fr); margin:12px 12px 0; background:#fff; border-radius:14px; padding:14px 4px 10px; }
 .quick a{ display:flex; flex-direction:column; align-items:center; gap:6px; font-size:12.5px; color:var(--sub); text-decoration:none; }
 .quick i{ width:38px; height:38px; border-radius:12px; display:grid; place-items:center; font-size:20px; }

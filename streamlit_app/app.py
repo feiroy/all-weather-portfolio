@@ -482,14 +482,13 @@ div[data-testid="stAlert"] p{ color:var(--brand-strong); }
 .hero{ padding-bottom:6px !important; }
 .st-key-hero_meta{ margin:2px 0 14px 50px; }
 @media(max-width:640px){ .st-key-hero_meta{ margin-left:0; } }
-/* 账户内页头：账户名（最醒目）· 实盘/模拟 · 跟随策略 · [账户设置] [切换账户] */
+/* 账户内页头：账户名（最醒目）· 实盘/模拟 · 跟随策略 · [切换账户]；改名/删除在入口页 */
 .hero-acct{ font-size:15px; font-weight:700; color:var(--ink); margin-right:8px; vertical-align:middle; }
 .lc-real{ display:inline-block; font-size:11.5px; font-weight:600; color:var(--brand); background:#EEF2FF;
   border:1px solid #E0E7FF; border-radius:999px; padding:3px 9px; margin-right:6px; vertical-align:middle; }
-.st-key-acct_set button, .st-key-acct_out button{ min-height:30px !important; padding:3px 11px !important;
+.st-key-acct_out button{ min-height:30px !important; padding:3px 11px !important;
   font-size:12.5px !important; border-radius:999px !important; color:var(--sub) !important; }
 .st-key-acct_out button:hover{ color:var(--brand) !important; border-color:#A5B4FC !important; }
-.acsw-n{ font-size:12px; color:var(--muted); margin-top:6px; }
 
 /* ========== 导航：电脑顶部一排，手机底部 4 个入口 ========== */
 .st-key-app_nav{ border-bottom:1px solid var(--line); margin:0 0 18px; gap:4px !important; }
@@ -578,8 +577,8 @@ div[data-testid="stAlert"] p{ color:var(--brand-strong); }
   /* 页头在手机上收紧：品牌大标题不要（底部导航已经说明了在哪），账户一行 + 数据日期一行 */
   .hero{ display:none !important; }
   .st-key-hero_meta{ margin:0 0 4px !important; row-gap:6px !important; }
-  .st-key-acct_set button p, .st-key-acct_out button p{ display:none; }
-  .st-key-acct_set button, .st-key-acct_out button{ padding:3px 8px !important; }
+  .st-key-acct_out button p{ display:none; }
+  .st-key-acct_out button{ padding:3px 8px !important; }
   .st-key-hero_actions{ margin-top:-6px; }
   /* 页头两行都左对齐：原来「数据截止 / 更新数据」是右对齐，和上面账户名错位显乱 */
   .st-key-hero_actions [data-testid="stHorizontalBlock"]{ justify-content:flex-start !important; }
@@ -679,6 +678,11 @@ div[data-testid="stAlert"] p{ color:var(--brand-strong); }
 .st-key-trend_mode_switch button[aria-checked="true"],.st-key-rb_mode_switch button[aria-checked="true"]{background:var(--card) !important;
   box-shadow:0 1px 2px rgba(15,23,42,.08)}
 .st-key-trend_mode_switch button[aria-checked="true"] p,.st-key-rb_mode_switch button[aria-checked="true"] p{color:var(--brand) !important;font-weight:600}
+/* 入口页账户卡：进入下面的「改名 / 删除」，弱化成一个小操作行 */
+[class*="st-key-lc_ops_"] { margin-top:6px !important; }
+[class*="st-key-lc_ops_"] button{ font-size:12px !important; min-height:28px !important;
+  color:var(--sub) !important; background:var(--bg) !important; border-color:var(--line) !important; }
+[class*="st-key-lc_ops_"] button:hover{ color:var(--brand) !important; border-color:#A5B4FC !important; }
 /* 交易记录页：记一笔那块画成卡片（已不用 st.form，控件改动即刷新下面的提示） */
 .st-key-tr_card{background:var(--card); border:1px solid var(--line); border-radius:16px;
   padding:20px !important; margin-bottom:18px}
@@ -2175,6 +2179,28 @@ def _sgn(v: float, d: int = 2) -> str:
     return f"{0:.{d}f}" if abs(v) < 0.5 * 10 ** (-d) else f"{v:+,.{d}f}"
 
 
+@st.dialog("改名")
+def _landing_rename_dialog(aid: str, old: str) -> None:
+    """改名放在入口页的账户卡片上，和「删除」挨着 —— 管账户的事都在一起。"""
+    nm = st.text_input("账户名称", value=old, key=f"lc_rn_{aid}", max_chars=20)
+    if st.button("保存", type="primary", key=f"lc_rn_go_{aid}",
+                 disabled=nm.strip() in ("", old), width="stretch"):
+        AC.update(aid, name=nm.strip())
+        st.rerun()
+
+
+@st.dialog("删除账户")
+def _landing_delete_dialog(aid: str, name: str, can_delete: bool) -> None:
+    st.write(f"把「{name}」移到回收站。交易记录和选基配置都会留着，随时可以在本页底部恢复。")
+    if not can_delete:
+        st.caption("只剩这一个账户，不能删 —— 先新建一个账户再来删它。")
+        return
+    cf = st.text_input(f'输入「{name}」确认', key=f"lc_dl_cf_{aid}")
+    if st.button("删除", key=f"lc_dl_go_{aid}", disabled=cf.strip() != name, width="stretch"):
+        AC.delete(aid)
+        st.rerun()
+
+
 @st.dialog("新建账户")
 def _landing_create_dialog() -> None:
     """新建：名称 / 类型 / 跟随策略 / 本金 / 起始日 + 选基配置从哪来（默认 8 只或复制某个账户）。"""
@@ -2254,6 +2280,14 @@ def _render_landing() -> None:
             if st.button("进入", key=f"lc_go_{a['id']}", type="primary", width="stretch"):
                 _switch_account(a["id"])
                 st.rerun()
+            # 改名 / 删除和「进入」放同一张卡：账户管理都在入口页，不在页头再开一个设置弹层
+            with st.container(key=f"lc_ops_{a['id']}", horizontal=True, gap="small"):
+                if st.button("改名", key=f"lc_rn_btn_{a['id']}", width="stretch"):
+                    _landing_rename_dialog(a["id"], a["name"])
+                if st.button("删除", key=f"lc_dl_btn_{a['id']}", width="stretch",
+                             disabled=len(_ACCTS) <= 1,
+                             help="最后一个账户不能删" if len(_ACCTS) <= 1 else "移到回收站，可以恢复"):
+                    _landing_delete_dialog(a["id"], a["name"], len(_ACCTS) > 1)
     _tr = AC.trash()
     if _tr:
         with st.expander(f"回收站 · {len(_tr)} 个账户", icon=":material/delete:"):
@@ -4557,32 +4591,6 @@ _SWAP_SVG = ('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-
 _KIND_TAG = {"实盘": '<span class="lc-real">实盘</span>', "模拟": '<span class="hero-kind">模拟</span>'}
 
 
-def _acct_settings() -> None:
-    """当前账户的设置：改名 / 删除（进回收站，在入口页底部恢复）。
-
-    实盘 / 模拟只在新建时选一次：它只是列表里的一个标签，不影响任何计算，
-    放在设置里会让人以为改了会改变什么。
-    """
-    with st.popover("账户设置", icon=":material/settings:", key="acct_set"):
-        _nm = st.text_input("名称", value=ACCT_INFO["name"], key="acm_cur_name")
-        if st.button("保存", key="acm_cur_save", type="primary",
-                     disabled=_nm.strip() == ACCT_INFO["name"]):
-            AC.update(_aid, name=_nm.strip() or ACCT_INFO["name"])
-            st.rerun()
-        st.markdown('<div class="acsw-n">跟随哪个策略在「选基配置」里换（会先给预览）。<br>'
-                    '实盘 / 模拟在新建账户时定，这里不能改。</div>', unsafe_allow_html=True)
-        st.divider()
-        if len(_ACCTS) <= 1:
-            st.caption("只剩这一个账户，不能删 —— 先在入口页新建一个再来删它。")
-        else:
-            _cf = st.text_input(f"删除：输入「{ACCT_INFO['name']}」确认", key="acm_del_confirm")
-            if st.button("删除这个账户", key="acm_del_go", disabled=_cf.strip() != ACCT_INFO["name"]):
-                AC.delete(_aid)
-                _switch_account(None)
-                st.rerun()
-            st.caption("删掉的账户进回收站，可以在入口页底部恢复。")
-
-
 _hero_cols = st.columns([3, 2], vertical_alignment="center")
 with _hero_cols[0]:
     st.markdown(
@@ -4603,7 +4611,6 @@ with _hero_cols[0]:
             f'<span class="k">跟随</span><b>{_strat_display[strat_key]}</b>'
             f'<span class="sw">{_SWAP_SVG}</span></span>',
             unsafe_allow_html=True, width="content")
-        _acct_settings()
         if st.button("切换账户", icon=":material/logout:", key="acct_out"):
             _switch_account(None)
             st.rerun()

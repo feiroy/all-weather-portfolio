@@ -11,7 +11,6 @@ const routes = [
   { path: '/a/:aid/compare', name: 'compare', component: v('Compare'), meta: { depth: 2, tab: 'home' } },
   { path: '/a/:aid/health', name: 'health', component: v('Health'), meta: { depth: 2, tab: 'home' } },
   { path: '/a/:aid/weights', name: 'weights', component: v('Weights'), meta: { depth: 2, tab: 'home' } },
-  { path: '/a/:aid/settings', name: 'settings', component: v('Settings'), meta: { depth: 2, tab: 'home' } },
   { path: '/a/:aid/calc', name: 'calc', component: v('Calc'), meta: { depth: 1, tab: 'calc' } },
   { path: '/a/:aid/dca', name: 'dca', component: v('Dca'), meta: { depth: 2, tab: 'calc' } },
   { path: '/a/:aid/trades', name: 'trades', component: v('Trades'), meta: { depth: 1, tab: 'trades', keep: true } },

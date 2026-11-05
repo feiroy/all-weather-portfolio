@@ -16,6 +16,11 @@
             <div class="amt num">¥{{ money(a.total) }}</div>
             <div class="pnl num"><span :class="tone(a.pnl)">{{ signed(a.pnl) }}</span>
               <span :class="tone(a.pnl_pct)">{{ pct(a.pnl_pct) }}</span><small>持有收益</small></div>
+            <div class="ops" @click.stop>
+              <a @click="openRename(a)">改名</a>
+              <a class="red" :class="{ dis: list.length <= 1 }" @click="askDelete(a)">删除</a>
+              <span class="enter">进入 <van-icon name="arrow" /></span>
+            </div>
           </template>
         </div>
         <div class="acard add" @click="openNew"><van-icon name="plus" /><span>新建账户</span><small>模拟盘试策略 / 再开一个实盘</small></div>
@@ -31,6 +36,11 @@
         </van-cell-group>
       </template>
     </div>
+
+    <!-- 改名（和删除、回收站一样，都放在入口页） -->
+    <van-dialog v-model:show="showRename" title="改名" show-cancel-button @confirm="doRename">
+      <van-field v-model="renameVal" label="名称" placeholder="账户名称" maxlength="20" :label-width="56" />
+    </van-dialog>
 
     <!-- 新建账户 -->
     <van-popup v-model:show="showNew" position="bottom" round closeable :style="{ maxHeight: '90vh' }">
@@ -50,7 +60,6 @@
             <van-field :model-value="f.created" label="建立日期" readonly is-link :label-width="76" @click="showDate = true" />
           </template>
         </van-cell-group>
-        <p class="tip">类型只在新建时选一次，建好以后不能改；它只是列表里的一个标签，两种账户的算法完全一样。</p>
         <p class="tip">类型只在新建时选一次，建好以后不能改；它只是列表里的一个标签，两种账户的算法完全一样。</p>
         <p class="tip" v-if="f.from && f.copy_trades">复制后两个账户各记各的，互不影响 —— 适合「如果当时换个策略会怎样」</p>
         <div class="btn-row"><van-button round block type="primary" :loading="saving" @click="create">创建并进入</van-button></div>
@@ -72,7 +81,7 @@ defineOptions({ name: 'Accounts' })
 import { computed, reactive, ref, onActivated, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { showConfirmDialog, showSuccessToast, showFailToast } from 'vant'
-import { get, peek, post, del, dataVer } from '../api'
+import { get, peek, post, patch, del, dataVer } from '../api'
 import { money, signed, pct, tone } from '../fmt'
 import UpdateBtn from '../components/UpdateBtn.vue'
 const router = useRouter()
@@ -104,6 +113,23 @@ async function create() {
     router.push(`/a/${r.id}`)
   } catch (e) { showFailToast(e.message) } finally { saving.value = false }
 }
+// 改名 / 删除：账户管理只在这一页，不另开「账户设置」
+const showRename = ref(false), renameId = ref(''), renameVal = ref('')
+function openRename(a) { renameId.value = a.id; renameVal.value = a.name; showRename.value = true }
+async function doRename() {
+  const nm = renameVal.value.trim()
+  if (!nm) { showFailToast('名字不能为空'); showRename.value = true; return }
+  try { await patch(`/api/acct/${renameId.value}`, { name: nm }); showSuccessToast('已改名'); load(true) }
+  catch (e) { showFailToast(e.message) }
+}
+async function askDelete(a) {
+  if (list.value.length <= 1) return showFailToast('最后一个账户不能删：先新建一个再来删它')
+  try {
+    await showConfirmDialog({ title: `删除「${a.name}」？`, message: '移到回收站，交易记录和选基配置都留着，随时可以恢复',
+      confirmButtonColor: '#E23B3B', confirmButtonText: '删除' })
+  } catch { return }
+  try { await del(`/api/acct/${a.id}`); showSuccessToast('已移到回收站'); load(true) } catch (e) { showFailToast(e.message) }
+}
 async function restore(t) {
   try { await post(`/api/trash/${t.file}/restore`, {}); showSuccessToast('已恢复'); load(true) } catch (e) { showFailToast(e.message) }
 }
@@ -129,6 +155,9 @@ async function purge(t) {
 .add{ display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; border:1.5px dashed #D1D5DB; background:transparent; color:var(--sub); min-height:120px; }
 .add .van-icon{ font-size:24px; color:var(--brand); } .add span{ font-size:15px; font-weight:600; } .add small{ font-size:12px; color:var(--muted); }
 .lk{ color:var(--brand); margin-left:14px; font-size:13px; cursor:pointer; } .lk.red{ color:var(--up); }
+.ops{ display:flex; align-items:center; gap:16px; margin-top:12px; padding-top:10px; border-top:1px solid var(--line); font-size:13px; }
+.ops a{ color:var(--sub); cursor:pointer; } .ops a.red{ color:var(--up); } .ops a.dis{ opacity:.35; }
+.ops .enter{ margin-left:auto; color:var(--brand); display:flex; align-items:center; gap:3px; }
 .pop{ padding:18px 0 24px; max-width:560px; margin:0 auto; }
 .pop h4{ margin:0 18px 12px; font-size:17px; }
 .pop .seg2{ flex-wrap:wrap; justify-content:flex-end; }
