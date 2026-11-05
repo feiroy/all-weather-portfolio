@@ -177,7 +177,7 @@ const cmpSeries = computed(() => {
 })
 </script>
 <style scoped>
-.narrow{ max-width:720px !important; }
+.narrow{ max-width:960px !important; }
 .mode{ display:flex; margin:12px 12px 0; width:fit-content; }
 .sb{ background:transparent; padding:10px 12px; }
 .src{ font-size:12px; color:var(--muted); }

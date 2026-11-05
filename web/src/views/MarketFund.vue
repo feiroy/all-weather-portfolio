@@ -52,7 +52,7 @@ const ret = computed(() => { const v = seg.value.values; return (v[v.length - 1]
 const mdd = computed(() => { let pk = -Infinity, m = 0; for (const v of seg.value.values) { pk = Math.max(pk, v); m = Math.min(m, v / pk - 1) } return m * 100 })
 </script>
 <style scoped>
-.narrow{ max-width:720px !important; }
+.narrow{ max-width:960px !important; }
 .head .sub{ font-size:12px; color:var(--muted); }
 .g{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:10px; }
 .g span{ display:block; font-size:12px; color:var(--muted); } .g b{ display:block; font-size:18px; margin-top:3px; } .g small{ font-size:11px; color:var(--muted); }

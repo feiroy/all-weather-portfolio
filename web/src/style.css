@@ -40,13 +40,13 @@ html,body{ margin:0; background:var(--bg); color:var(--ink);
 .d-only{ display:none !important; }
 /* 电脑端：顶部导航 + 内容 1080 宽；手机底部导航隐藏；二级页面的「返回」栏留着当面包屑 */
 @media (min-width:900px){
-  .wrap{ max-width:1080px; }
+  .wrap{ max-width:960px; }
   .d-only{ display:revert !important; }
   .m-only{ display:none !important; }
   .has-desk{ padding-top:92px; }
   .has-desk .page{ min-height:calc(100vh - 92px); }
   .page{ padding-bottom:32px; }
-  .van-nav-bar.subbar{ top:92px; max-width:1080px; margin:0 auto; }
+  .van-nav-bar.subbar{ top:92px; max-width:960px; margin:0 auto; }
   /* 桌面不再左右同级分屏：所有页面统一限宽单主列，靠纵向顺序建立主次 */
   .cols2{ max-width:960px; margin:0 auto; }
   .cols2 > div{ min-width:0; }

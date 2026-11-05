@@ -162,7 +162,7 @@ async function remove() {
 }
 </script>
 <style scoped>
-.narrow{ max-width:560px !important; }
+.narrow{ max-width:960px !important; }
 .seg{ display:flex; gap:10px; margin:12px 16px; }
 .seg button{ flex:1; height:42px; border-radius:12px; border:1px solid var(--line); background:#fff; font-size:15px; font-weight:600; color:var(--sub); cursor:pointer; }
 .seg button.on.buy{ background:#FEECEC; border-color:#FBC4C4; color:var(--up); }

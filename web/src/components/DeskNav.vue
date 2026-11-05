@@ -36,7 +36,7 @@ watch(() => [props.aid, dataVer.value], async () => {
 <style scoped>
 .topnav{ position:fixed; top:0; left:0; right:0; z-index:50; background:rgba(255,255,255,.94);
   backdrop-filter:saturate(1.6) blur(10px); border-bottom:1px solid var(--line); }
-.in{ max-width:1080px; margin:0 auto; padding:0 16px; box-sizing:border-box; }
+.in{ max-width:960px; margin:0 auto; padding:0 16px; box-sizing:border-box; }
 .first{ height:50px; display:flex; align-items:center; }
 .brand{ display:flex; align-items:center; gap:8px; font-weight:700; font-size:16px; color:var(--ink); text-decoration:none; }
 .brand img{ width:26px; height:26px; }

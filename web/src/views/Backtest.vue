@@ -109,7 +109,7 @@ const shownPeriods = computed(() => d.value?.periods?.[pk.value] || [])
 .grow b{ flex:0 0 100%; } .grow em{ font-style:normal; margin-left:4px; }
 
 @media (min-width:900px){
-  .metric-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+  .metric-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; padding:0 12px; }
   .metric-grid .card{ margin:0; }
   .metric-grid + .k{ grid-column:1/-1; }
 }

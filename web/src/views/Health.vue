@@ -32,7 +32,7 @@ load(); watch(dataVer, () => load(true))
 const sorted = computed(() => [...d.value.items].sort((a, b) => b.bad - a.bad))
 </script>
 <style scoped>
-.narrow{ max-width:640px !important; }
+.narrow{ max-width:960px !important; }
 .score{ display:flex; gap:12px; align-items:center; margin:12px 12px 0; padding:16px; border-radius:16px; }
 .score.ok{ background:#E8F7EE; } .score.warn{ background:#FFFBEB; }
 .si{ font-size:30px; } .ok .si{ color:var(--down); } .warn .si{ color:#B45309; }
