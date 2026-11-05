@@ -482,13 +482,14 @@ div[data-testid="stAlert"] p{ color:var(--brand-strong); }
 .hero{ padding-bottom:6px !important; }
 .st-key-hero_meta{ margin:2px 0 14px 50px; }
 @media(max-width:640px){ .st-key-hero_meta{ margin-left:0; } }
-/* 账户内页头：账户名（最醒目）· 实盘/模拟 · 跟随策略 · [切换账户]；改名/删除在入口页 */
-.hero-acct{ font-size:15px; font-weight:700; color:var(--ink); margin-right:8px; vertical-align:middle; }
+/* 账户内页头：账户名（点它回入口页切换）· 策略名淡灰小字；右侧只有「更新数据」 */
+.st-key-acct_out button{ font-size:15px !important; font-weight:700 !important; color:var(--ink) !important;
+  border:0 !important; background:transparent !important; padding:2px 0 !important; min-height:0 !important; }
+.st-key-acct_out button:hover{ color:var(--brand) !important; background:transparent !important; }
+.st-key-acct_out button p{ font-size:15px !important; }
 .lc-real{ display:inline-block; font-size:11.5px; font-weight:600; color:var(--brand); background:#EEF2FF;
   border:1px solid #E0E7FF; border-radius:999px; padding:3px 9px; margin-right:6px; vertical-align:middle; }
-.st-key-acct_out button{ min-height:30px !important; padding:3px 11px !important;
   font-size:12.5px !important; border-radius:999px !important; color:var(--sub) !important; }
-.st-key-acct_out button:hover{ color:var(--brand) !important; border-color:#A5B4FC !important; }
 
 /* ========== 导航：电脑顶部一排，手机底部 4 个入口 ========== */
 .st-key-app_nav{ border-bottom:1px solid var(--line); margin:0 0 18px; gap:4px !important; }
@@ -577,8 +578,7 @@ div[data-testid="stAlert"] p{ color:var(--brand-strong); }
   /* 页头在手机上收紧：品牌大标题不要（底部导航已经说明了在哪），账户一行 + 数据日期一行 */
   .hero{ display:none !important; }
   .st-key-hero_meta{ margin:0 0 4px !important; row-gap:6px !important; }
-  .st-key-acct_out button p{ display:none; }
-  .st-key-acct_out button{ padding:3px 8px !important; }
+  .st-key-acct_out button{ padding:2px 0 !important; }
   .st-key-hero_actions{ margin-top:-6px; }
   /* 页头两行都左对齐：原来「数据截止 / 更新数据」是右对齐，和上面账户名错位显乱 */
   .st-key-hero_actions [data-testid="stHorizontalBlock"]{ justify-content:flex-start !important; }
@@ -590,9 +590,8 @@ div[data-testid="stAlert"] p{ color:var(--brand-strong); }
     margin:0 !important; padding:0 !important; overflow:visible !important; }
   [data-testid="stMainBlockContainer"] > div > [data-testid="stVerticalBlock"]{ row-gap:14px !important; }
   [data-testid="stHeader"]{ height:0 !important; min-height:0 !important; }
-  .hero-strat .k, .hero-strat .sw{ display:none !important; }
-  .hero-strat{ padding:4px 10px !important; }
-  .hero-acct{ font-size:16px; margin-right:4px; }
+  .st-key-acct_out button, .st-key-acct_out button p{ font-size:15px !important; }
+  .hero-strat{ font-size:12px !important; }
 }
 /* ========== 入口页：选择账户 ========== */
 .lc-head{ display:flex; align-items:baseline; justify-content:space-between; margin:6px 0 14px; }
@@ -619,16 +618,8 @@ div[data-testid="stAlert"] p{ color:var(--brand-strong); }
 .lc-new .s{ font-size:12.5px; margin-top:6px; line-height:1.6; }
 .hero-kind{ display:inline-block; font-size:11.5px; font-weight:650; color:#B45309; background:#FFFBEB;
   border:1px solid #FDE68A; border-radius:999px; padding:3px 9px; margin-right:6px; vertical-align:middle; }
-/* 账户跟随：只说「跟的是谁」，去哪换交给悬停提示 + 末尾一个小换向图标 */
-.hero-strat{ display:inline-flex; align-items:center; gap:7px; padding:4px 9px 4px 11px;
-  border-radius:999px; background:#EEF2FF; border:1px solid #E0E7FF; cursor:help;
-  transition:border-color .15s, background .15s; }
-.hero-strat:hover{ border-color:#A5B4FC; background:#E0E7FF; }
-.hero-strat .k{ font-size:11.5px; color:#6366F1; }
-.hero-strat b{ font-size:13px; color:#1E3A8A; font-weight:650; letter-spacing:-.1px; }
-.hero-strat .sw{ display:inline-flex; color:#A5B4FC; }
-.hero-strat .sw svg{ width:13px; height:13px; }
-.hero-strat:hover .sw{ color:#4F46E5; }
+/* 策略名只是一行淡灰小字，不再做胶囊标签 */
+.hero-strat{ font-size:12.5px; color:var(--muted); cursor:help; white-space:nowrap; }
 @media(max-width:640px){ .hero-meta{ margin-left:0; } }
 
 /* 更新数据：拉取中图标转圈（按钮禁用），拉完自动停 */
@@ -4549,9 +4540,8 @@ def _update_ctl() -> None:
                        gap="small", key="upd_row")
     _when = f"数据截止 {_cn_date(last_date)}"
     if _bg_running():
-        row.markdown(f'<span class="upd-st">{_when} · 正在拉取最新数据</span>',
-                     unsafe_allow_html=True, width="content")
-        row.button("更新中", icon=":material/sync:", disabled=True, key="upd_running")
+        row.button("更新中", icon=":material/sync:", disabled=True, key="upd_running",
+                   help=f"{_when} · 正在拉取最新数据")
         return
     if stt["finished"] and stt["finished"] > st.session_state.get("upd_seen", 0):
         st.session_state.upd_seen = stt["finished"]
@@ -4570,25 +4560,18 @@ def _update_ctl() -> None:
                 f'<div class="upd-pop-i"><b>{html_escape(n)}</b>'
                 f'<span>{html_escape(r[:160])}</span></div>'
                 for n, r in (_err_label(e) for e in _errs)), unsafe_allow_html=True)
-    # 数据截止跟更新按钮放一起：「数据到哪天了」和「要不要再拉一次」本来就是同一件事
-    _tail = ""
+    # 页头只放一个按钮：数据到哪天 / 更新结果都收进悬停提示，头卡副标题里另有净值日期
+    _tip = _when
     if _stale >= 1:
-        _tail = f' · <b class="stale">缺 {_stale} 个交易日</b>'
+        _tip += f" · 缺 {_stale} 个交易日"
     elif st.session_state.get("upd_done"):
-        _tail = f' · {_t.strftime("%H:%M", _t.localtime(st.session_state.upd_done))} 已更新'
-    row.markdown(f'<span class="upd-st">{_when}{_tail}</span>', unsafe_allow_html=True, width="content")
-    if row.button("更新数据", icon=":material/sync:", key="upd_btn",
+        _tip += f' · {_t.strftime("%H:%M", _t.localtime(st.session_state.upd_done))} 已更新'
+    if row.button("更新数据", icon=":material/sync:", key="upd_btn", help=_tip,
                  type="primary" if _stale >= 1 else "secondary"):
         _start_background_fetch(force=True)
         st.session_state.fetch_errors = []
         st.session_state.upd_done = None
         st.rerun()           # 整页重跑：外面才会把这个 fragment 换成「每 1.5 秒看一眼」的模式
-
-
-_SWAP_SVG = ('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
-             'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
-             '<path d="M7 7h11l-3-3M17 17H6l3 3"/></svg>')
-_KIND_TAG = {"实盘": '<span class="lc-real">实盘</span>', "模拟": '<span class="hero-kind">模拟</span>'}
 
 
 _hero_cols = st.columns([3, 2], vertical_alignment="center")
@@ -4602,18 +4585,16 @@ with _hero_cols[0]:
         unsafe_allow_html=True,
     )
     with st.container(key="hero_meta", horizontal=True, vertical_alignment="center", gap="small"):
-        st.markdown(
-            f'<span class="hero-acct">{html_escape(ACCT_INFO["name"])}</span>'
-            + _KIND_TAG.get(ACCT_INFO.get("kind"), "")
-            # 「去哪换」不写成正文：悬停提示 + 一个小换向图标就够了，胶囊只说「跟的是谁」
-            + '<span class="hero-strat" title="这个账户按这个策略调仓（帮你算的清单、偏离目标都按它算）'
-            '&#10;在「选基配置」里更换">'
-            f'<span class="k">跟随</span><b>{_strat_display[strat_key]}</b>'
-            f'<span class="sw">{_SWAP_SVG}</span></span>',
-            unsafe_allow_html=True, width="content")
-        if st.button("切换账户", icon=":material/logout:", key="acct_out"):
+        # 页头只留「账户名（点它切换） + 策略名」：实盘/模拟、跟随字样、独立切换按钮都收掉
+        if st.button(ACCT_INFO["name"], icon=":material/expand_more:", key="acct_out",
+                     type="tertiary", help="切换账户（回入口页）"):
             _switch_account(None)
             st.rerun()
+        if ACCT_INFO.get("kind") == "模拟":     # 只有模拟账户需要提醒，实盘是默认
+            st.markdown('<span class="hero-kind">模拟</span>', unsafe_allow_html=True, width="content")
+        st.markdown(f'<span class="hero-strat" title="这个账户按这个策略调仓'
+                    f'&#10;在「选基配置」里更换">{_strat_display[strat_key]}</span>',
+                    unsafe_allow_html=True, width="content")
 with _hero_cols[1], st.container(key="hero_actions"):
     st.fragment(_update_ctl, run_every=1.5 if _bg_running() else None)()
 
@@ -6022,7 +6003,7 @@ def _pg_record() -> None:
     _cash = float(_plan["cash"])
     _slot_opts = _hg_slot_options()
     if acct is None:
-        st.info("没有选中账户：点右上角「切换账户」回到入口页选一个。")
+        st.info("没有选中账户：点页头的账户名回到入口页选一个。")
         return
     if not _slot_opts:
         st.warning("还没有挂任何基金：先到「选基配置」给位置加至少一只基金，才能记账。")
@@ -6171,7 +6152,7 @@ def _pg_trades() -> None:
                "卖出的钱自动回到账户现金里，不用另外记一笔。")
     _slot_opts = _hg_slot_options()
     if acct is None:
-        st.info("没有选中账户：点右上角「切换账户」回到入口页选一个。")
+        st.info("没有选中账户：点页头的账户名回到入口页选一个。")
     elif not _slot_opts:
         st.warning("还没有挂任何基金：先到「选基配置」给位置加至少一只基金，才能记账。")
     else:

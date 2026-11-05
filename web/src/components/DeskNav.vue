@@ -4,7 +4,7 @@
     <div class="in">
       <router-link to="/" class="brand"><img src="/icon.svg" alt="" />全天候再平衡</router-link>
       <router-link to="/" class="acct" v-if="acct" title="切换账户">
-        {{ acct.name }}<span class="tag" :class="acct.kind === '模拟' ? 'sim' : 'real'">{{ acct.kind }}</span>
+        {{ acct.name }}<span v-if="acct.kind === '模拟'" class="tag sim">模拟</span>
         <van-icon name="exchange" />
       </router-link>
       <nav>
@@ -12,7 +12,7 @@
           <van-icon :name="t.icon" />{{ t.label }}
         </router-link>
       </nav>
-      <UpdateBtn class="u" />
+      <UpdateBtn class="u" compact />
     </div>
   </header>
 </template>

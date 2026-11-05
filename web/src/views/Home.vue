@@ -2,13 +2,13 @@
   <div class="page">
     <van-pull-refresh v-model="refreshing" @refresh="load(true)" success-text="已更新">
       <div class="wrap">
-        <!-- 顶栏：账户名（点了回账户列表）· 类型 · 跟随策略 -->
+        <!-- 顶栏：账户名（点了回账户列表）· 策略名淡灰小字 · 一个更新图标 -->
         <div class="top" v-if="d">
           <div class="acct" @click="$router.push('/')">
             <b>{{ d.account.name }}</b><van-icon name="arrow-down" />
           </div>
-          <span class="tag" :class="d.account.kind === '模拟' ? 'sim' : 'real'">{{ d.account.kind }}</span>
-          <span class="tag gray">{{ d.account.strategy_name }}</span>
+          <span v-if="d.account.kind === '模拟'" class="tag sim">模拟</span>
+          <span class="strat">{{ d.account.strategy_name }}</span>
           <UpdateBtn class="m-only upd" compact />
         </div>
         <van-skeleton v-if="!d" title :row="8" style="padding:20px 16px" />
@@ -133,7 +133,7 @@ const statusLabel = computed(() => {
 .mh span{ opacity:.8 } .mh b{ font-size:15px; }
 .status{ margin-top:12px !important; }
 .upd{ margin-left:auto; }
-.top .tag.gray{ max-width:40vw; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.strat{ font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .quick{ display:grid; grid-template-columns:repeat(4,1fr); margin:12px 12px 0; background:#fff; border-radius:14px; padding:14px 4px 10px; }
 .quick a{ display:flex; flex-direction:column; align-items:center; gap:6px; font-size:12.5px; color:var(--sub); text-decoration:none; }
 .quick i{ width:38px; height:38px; border-radius:12px; display:grid; place-items:center; font-size:20px; }
@@ -146,7 +146,9 @@ const statusLabel = computed(() => {
 .fp{ font-size:12px; margin-top:2px; }
 .cols{ display:block; }
 @media (min-width:900px){
-  .cols{ display:grid; grid-template-columns:420px 1fr; gap:4px; align-items:start; }
+  /* 顶部导航已经有账户名和切换入口，资产页这行在电脑上重复，隐藏 */
+  .top{ display:none; }
+  .cols{ display:grid; grid-template-columns:420px 1fr; gap:4px; align-items:start; padding-top:12px; }
   .cols .col:last-child .sec-t{ margin-top:10px; }
 }
 </style>
