@@ -1,0 +1,9 @@
+{
+  "name": "全天候再平衡",
+  "short_name": "全天候",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F5F6F8",
+  "theme_color": "#1E40AF",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}

@@ -1,0 +1,33 @@
+:root{
+  --bg:#F5F6F8; --card:#fff; --ink:#111827; --sub:#4B5563; --muted:#9CA3AF; --line:#EEF0F3;
+  --brand:#1E40AF; --brand-soft:#EEF2FF; --up:#E23B3B; --down:#16A34A;
+  --van-primary-color:#1E40AF; --van-nav-bar-icon-color:#111827; --van-nav-bar-text-color:#1E40AF;
+  --van-tabbar-item-active-color:#1E40AF; --van-cell-group-inset-radius:14px;
+}
+*{ -webkit-tap-highlight-color:transparent; }
+html,body{ margin:0; background:var(--bg); color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Noto Sans SC","Microsoft YaHei",sans-serif; }
+.num{ font-variant-numeric:tabular-nums; }
+.up{ color:var(--up) } .down{ color:var(--down) }
+.page{ min-height:100vh; padding-bottom:calc(64px + env(safe-area-inset-bottom)); box-sizing:border-box; }
+.page.no-tab{ padding-bottom:calc(24px + env(safe-area-inset-bottom)); }
+.wrap{ max-width:720px; margin:0 auto; }
+.sec-t{ font-size:13px; color:var(--muted); margin:18px 18px 8px; display:flex; justify-content:space-between; }
+.card{ background:var(--card); border-radius:14px; margin:12px 12px 0; padding:14px 16px; }
+.tag{ display:inline-block; font-size:11px; line-height:18px; padding:0 7px; border-radius:9px; font-weight:500; }
+.tag.sim{ color:#B45309; background:#FEF3C7; }
+.tag.real{ color:var(--brand); background:var(--brand-soft); }
+.tag.buy{ color:var(--up); background:#FEECEC; } .tag.sell{ color:var(--down); background:#E8F7EE; }
+.tag.gray{ color:var(--sub); background:#F1F2F4; }
+/* 转场：往深处走右侧滑入，返回左侧滑回 */
+.push-enter-active,.push-leave-active,.pop-enter-active,.pop-leave-active{ transition:transform .28s cubic-bezier(.2,.8,.2,1), opacity .28s; }
+.push-enter-from{ transform:translateX(100%); } .push-leave-to{ transform:translateX(-25%); opacity:.6; }
+.pop-enter-from{ transform:translateX(-25%); opacity:.6; } .pop-leave-to{ transform:translateX(100%); }
+.fade-enter-active,.fade-leave-active{ transition:opacity .15s; } .fade-enter-from,.fade-leave-to{ opacity:0; }
+.view-stack{ display:grid; } .view-stack > *{ grid-area:1/1; min-width:0; }
+.van-nav-bar{ background:var(--bg) !important; } .van-hairline--bottom:after{ border:0 !important; }
+@media (min-width:900px){ .wrap{ max-width:1080px; } }
+/* 电脑上底部导航跟内容一样宽，别横贯整个屏幕（正式版电脑端改成顶部导航） */
+@media (min-width:900px){
+  .van-tabbar{ max-width:1080px; left:50% !important; transform:translateX(-50%); border-radius:14px 14px 0 0; box-shadow:0 -2px 12px rgba(0,0,0,.05); }
+}
