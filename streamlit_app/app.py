@@ -580,11 +580,14 @@ div[data-testid="stAlert"] p{ color:var(--brand-strong); }
   .st-key-acct_set button p, .st-key-acct_out button p{ display:none; }
   .st-key-acct_set button, .st-key-acct_out button{ padding:3px 8px !important; }
   .st-key-hero_actions{ margin-top:-6px; }
+  /* 页头两行都左对齐：原来「数据截止 / 更新数据」是右对齐，和上面账户名错位显乱 */
+  .st-key-hero_actions [data-testid="stHorizontalBlock"]{ justify-content:flex-start !important; }
+  .st-key-hero_actions { text-align:left !important; }
   .st-key-app_nav > div{ flex:1 1 0 !important; }
   [data-testid="stMainBlockContainer"], .block-container{ padding-top:10px !important; }
-  /* 底部导航整块移出文档流：不然它和页头之间白白多出两道 21px 的间距 */
-  [data-testid="stLayoutWrapper"]:has(> .st-key-app_nav){ position:fixed !important; left:0; right:0; bottom:0;
-    z-index:1000; height:auto !important; }
+  /* 外层 wrapper 只负责不占位：导航自己已经 fixed，两层都 fixed 会把白底顶到屏幕外、和图标错位 */
+  [data-testid="stLayoutWrapper"]:has(> .st-key-app_nav){ height:0 !important; min-height:0 !important;
+    margin:0 !important; padding:0 !important; overflow:visible !important; }
   [data-testid="stMainBlockContainer"] > div > [data-testid="stVerticalBlock"]{ row-gap:14px !important; }
   [data-testid="stHeader"]{ height:0 !important; min-height:0 !important; }
   .hero-strat .k, .hero-strat .sw{ display:none !important; }
@@ -3698,7 +3701,15 @@ _CAL_CSS = r"""
 .dt-row .up{color:#C52828}.dt-row .down{color:#16703B}.dt-row .flat{color:#475569}
 .dt-row .wait{font-size:13px;color:#94A3B8}
 .dt-empty{font-size:13px;color:#94A3B8;padding:10px 2px}
-@media(max-width:560px){.cal-cell{min-height:52px;padding:6px}.cal-cell .v{font-size:12px}#pick{min-width:110px}}
+@media(max-width:560px){
+  .cal-grid{gap:4px}
+  .cal-cell{min-height:50px;padding:5px 2px;overflow:hidden}
+  .cal-cell .v{font-size:10px;letter-spacing:-.6px;text-align:center;white-space:nowrap;
+    overflow:hidden;text-overflow:clip}
+  .cal-cell .mv{font-size:10px;text-align:center;letter-spacing:-.3px}
+  .cal-cell .k{font-size:12px}
+  #pick{min-width:110px}
+}
 """
 
 
