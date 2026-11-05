@@ -4,91 +4,71 @@
     <div class="wrap">
       <van-skeleton v-if="!d" title :row="10" style="padding:16px" />
       <van-empty v-else-if="!d.dates.length" description="还没有收益数据，先记一笔买入" />
-      <div v-else class="cols2 even">
-        <div>
-          <!-- 走势 -->
-          <div class="card">
-            <div class="ch">
-              <div><div class="k">{{ rangeK }}{{ unit === '%' ? '收益率' : '收益' }}</div>
-                <b class="num big" :class="tone(segRet)">{{ unit === '%' ? pct(segRet) : signed(segRet) }}</b></div>
-              <span class="seg2"><button :class="{ on: unit === '%' }" @click="unit = '%'">收益率</button>
-                <button :class="{ on: unit === '¥' }" @click="unit = '¥'">金额</button></span>
-            </div>
-            <div class="chips rr"><span v-for="r in ranges" :key="r" class="chip" :class="{ on: rangeK === r }" @click="rangeK = r">{{ r }}</span>
-              <span class="seg2 per"><button v-for="p in periods" :key="p" :class="{ on: period === p }" @click="period = p">{{ p }}</button></span></div>
-            <LineChart :dates="chart.dates" :values="chart.values" :labels="chart.labels" :height="220" :unit="unit === '%' ? '%' : ''" zero
-                       :reset-key="rangeK + unit + period"
-                       :fmt-tip="i => `${chart.dates[i].replace(/-/g, '/')}<br/><b>${unit === '%' ? pct(chart.values[i]) : signed(chart.values[i]) + ' 元'}</b>`" />
-            <p class="note">收益率 = 持有收益 ÷ 投入本金；区间收益从区间前一天收盘算起。拖动平移、滚轮缩放、双击复位</p>
+      <template v-else>
+        <!-- 曲线和日历同属一张卡：不存在「上下两张卡不一样宽」，也不用往两侧塞东西 -->
+        <div class="card trend">
+          <div class="ch">
+            <div><div class="k">{{ rangeK }}{{ unit === '%' ? '收益率' : '收益' }}</div>
+              <b class="num big" :class="tone(segRet)">{{ unit === '%' ? pct(segRet) : signed(segRet) }}</b></div>
+            <span class="seg2"><button :class="{ on: unit === '%' }" @click="unit = '%'">收益率</button>
+              <button :class="{ on: unit === '¥' }" @click="unit = '¥'">金额</button></span>
           </div>
-        </div>
-        <div>
-          <!-- 收益日历 -->
-          <div class="card cal">
-            <div class="ch">
-              <span class="seg2"><button v-for="m in ['日', '月', '年']" :key="m" :class="{ on: mode === m }" @click="mode = m">{{ m }}</button></span>
-              <div class="nav" v-if="mode !== '年'">
-                <van-icon name="arrow-left" @click="step(-1)" :class="{ dis: !canStep(-1) }" />
-                <b class="num">{{ mode === '日' ? `${cur.y}年${cur.m}月` : `${cur.y}年` }}</b>
-                <van-icon name="arrow" @click="step(1)" :class="{ dis: !canStep(1) }" />
+          <div class="chips rr"><span v-for="r in ranges" :key="r" class="chip" :class="{ on: rangeK === r }" @click="rangeK = r">{{ r }}</span>
+            <span class="seg2 per"><button v-for="p in periods" :key="p" :class="{ on: period === p }" @click="period = p">{{ p }}</button></span></div>
+          <LineChart :dates="chart.dates" :values="chart.values" :labels="chart.labels" :height="220" :unit="unit === '%' ? '%' : ''" zero
+                     :reset-key="rangeK + unit + period"
+                     :fmt-tip="i => `${chart.dates[i].replace(/-/g, '/')}<br/><b>${unit === '%' ? pct(chart.values[i]) : signed(chart.values[i]) + ' 元'}</b>`" />
+          <p class="note">收益率 = 持有收益 ÷ 投入本金；区间收益从区间前一天收盘算起。拖动平移、滚轮缩放、双击复位</p>
+
+          <div class="trend-div"></div>
+
+          <div class="cal">
+            <div class="cal-inner">
+              <div class="ch">
+                <span class="seg2"><button v-for="m in ['日', '月', '年']" :key="m" :class="{ on: mode === m }" @click="mode = m">{{ m }}</button></span>
+                <div class="nav" v-if="mode !== '年'">
+                  <van-icon name="arrow-left" @click="step(-1)" :class="{ dis: !canStep(-1) }" />
+                  <b class="num">{{ mode === '日' ? `${cur.y}年${cur.m}月` : `${cur.y}年` }}</b>
+                  <van-icon name="arrow" @click="step(1)" :class="{ dis: !canStep(1) }" />
+                </div>
+                <span class="seg2"><button :class="{ on: cu === '¥' }" @click="cu = '¥'">¥</button><button :class="{ on: cu === '%' }" @click="cu = '%'">%</button></span>
               </div>
-              <span class="seg2"><button :class="{ on: cu === '¥' }" @click="cu = '¥'">¥</button><button :class="{ on: cu === '%' }" @click="cu = '%'">%</button></span>
-            </div>
-            <div class="sumline" v-if="mode !== '年'">
-              {{ mode === '日' ? '本月' : '本年' }}收益 <b class="num" :class="tone(curSum.v)">{{ signed(curSum.v) }}</b>
-              <b class="num" :class="tone(curSum.p)">{{ pct(curSum.p) }}</b>
-            </div>
-            <div class="cal-body" :class="{ 'with-side': mode === '日' }">
-              <!-- 桌面：左侧填本月涨跌天数，避免日历缩在 460px 中间、两边大片留白 -->
-              <div class="cal-side" v-if="mode === '日'">
-                <div class="sh">本月交易日</div>
-                <div class="srow"><span>上涨</span><b class="num up">{{ dayStat.up }} 天</b></div>
-                <div class="srow"><span>下跌</span><b class="num down">{{ dayStat.down }} 天</b></div>
-                <div class="srow"><span>持平</span><b class="num">{{ dayStat.flat }} 天</b></div>
-                <div class="sbar"><i class="u" :style="{ width: dayStat.upPct + '%' }"></i><i class="d" :style="{ width: dayStat.downPct + '%' }"></i></div>
-                <p class="sn">按账户口径的每日涨跌，不是单只基金</p>
+              <div class="sumline" v-if="mode !== '年'">
+                {{ mode === '日' ? '本月' : '本年' }}收益 <b class="num" :class="tone(curSum.v)">{{ signed(curSum.v) }}</b>
+                <b class="num" :class="tone(curSum.p)">{{ pct(curSum.p) }}</b>
               </div>
-              <div class="cal-mid">
-                <template v-if="mode === '日'">
-                  <div class="wk"><span v-for="w in '一二三四五六日'" :key="w">{{ w }}</span></div>
-                  <div class="grid7">
-                    <div v-for="(c, k) in dayCells" :key="k" class="cell" :class="[c && c.v != null ? (c.v > 0 ? 'pos' : c.v < 0 ? 'neg' : '') : '', { sel: c && c.date === sel, empty: !c }]"
-                         @click="c && c.v != null && (sel = c.date)">
-                      <template v-if="c"><span class="dd">{{ c.d }}</span><span class="dv num">{{ c.v == null ? '' : cu === '¥' ? short(c.v) : pctS(c.p) }}</span></template>
-                    </div>
-                  </div>
-                </template>
-                <div v-else class="grid3">
-                  <div v-for="c in periodCells" :key="c.key" class="cell big" :class="c.v == null ? 'empty' : c.v > 0 ? 'pos' : c.v < 0 ? 'neg' : ''"
-                       @click="c.v != null && drill(c)">
-                    <span class="dd">{{ c.label }}</span><span class="dv num">{{ c.v == null ? '—' : cu === '¥' ? signed(c.v, 0) : pct(c.p) }}</span>
+              <template v-if="mode === '日'">
+                <div class="wk"><span v-for="w in '一二三四五六日'" :key="w">{{ w }}</span></div>
+                <div class="grid7">
+                  <div v-for="(c, k) in dayCells" :key="k" class="cell" :class="[c && c.v != null ? (c.v > 0 ? 'pos' : c.v < 0 ? 'neg' : '') : '', { sel: c && c.date === sel, empty: !c }]"
+                       @click="c && c.v != null && (sel = c.date)">
+                    <template v-if="c"><span class="dd">{{ c.d }}</span><span class="dv num">{{ c.v == null ? '' : cu === '¥' ? short(c.v) : pctS(c.p) }}</span></template>
                   </div>
                 </div>
+              </template>
+              <div v-else class="grid3">
+                <div v-for="c in periodCells" :key="c.key" class="cell big" :class="c.v == null ? 'empty' : c.v > 0 ? 'pos' : c.v < 0 ? 'neg' : ''"
+                     @click="c.v != null && drill(c)">
+                  <span class="dd">{{ c.label }}</span><span class="dv num">{{ c.v == null ? '—' : cu === '¥' ? signed(c.v, 0) : pct(c.p) }}</span>
+                </div>
               </div>
-              <!-- 桌面：右侧填单日极值，同时告诉用户点格子能看明细 -->
-              <div class="cal-side" v-if="mode === '日'">
-                <div class="sh">单日波动</div>
-                <div class="srow"><span>最好</span><b class="num" :class="tone(dayStat.best?.p)">{{ dayStat.best ? pctS(dayStat.best.p) : '—' }}</b></div>
-                <div class="srow"><span>最差</span><b class="num" :class="tone(dayStat.worst?.p)">{{ dayStat.worst ? pctS(dayStat.worst.p) : '—' }}</b></div>
-                <div class="srow"><span>最好那天</span><b class="num">{{ dayStat.best?.date?.slice(5).replace('-', '/') || '—' }}</b></div>
-                <p class="sn">点日历里任意一天，下面展开每只基金各赚多少</p>
-              </div>
+              <p class="cal-tip" v-if="mode === '日'">点日历里任意一天，下面展开每只基金各赚多少</p>
             </div>
-          </div>
-          <!-- 选中那天：每只基金赚了多少 -->
-          <div class="card det" v-if="mode === '日' && sel && d.detail[sel]">
-            <div class="ch"><b class="num">{{ sel.replace(/-/g, '/') }} 收益</b>
-              <b class="num" :class="tone(selDay)">{{ signed(selDay) }}</b></div>
-            <div v-for="r in d.detail[sel]" :key="r[0]" class="drow" @click="$router.push(`/a/${aid}/fund/${r[0]}`)">
-              <div class="dn"><div>{{ d.funds[r[0]] || r[0] }}</div>
-                <small>{{ r[0] }}<span v-if="r[4]" class="tag" :class="r[4] === '买入' ? 'buy' : 'sell'">{{ r[4] }}</span>
-                  <span v-if="r[3]" class="tag gray">{{ r[3] }}</span></small></div>
-              <div class="dv2"><b class="num" :class="tone(r[1])">{{ signed(r[1]) }}</b><small class="num" :class="tone(r[2])">{{ r[2] == null ? '—' : pct(r[2]) }}</small></div>
-            </div>
-            <p class="note">「待更新」= 场外基金当天净值还没出，按 0 计；出了以后点更新数据就会补上</p>
           </div>
         </div>
-      </div>
+        <!-- 选中那天：每只基金赚了多少（点选后才出现，单独一张卡） -->
+        <div class="card det" v-if="mode === '日' && sel && d.detail[sel]">
+          <div class="ch"><b class="num">{{ sel.replace(/-/g, '/') }} 收益</b>
+            <b class="num" :class="tone(selDay)">{{ signed(selDay) }}</b></div>
+          <div v-for="r in d.detail[sel]" :key="r[0]" class="drow" @click="$router.push(`/a/${aid}/fund/${r[0]}`)">
+            <div class="dn"><div>{{ d.funds[r[0]] || r[0] }}</div>
+              <small>{{ r[0] }}<span v-if="r[4]" class="tag" :class="r[4] === '买入' ? 'buy' : 'sell'">{{ r[4] }}</span>
+                <span v-if="r[3]" class="tag gray">{{ r[3] }}</span></small></div>
+            <div class="dv2"><b class="num" :class="tone(r[1])">{{ signed(r[1]) }}</b><small class="num" :class="tone(r[2])">{{ r[2] == null ? '—' : pct(r[2]) }}</small></div>
+          </div>
+          <p class="note">「待更新」= 场外基金当天净值还没出，按 0 计；出了以后点更新数据就会补上</p>
+        </div>
+      </template>
     </div>
   </div>
 </template>
@@ -177,18 +157,6 @@ const periodCells = computed(() => {
   return ys.map(y => ({ key: y, label: `${y}年`, y, ...periodStat(String(y)) }))
 })
 const curSum = computed(() => periodStat(mode.value === '日' ? `${cur.value.y}-${pad(cur.value.m)}` : String(cur.value.y)))
-// 日历两侧的月度概览：涨跌天数 + 单日极值（只统计有数据的交易日）
-const dayStat = computed(() => {
-  const cs = dayCells.value.filter(c => c && c.v != null)
-  const up = cs.filter(c => c.v > 0), down = cs.filter(c => c.v < 0)
-  const ext = (cmp, init) => cs.reduce((m, c) => m == null || cmp(c.p ?? 0, m.p ?? 0) ? c : m, init)
-  return {
-    up: up.length, down: down.length, flat: cs.length - up.length - down.length,
-    upPct: cs.length ? up.length / cs.length * 100 : 0,
-    downPct: cs.length ? down.length / cs.length * 100 : 0,
-    best: ext((a, b) => a > b, null), worst: ext((a, b) => a < b, null),
-  }
-})
 const months = computed(() => [...new Set(d.value.dates.map(v => v.slice(0, 7)))])
 function canStep(k) {
   const { y, m } = cur.value
@@ -238,19 +206,12 @@ void money
 .dn{ min-width:0; font-size:14px; } .dn small{ display:flex; gap:4px; align-items:center; font-size:11.5px; color:var(--muted); margin-top:2px; }
 .dv2{ text-align:right; } .dv2 b{ display:block; font-size:14.5px; } .dv2 small{ font-size:12px; }
 
-/* 桌面：日历卡外框与上方曲线卡同宽（936），两侧留白用月度概览填上，不再让日历孤零零居中 */
-.cal-side{ display:none; }
+/* 曲线与日历在同一张卡里；日历是卡内一个居中的浅灰内嵌模块，不加任何两侧内容 */
+.trend-div{ height:1px; background:var(--line); margin:16px 0 14px; }
+.cal-tip{ font-size:11.5px; color:var(--muted); text-align:center; line-height:1.6; margin:12px 0 0; }
 @media (min-width:900px){
+  .cal-inner{ max-width:520px; margin:0 auto; background:#F8FAFC; border:1px solid var(--line);
+    border-radius:12px; padding:14px 18px 16px; }
   .cal .sumline{ justify-content:center; }
-  .cal-body.with-side{ display:grid; grid-template-columns:1fr 460px 1fr; gap:16px; align-items:start; }
-  .cal-body:not(.with-side){ max-width:460px; margin:0 auto; }
-  .cal-side{ display:block; background:#F8FAFC; border-radius:10px; padding:12px 14px; }
-  .cal-side .sh{ font-size:12px; color:var(--muted); margin-bottom:8px; }
-  .cal-side .srow{ display:flex; justify-content:space-between; align-items:baseline; padding:5px 0; font-size:12.5px; color:var(--sub); }
-  .cal-side .srow b{ font-size:15px; }
-  .cal-side .sbar{ display:flex; height:6px; border-radius:3px; overflow:hidden; background:#E9EBEF; margin-top:10px; }
-  .cal-side .sbar i{ display:block; height:100%; }
-  .cal-side .sbar .u{ background:var(--up); } .cal-side .sbar .d{ background:var(--down); }
-  .cal-side .sn{ font-size:11px; color:var(--muted); line-height:1.6; margin:10px 0 0; }
 }
 </style>
