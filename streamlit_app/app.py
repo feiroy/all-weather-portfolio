@@ -668,27 +668,24 @@ div[data-testid="stAlert"] p{ color:var(--brand-strong); }
 .st-key-trend_mode_switch button[aria-checked="true"],.st-key-rb_mode_switch button[aria-checked="true"]{background:var(--card) !important;
   box-shadow:0 1px 2px rgba(15,23,42,.08)}
 .st-key-trend_mode_switch button[aria-checked="true"] p,.st-key-rb_mode_switch button[aria-checked="true"] p{color:var(--brand) !important;font-weight:600}
-/* 宏观季节横幅：蓝色头卡上方，通栏淡色底 + 左侧色条 + 右侧微缩四象限 */
-.season-banner{ display:flex; align-items:center; gap:14px; padding:10px 16px; margin:0 0 12px;
-  background:var(--sbg); border-left:4px solid var(--sc); border-radius:12px; min-width:0; }
-.sb-mark{ width:36px; height:36px; border-radius:10px; background:var(--sc); color:#fff;
-  display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; }
-.sb-mark svg{ width:21px; height:21px; }
-.sb-txt{ display:flex; align-items:baseline; gap:10px; min-width:0; flex:1; flex-wrap:wrap; }
-.sb-k{ font-size:12px; color:var(--sub); }
-.sb-txt b{ font-size:19px; font-weight:700; color:var(--sc); letter-spacing:-.3px; }
-.sb-ax{ font-size:12.5px; color:var(--sub); white-space:nowrap; }
-.sb-a{ font-size:12.5px; color:var(--muted); margin-left:auto; white-space:nowrap;
+/* 宏观季节：头卡下方一行小卡，通栏、无凸出按钮，与头卡/状态条同宽 */
+.macro-mini{ display:flex; align-items:center; gap:9px; margin:10px 0 14px; padding:8px 14px;
+  background:var(--card); border:1px solid var(--line); border-radius:10px; min-width:0; }
+.mm-dot{ width:7px; height:7px; border-radius:50%; flex:0 0 auto; }
+.mm-k{ font-size:12px; color:var(--muted); white-space:nowrap; }
+.macro-mini b{ font-size:14px; font-weight:650; white-space:nowrap; }
+.mm-ax{ font-size:12px; color:var(--sub); white-space:nowrap; }
+.mm-a{ font-size:12px; color:var(--muted); margin-left:auto; white-space:nowrap;
   overflow:hidden; text-overflow:ellipsis; }
-.sb-quad{ display:grid; grid-template-columns:repeat(2,20px); grid-template-rows:repeat(2,20px);
-  gap:3px; flex:0 0 auto; }
-.sb-quad i{ display:grid; place-items:center; font-size:11px; font-style:normal; border-radius:4px;
-  background:#fff; color:#94A3B8; border:1px solid #E2E8F0; }
+.sb-quad{ display:grid; grid-template-columns:repeat(2,17px); grid-template-rows:repeat(2,17px);
+  gap:2px; flex:0 0 auto; }
+.sb-quad i{ display:grid; place-items:center; font-size:10px; font-style:normal; border-radius:3px;
+  background:#F8FAFC; color:#94A3B8; border:1px solid #E2E8F0; }
 .sb-quad i.on{ background:var(--qi); border-color:var(--qi); color:#fff; font-weight:650; }
 @media(max-width:700px){
-  .season-banner{ gap:10px; padding:9px 12px; }
-  .sb-a{ margin-left:0; width:100%; }
-  .sb-quad{ grid-template-columns:repeat(2,18px); grid-template-rows:repeat(2,18px); }
+  .macro-mini{ gap:7px; padding:7px 10px; flex-wrap:wrap; }
+  .mm-a{ display:none; }
+  .sb-quad{ margin-left:auto; }
 }
 /* 入口页账户卡：进入下面的「改名 / 删除」，弱化成一个小操作行 */
 [class*="st-key-lc_ops_"] { margin-top:6px !important; }
@@ -5417,22 +5414,6 @@ def _pg_assets() -> None:
     # 标题和一大段「一页四看」说明撤掉：头卡自己就说明了这是哪儿，
     # 四个子页签各管什么写在切换器的悬停提示里，不用每次进来都读一遍
 
-    # ---- 宏观季节横幅：放在蓝色头卡上方，通栏、带色、一眼看到当前大环境 ----
-    _ms = macro_season(prices, signals)
-    _q = {(True, False): "复", (True, True): "过", (False, False): "衰", (False, True): "滞"}
-    _mini = "".join(
-        f'<i class="{"on" if (q["growth"], q["inflation"]) == (_ms["growth"], _ms["inflation"]) else ""}" '
-        f'style="--qi:{q["color"]}" title="{q["label"]} · {q["sub"]} · {q["assets"]}">'
-        f'{_q[(q["growth"], q["inflation"])]}</i>'
-        for q in _ms["quadrants"])
-    st.markdown(
-        f'<div class="season-banner" style="--sc:{_ms["color"]};--sbg:{_ms["color"]}12">'
-        f'<span class="sb-mark">{_QUAD_ICONS[_ms["current"]]}</span>'
-        '<span class="sb-txt"><span class="sb-k">宏观季节</span>'
-        f'<b>{_ms["current"]}</b><span class="sb-ax">{_ms["axis"]}</span>'
-        f'<span class="sb-a">对应 {_ms["assets"]}</span></span>'
-        f'<span class="sb-quad">{_mini}</span></div>', unsafe_allow_html=True)
-
     # ---- 头卡：全站唯一一处「总金额 / 今日 / 持有收益」----
     _tot = _plan["total"]
     # 只数「账上有份额」的：表头那句「16 只基金」和下面列表的「共 N 只」得是同一个数，
@@ -5469,6 +5450,22 @@ def _pg_assets() -> None:
         '</div>'),
         unsafe_allow_html=True,
     )
+
+    # ---- 头卡下方：宏观季节，一行小卡（克制，不抢总金额的位置）----
+    _ms = macro_season(prices, signals)
+    _q = {(True, False): "复", (True, True): "过", (False, False): "衰", (False, True): "滞"}
+    _mini = "".join(
+        f'<i class="{"on" if (q["growth"], q["inflation"]) == (_ms["growth"], _ms["inflation"]) else ""}" '
+        f'style="--qi:{q["color"]}" title="{q["label"]} · {q["sub"]} · {q["assets"]}">'
+        f'{_q[(q["growth"], q["inflation"])]}</i>' for q in _ms["quadrants"])
+    st.markdown(
+        '<div class="macro-mini">'
+        f'<span class="mm-dot" style="background:{_ms["color"]}"></span>'
+        '<span class="mm-k">宏观季节</span>'
+        f'<b style="color:{_ms["color"]}">{_ms["current"]}</b>'
+        f'<span class="mm-ax">{_ms["axis"]}</span>'
+        f'<span class="mm-a">对应 {_ms["assets"]}</span>'
+        f'<span class="sb-quad">{_mini}</span></div>', unsafe_allow_html=True)
 
     # ---- 头卡下面一行结论：这一轮要不要动手 ----
     # 只说「有没有事、去哪看」，一个金额都不报 —— 该买该卖多少只存在「调仓」一处，
