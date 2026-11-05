@@ -507,9 +507,28 @@ div[data-testid="stAlert"] p{ color:var(--brand-strong); }
 .st-key-subhead [data-testid="stPageLink"] a p{ color:var(--brand) !important; font-size:14px !important; }
 .subhead-t{ font-size:17px; font-weight:700; color:var(--ink); }
 /* 市场入口页：四行大入口 */
-[class*="st-key-mk_"]{ border-radius:14px !important; }
-[class*="st-key-mk_"] [data-testid="stPageLink"] a p{ font-size:15.5px !important; font-weight:650; color:var(--ink) !important; }
-.mk-d{ font-size:12.5px; color:var(--muted); margin:-4px 0 2px 34px; }
+[class*="st-key-mk_"]{ border-radius:14px !important; border-left:3px solid var(--mk) !important;
+  padding:10px 14px !important; }
+/* 四个入口各一种颜色：避开红绿（那是涨跌的语义色） */
+.st-key-mk_funds{ --mk:#1D4ED8; }
+.st-key-mk_signals{ --mk:#B45309; }
+.st-key-mk_backtest{ --mk:#7C3AED; }
+.st-key-mk_valuation{ --mk:#0E7490; }
+[class*="st-key-mk_"] [data-testid="stPageLink"]{ flex:0 0 auto !important; width:auto !important; }
+[class*="st-key-mk_"] [data-testid="stPageLink"] a{ padding:0 !important; background:transparent !important; }
+[class*="st-key-mk_"] [data-testid="stPageLink"] a p{ font-size:15px !important; font-weight:650; color:var(--mk) !important; }
+[class*="st-key-mk_"] [data-testid="stIconMaterial"]{ color:var(--mk) !important; }
+/* 说明紧跟名称，不另起一行 */
+.mk-d{ font-size:12.5px; color:var(--mk); opacity:.78; white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis; }
+@media(max-width:700px){
+  /* 窄屏也保持「名称 · 说明」同一行：说明占剩余宽度，放不下就省略，不再整行掉到名称下面 */
+  [class*="st-key-mk_"]{ display:flex !important; flex-direction:row !important;
+    flex-wrap:nowrap !important; align-items:center !important; gap:12px !important; }
+  [class*="st-key-mk_"] > [data-testid="stElementContainer"]:first-child{ flex:0 0 auto !important; }
+  [class*="st-key-mk_"] > [data-testid="stElementContainer"]:last-child{ flex:1 1 auto !important; min-width:0 !important; }
+  .mk-d{ display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+}
 .st-key-asset_links{ margin:-4px 0 10px; }
 .st-key-asset_links [data-testid="stPageLink"] a p{ font-size:13px !important; color:var(--brand) !important; }
 /* 调仓卡片（手机）/ 表格（电脑）二选一 */
@@ -659,6 +678,35 @@ div[data-testid="stAlert"] p{ color:var(--brand-strong); }
 /* 交易记录页：记一笔那块画成卡片（已不用 st.form，控件改动即刷新下面的提示） */
 .st-key-tr_card{background:var(--card); border:1px solid var(--line); border-radius:16px;
   padding:20px !important; margin-bottom:18px}
+/* 记一笔：宽屏左右两栏（左表单 + 右「这一笔」），整页限宽居中，右边不再空一大片 */
+[data-testid="stMain"]:has(.st-key-tr_card) .st-key-subhead{ max-width:1080px; margin-left:auto; margin-right:auto; }
+.st-key-rec_note{ max-width:1080px; margin:0 auto 10px; }
+[data-testid="stHorizontalBlock"]:has(.st-key-tr_card){ max-width:1080px; margin:0 auto; }
+.st-key-tr_card{ max-width:none; }
+.st-key-tr_preview{ background:var(--card); border:1px solid var(--line); border-radius:16px;
+  padding:18px 20px !important; min-height:430px; }
+.st-key-tr_preview [data-testid="stVerticalBlock"]{ display:flex; flex-direction:column; min-height:394px; }
+.st-key-tr_preview [data-testid="stElementContainer"]:last-child{ margin-top:auto !important; }
+.pv-foot{ border-top:1px solid var(--line); padding-top:10px; }
+@media(max-width:900px){
+  .st-key-tr_preview{ min-height:0; }
+  .st-key-tr_preview [data-testid="stVerticalBlock"]{ min-height:0; }
+  .st-key-tr_preview [data-testid="stElementContainer"]:last-child{ margin-top:8px !important; }
+}
+.pv-h{ font-size:13px; color:var(--muted); }
+.pv-top{ display:flex; align-items:baseline; gap:10px; margin-top:6px; }
+.pv-side{ font-size:13px; font-weight:650; padding:2px 9px; border-radius:9px; }
+.pv-side.buy{ color:var(--red); background:#FEECEC; } .pv-side.sell{ color:var(--green); background:#E8F7EE; }
+.pv-amt{ font-size:26px; font-weight:700; letter-spacing:-.5px; font-variant-numeric:tabular-nums; }
+.pv-name{ font-size:14px; color:var(--sub); margin-top:6px; }
+.pv-name small{ color:var(--muted); margin-left:8px; font-size:12px; }
+.pv-rows{ margin-top:14px; border-top:1px solid var(--line); padding-top:8px; }
+.pv-rows div{ display:flex; justify-content:space-between; gap:10px; padding:5px 0; font-size:13px; }
+.pv-rows span{ color:var(--muted); flex:0 0 auto; } .pv-rows b{ font-weight:600; font-variant-numeric:tabular-nums; }
+.pv-note{ font-size:12px; color:var(--sub); line-height:1.7; margin-top:10px; }
+.pv-warn{ font-size:12px; color:#B45309; background:#FFFBEB; border-radius:8px; padding:7px 10px;
+  margin-top:8px; line-height:1.6; }
+.pv-foot{ font-size:11.5px; color:var(--muted); }
 .st-key-tr_card [data-testid="stHorizontalBlock"]{gap:14px; align-items:flex-end}
 .st-key-tr_card [data-testid="stButton"] button{height:38px; min-height:38px}
 .fund-head.flat{border:none; box-shadow:none; padding:0; margin:0; background:transparent}
@@ -5969,7 +6017,8 @@ def _pg_record() -> None:
         _q_amt = 0.0
     _sig = f"{_q_code}_{_q_side}_{_q_amt:.0f}"
     if _q_code:
-        st.caption("从「调仓」或基金详情带过来的：基金、买卖、金额已经填好，按支付宝里实际成交的改一下再存。")
+        with st.container(key="rec_note"):
+            st.caption("从「调仓」或基金详情带过来的：基金、买卖、金额已经填好，按支付宝里实际成交的改一下再存。")
 
     _unit_of: dict[str, str] = {}
     for _s0 in HG.SLOTS:
@@ -5984,7 +6033,8 @@ def _pg_record() -> None:
                 else "场外 · 按份额申购，一天一个净值")
 
     # ---------------- 记一笔：金额优先，和支付宝「买入 5,000 元」的说法一致 ----------------
-    with st.container(key="tr_card"):
+    _l, _r = st.columns([1.12, 0.88], gap="large")
+    with _l, st.container(key="tr_card"):
         # 一页一张表单、一列竖排：买还是卖 → 哪只 → 哪天 → 多少钱 → 单价 → 手续费。
         # 代码里控件的创建顺序是 日期 / 类型 / 基金 / 金额 / 单价 / 手续费（单价默认值要看日期和基金），
         # 所以先按显示顺序占好位，再往位子里放
@@ -6028,22 +6078,13 @@ def _pg_record() -> None:
         # 现金只看「金额」：买入付出去多少、卖出到账多少（手续费已含在金额里）
         _cash_after = (_cash + float(tr_amount) if tr_side == "卖出"
                        else _cash - float(tr_amount))
-        # 先说这只基金按什么成交，再说这笔会发生什么 —— 「我该填股价还是净值」是这个表单最容易填错的地方
-        _hint = f"**{_mkt(tr_slot[1])}**　{_side_note}"
-        if tr_amount > 0 and tr_nav > 0:
-            _hint += (f"　≈ {_sh_new:,.2f} {_uw(tr_slot[1])}"
-                      f"，现金 ¥{_cash:,.0f} → ¥{_cash_after:,.0f}")
-            # 场内买入只能是整手（100 股），折出零股基本就是金额或单价填错了 —— 顺带给出就近那一手
-            if tr_side == "买入" and _uw(tr_slot[1]) == "股" and abs(round(_sh_new) - _sh_new) > 0.01:
-                _near = int(round(_sh_new / 100)) * 100
-                _hint += ("（场内买入按整手 100 股，这个金额不够一手）" if _near <= 0 else
-                          f"（场内买入按整手 100 股；就近是 {_near:,} 股 ≈ ¥{_near * float(tr_nav):,.2f}）")
-        st.caption(_hint)
-        if _cash_after < -1:
-            st.warning(
-                f"记完现金会变成 ¥{_cash_after:,.0f}（负的）—— 账户里没有这么多现金。"
-                "把金额调小到现金以内；如果这只基金之前就有持仓、只是没补录，"
-                "先把那笔买入补上，现金就够扣了。")
+        # 口径、整手、现金提示放到右边「这一笔」卡片里，不再挤在表单下面
+        _lot_note = ""
+        if (tr_amount > 0 and tr_nav > 0 and tr_side == "买入"
+                and _uw(tr_slot[1]) == "股" and abs(round(_sh_new) - _sh_new) > 0.01):
+            _near = int(round(_sh_new / 100)) * 100
+            _lot_note = ("场内买入按整手 100 股，这个金额不够一手" if _near <= 0 else
+                         f"场内买入按整手 100 股；就近是 {_near:,} 股 ≈ ¥{_near * float(tr_nav):,.2f}")
 
         if _act.button("保存这一笔", type="primary", key="tr_add", width="stretch"):
             _t = {"date": str(tr_date), "side": tr_side,
@@ -6073,6 +6114,27 @@ def _pg_record() -> None:
                     f"¥{float(tr_amount):,.2f}")
                 st.switch_page(PG_TRADES, query_params={"acct": _aid})
 
+    # 右栏：把「记完会怎样」摆成一张卡，宽屏上不再让右侧空一大片
+    with _r, st.container(key="tr_preview", border=True):
+        st.markdown(
+            '<div class="pv-h">这一笔</div>'
+            f'<div class="pv-top"><span class="pv-side {("buy" if tr_side == "买入" else "sell")}">'
+            f'{tr_side}</span><b class="pv-amt">¥{float(tr_amount):,.2f}</b></div>'
+            f'<div class="pv-name">{html_escape(str(FL.fund_name(tr_slot[1]) or tr_slot[2]))}'
+            f'<small>{tr_slot[1]}</small></div>'
+            '<div class="pv-rows">'
+            f'<div><span>日期</span><b>{_cn_date(tr_date)}</b></div>'
+            f'<div><span>折合</span><b>{_sh_new:,.2f} {_uw(tr_slot[1])}</b></div>'
+            f'<div><span>单价</span><b>¥{float(tr_nav):,.4f}</b></div>'
+            f'<div><span>现金</span><b>¥{_cash:,.0f} → ¥{_cash_after:,.0f}</b></div>'
+            '</div>'
+            f'<div class="pv-note">{_mkt(tr_slot[1])}。{_side_note}</div>'
+            + (f'<div class="pv-warn">{_lot_note}</div>' if _lot_note else '')
+            + (f'<div class="pv-warn">记完现金会变成 ¥{_cash_after:,.0f}（负的）：账户里没有这么多现金。'
+               '把金额调小；或先补录之前漏记的买入。</div>' if _cash_after < -1 else ''),
+            unsafe_allow_html=True)
+        st.markdown('<div class="pv-foot">这里只记账，不替你下单。存完立刻重算持仓和收益。</div>',
+                    unsafe_allow_html=True)
 
 
 def _pg_trades() -> None:
@@ -7159,9 +7221,11 @@ def _pg_market() -> None:
                        (PG_SIGNALS, "三个策略这一轮触发了哪些趋势过滤"),
                        (PG_BACKTEST, "三个策略的历史回测、调仓节奏对比、自定义策略"),
                        (PG_VALUATION, "指数 PE / PB 分位，贵不贵")):
-        with st.container(key=f"mk_{_pg.url_path.replace('/', '_')}", border=True):
+        # 名称和说明同一行（原来说明另起一行、还缩进，四张卡片看起来左重右轻）
+        with st.container(key=f"mk_{_pg.url_path}", border=True, horizontal=True,
+                          vertical_alignment="center", gap="small"):
             st.page_link(_pg, label=_pg.title, icon=_pg.icon, query_params={"acct": _aid})
-            st.markdown(f'<div class="mk-d">{_desc}</div>', unsafe_allow_html=True)
+            st.markdown(f'<span class="mk-d">{_desc}</span>', unsafe_allow_html=True, width="content")
 
 
 def _with_back(fn, title, parent, parent_label):
