@@ -531,23 +531,17 @@ div[data-testid="stAlert"] p{ color:var(--brand-strong); }
 .st-key-tr_new_btn [data-testid="stPageLink"] a p, .st-key-tr_new_btn [data-testid="stPageLink"] a span{
   color:#fff !important; font-weight:650 !important; }
 .st-key-hd_actions{ margin-bottom:8px; }
-/* 详情页左栏（电脑）：紧凑的「名称 + 金额」列表，当前这只蓝底 */
-.hd-h{ font-size:12.5px; color:var(--muted); margin:2px 0 10px 10px; }
-.st-key-hd_list{ gap:2px !important; border-right:1px solid var(--line); padding-right:12px; }
-[class*="st-key-hdi_"] [data-testid="stPageLink"], [class*="st-key-hdi_"] [data-testid="stPageLink"] a{ width:100% !important; }
-[class*="st-key-hdi_"] [data-testid="stPageLink"] a{ border-radius:10px !important; padding:7px 10px !important;
-  background:transparent !important; justify-content:flex-start !important; }
-[class*="st-key-hdi_"] [data-testid="stPageLink"] a:hover{ background:var(--bg) !important; }
-[class*="st-key-hdi_"] [data-testid="stIconMaterial"]{ display:none !important; }
-[class*="st-key-hdi_"] [data-testid="stPageLink"] a p{ font-size:13px !important; color:var(--sub) !important; }
-[class*="st-key-hdi_"][class*="_on"] [data-testid="stPageLink"] a{ background:#EEF2FF !important; }
-[class*="st-key-hdi_"][class*="_on"] [data-testid="stPageLink"] a p{ color:var(--brand) !important; font-weight:650; }
+/* 详情页：记一笔 / 它的成交 在左，上一只 · 3/16 · 下一只 在右（替代原来的左侧基金列表） */
+.st-key-hd_actions{ align-items:center; flex-wrap:wrap; }
+.st-key-hd_nav{ margin-left:auto; align-items:center; gap:2px !important; width:auto !important;
+  background:#fff; border:1px solid var(--line); border-radius:999px; padding:2px 4px; }
+.st-key-hd_nav [data-testid="stPageLink"] a{ padding:3px 10px !important; border-radius:999px !important; }
+.st-key-hd_nav [data-testid="stPageLink"] a:hover{ background:var(--bg) !important; }
+.hd-pos{ font-size:12px; color:var(--muted); padding:0 4px; font-variant-numeric:tabular-nums; white-space:nowrap; }
 .st-key-hd_actions [data-testid="stPageLink"] a p{ font-size:13px !important; color:var(--brand) !important; }
 @media(max-width:900px){
   .st-key-rb_cards{ display:flex; }
   .st-key-rb_table{ display:none; }
-  .st-key-hd_list, [data-testid="stColumn"]:has(> div > .st-key-hd_list),
-  [data-testid="stColumn"]:has(.st-key-hd_list){ display:none !important; }
   [data-testid="stElementContainer"]:has(> div > .hero), [data-testid="stElementContainer"]:has(.hero){ display:none !important; }
   .st-key-tr_new_btn{ position:fixed; right:16px; bottom:calc(72px + env(safe-area-inset-bottom)); z-index:1001; width:auto !important; }
   .st-key-tr_new_btn [data-testid="stPageLink"] a{ box-shadow:0 6px 18px rgba(30,64,175,.32); padding:10px 18px !important; }
@@ -5452,7 +5446,7 @@ def _holding_item(code: str) -> tuple[dict | None, str]:
 
 
 def _pg_holding() -> None:
-    """一只基金的详情页。手机：单独一页；电脑：左边仍是持仓列表（点别的只换右边），右边详情。"""
+    """一只基金的详情页（从资产页的持仓点进来）。详情占满整页，右上角「上一只 / 下一只」切换。"""
     code = str(st.query_params.get("code") or "")
     it, note = _holding_item(code)
     name = (str(it["f"].get("name") or FL.fund_name(code) or code) if it else (FL.fund_name(code) or code or "基金详情"))
@@ -5460,31 +5454,30 @@ def _pg_holding() -> None:
     if it is None:
         st.info("这只基金不在当前账户里了（可能换了账户，或已经全部卖出又从配置里删掉）。")
         return
-    _l, _r = st.columns([1, 2.6], gap="medium")
-    with _l, st.container(key="hd_list"):
-        # 窄栏里放不下持仓表那 6 列：只留「名称 + 金额」，点哪只右边换哪只
-        st.markdown(f'<div class="hd-h">我的基金 · {len(_plan["rows"]) + len(_plan["other"])} 只</div>',
-                    unsafe_allow_html=True)
-        _seen = set()
-        for _it in list(_plan["rows"]) + [_hg_other_item(o["code"]) for o in _plan["other"]]:
-            _c = _it["code"]
-            if _c in _seen or (_it.get("dup") and _c in _seen):
-                continue
-            _seen.add(_c)
-            _nm = str(_it["f"].get("name") or FL.fund_name(_c) or _c)
-            with st.container(key=f"hdi_{_c}_{'on' if _c == code else 'off'}"):
-                st.page_link(PG_HOLDING, label=f"{_nm}　¥{float(_it['mv']):,.0f}",
-                             query_params={"acct": _aid, "code": _c})
-    with _r:
-        if note:
-            st.caption(note)
-        with st.container(key="hd_actions", horizontal=True, gap="small"):
-            st.page_link(PG_RECORD, label="记一笔这只基金", icon=":material/add:",
-                         query_params={"acct": _aid, "code": code})
-            _n = sum(1 for t in (acct or {}).get("trades", []) if str(t.get("code")) == code)
-            st.page_link(PG_TRADES, label=f"它的成交 · {_n} 笔", icon=":material/receipt_long:",
-                         query_params={"acct": _aid, "code": code})
-        _pf_detail(it)
+    # 原来左边有一列「我的基金」—— 和资产页的持仓列表重复，窄屏时还排在详情上面把内容挤下去。
+    # 换成「上一只 / 下一只」：顺序和资产页持仓列表一致（同一只挂两个位置只算一次）
+    _codes = []
+    for _it in list(_plan["rows"]) + [{"code": o["code"]} for o in _plan["other"]]:
+        if _it["code"] not in _codes and not _it.get("dup"):
+            _codes.append(_it["code"])
+    _k = _codes.index(code) if code in _codes else -1
+    if note:
+        st.caption(note)
+    with st.container(key="hd_actions", horizontal=True, gap="small"):
+        st.page_link(PG_RECORD, label="记一笔这只基金", icon=":material/add:",
+                     query_params={"acct": _aid, "code": code})
+        _n = sum(1 for t in (acct or {}).get("trades", []) if str(t.get("code")) == code)
+        st.page_link(PG_TRADES, label=f"它的成交 · {_n} 笔", icon=":material/receipt_long:",
+                     query_params={"acct": _aid, "code": code})
+        if _k >= 0 and len(_codes) > 1:
+            with st.container(key="hd_nav", horizontal=True, gap=None):
+                _prev, _next = _codes[_k - 1], _codes[(_k + 1) % len(_codes)]     # 首尾循环
+                st.page_link(PG_HOLDING, label="上一只", icon=":material/chevron_left:",
+                             query_params={"acct": _aid, "code": _prev}, help=FL.fund_name(_prev) or _prev)
+                st.markdown(f'<span class="hd-pos">{_k + 1} / {len(_codes)}</span>', unsafe_allow_html=True)
+                st.page_link(PG_HOLDING, label="下一只", icon=":material/chevron_right:",
+                             query_params={"acct": _aid, "code": _next}, help=FL.fund_name(_next) or _next)
+    _pf_detail(it)
 
 
 def _pg_assets() -> None:
@@ -5495,7 +5488,8 @@ def _pg_assets() -> None:
     _tot = _plan["total"]
     # 只数「账上有份额」的：表头那句「16 只基金」和下面列表的「共 N 只」得是同一个数，
     # 否则用户会以为漏了一只 —— 「位置已关闭 / 不在配置里」的那些钱也还在账上，一样要数
-    _n_funds = len([r for r in _plan["rows"] if r["shares"] > 0]) + len(_plan["other"])
+    # 按「不同的基金」数：同一只挂在两个位置（份额只有一份）只算一只，否则会多数出来
+    _n_funds = len({r["code"] for r in _plan["rows"] if r["shares"] > 0}) + len(_plan["other"])
     _head_sub = (f"账户起始 {_cn_date(acct['created'])} · 净值日期 {_cn_date(_hg_last)} · {_n_funds} 只基金"
                  if acct else "还没有账户")
     _curve = _head_month_curve_html()

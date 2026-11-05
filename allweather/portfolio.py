@@ -367,7 +367,7 @@ class Portfolio:
         return {"total": p["total"], "today": p["today"], "today_pct": (p["today"] / prev * 100) if prev > 0 else 0.0,
                 "pnl": p["pnl"], "pnl_pct": p["pnl_pct"] * 100, "cash": p["cash"],
                 "asof": f"{self.last:%Y-%m-%d}", "created": self.acct.get("created"),
-                "n_funds": len([r for r in p["rows"] if r["shares"] > 0]) + len(p["other"])}
+                "n_funds": len({r["code"] for r in p["rows"] if r["shares"] > 0}) + len(p["other"])}
 
     def slot_options(self) -> list[dict]:
         """记一笔可选的基金（app.py::_hg_slot_options）：参与调仓的在前，关掉的位置、已删的代码在后。"""
