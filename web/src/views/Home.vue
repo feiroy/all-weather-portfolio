@@ -151,7 +151,9 @@ const statusLabel = computed(() => {
 @media (min-width:900px){
   /* 顶部导航已经有账户名和切换入口，资产页这行在电脑上重复，隐藏 */
   .top{ display:none; }
-  .cols{ display:grid; grid-template-columns:420px 1fr; gap:4px; align-items:start; padding-top:12px; }
-  .cols .col:last-child .sec-t{ margin-top:10px; }
+  .cols{ max-width:960px; margin:0 auto; padding-top:12px; }
+  .cols .col:last-child .sec-t{ margin-top:16px; }
+  /* 持仓列表桌面两列，长列表不拖成一整条 */
+  .cols .col:last-child :deep(.van-cell-group){ display:grid; grid-template-columns:1fr 1fr; gap:0 10px; }
 }
 </style>

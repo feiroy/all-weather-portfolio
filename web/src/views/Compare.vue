@@ -16,17 +16,17 @@
               </div>
             </div>
           </div>
+        </div>
+        <div class="card">
+          <div class="ct"><b>收益率走势</b><span class="k">按同样的入金节奏折算</span></div>
+          <MultiLine :series="d.curves" :height="300" :colors="['#1E40AF', '#F59E0B', '#8B5CF6']" :dashed="['策略理论']" />
+        </div>
           <div class="card read">
             <b>怎么看</b>
             <p><i class="dot" style="background:#F59E0B"></i><b>项目默认基金</b>：同样的入金时间和金额，按策略目标权重买项目默认的那几只 ETF。我的账户跑输它 → 多半是<b>选的基金</b>或<b>没及时调仓</b>拖了后腿。</p>
             <p><i class="dot" style="background:#8B5CF6"></i><b>策略理论</b>：回测引擎里这个策略的净值曲线，按同样的入金节奏折算。和它的差距是<b>执行 + 跟踪误差</b>的总和。</p>
             <p>运行不满一年，差距在 ±1pp 以内都算正常波动。</p>
           </div>
-        </div>
-        <div class="card">
-          <div class="ct"><b>收益率走势</b><span class="k">按同样的入金节奏折算</span></div>
-          <MultiLine :series="d.curves" :height="300" :colors="['#1E40AF', '#F59E0B', '#8B5CF6']" :dashed="['策略理论']" />
-        </div>
       </div>
     </div>
   </div>

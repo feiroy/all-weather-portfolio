@@ -48,9 +48,9 @@ const cards = [
 .ptitle{ display:flex; align-items:baseline; gap:8px; padding:calc(14px + env(safe-area-inset-top)) 16px 2px; font-size:20px; }
 .ptitle .sub{ font-size:12px; color:var(--muted); }
 .upd{ margin-left:auto; align-self:center; }
-.grid{ display:grid; gap:10px; padding:12px 12px 0; grid-template-columns:1fr; }
+.grid{ display:grid; gap:10px; padding:12px 12px 0; grid-template-columns:minmax(0,1fr); }
 .mc{ display:flex; align-items:center; gap:10px; background:#fff; border-radius:14px; padding:12px 14px;
-  text-decoration:none; color:var(--ink); border-left:1px solid var(--line); }
+  text-decoration:none; color:var(--ink); border-left:1px solid var(--line); min-width:0; }
 .mc:active{ transform:scale(.99); }
 .mc i{ width:38px; height:38px; border-radius:11px; display:grid; place-items:center; font-size:20px;
   flex:0 0 auto; background:var(--mk-bg); color:var(--sub); }
@@ -61,5 +61,5 @@ const cards = [
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .mv{ font-size:12px; color:var(--sub); white-space:nowrap; flex:0 0 auto; } .mv b{ font-size:16px; color:var(--brand); }
 .go{ color:#CBD5E1; font-size:14px; flex:0 0 auto; }
-@media (min-width:900px){ .grid{ grid-template-columns:1fr 1fr; } .ptitle{ padding-top:16px; } }
+@media (min-width:900px){ .grid{ grid-template-columns:repeat(2,minmax(0,1fr)); } .ptitle{ padding-top:16px; } }
 </style>

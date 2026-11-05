@@ -13,7 +13,7 @@
       <van-loading v-if="loading" class="ld" vertical>回测计算中…</van-loading>
       <p v-else-if="err" class="empty-tip">{{ err }}</p>
       <div v-else-if="d" class="cols2">
-        <div>
+        <div class="metric-grid">
           <div v-for="r in d.rows" :key="r.name" class="card rcard" :class="{ base: isBase(r.name) }">
             <div class="r1"><i :style="{ background: colorOf(r.name) }"></i><b>{{ r.name }}</b><span class="k num">调仓 {{ r.n }} 次</span></div>
             <div class="r2">
@@ -72,4 +72,10 @@ const colors = computed(() => Object.keys(d.value?.curves || {}).map(colorOf))
 .r2{ display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin-top:10px; }
 .r2 span{ display:block; font-size:11.5px; color:var(--muted); } .r2 b{ display:block; font-size:15px; margin-top:2px; }
 .ct{ display:flex; justify-content:space-between; align-items:baseline; font-size:15px; margin-bottom:8px; }
+
+@media (min-width:900px){
+  .metric-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+  .metric-grid .card{ margin:0; }
+  .metric-grid + .k{ grid-column:1/-1; }
+}
 </style>

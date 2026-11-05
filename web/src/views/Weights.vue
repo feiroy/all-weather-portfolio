@@ -28,6 +28,7 @@
         <div>
           <!-- 我的位置：每个位置挂哪几只 -->
           <div class="sec-t"><span>我的位置 · 每个位置买哪几只</span></div>
+          <div class="slot-grid">
           <div v-for="s in d.slots" :key="s.slot" class="card slot" :class="{ off: !s.on }">
             <div class="s1"><b>{{ s.label }}</b>
               <van-switch :model-value="s.on" size="20px" @update:model-value="v => op(s, { op: 'toggle', on: v })" /></div>
@@ -45,6 +46,7 @@
               </div>
             </template>
             <p v-else class="offt">关掉的位置不买；它的目标权重按同桶分给别的位置</p>
+          </div>
           </div>
           <p class="empty-tip">一个位置挂多只时按占比分钱（会自动归一）；场内按股一手 100 股，场外按金额申购</p>
         </div>
@@ -155,4 +157,10 @@ async function add(r) {
 .s3 a:last-child{ color:var(--muted); margin-left:auto; }
 .offt{ font-size:12px; color:var(--muted); margin:8px 0 0; }
 .pop{ padding:18px 4px; } .pop h4{ margin:0 12px 6px; font-size:16px; }
+
+@media (min-width:900px){
+  .stg{ grid-template-columns:repeat(3,1fr); }
+  .slot-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; padding:0 12px; align-items:start; }
+  .slot-grid .card{ margin:0; }
+}
 </style>

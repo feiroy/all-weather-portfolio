@@ -200,4 +200,9 @@ void money
 .drow:last-of-type{ border-bottom:0; }
 .dn{ min-width:0; font-size:14px; } .dn small{ display:flex; gap:4px; align-items:center; font-size:11.5px; color:var(--muted); margin-top:2px; }
 .dv2{ text-align:right; } .dv2 b{ display:block; font-size:14.5px; } .dv2 small{ font-size:12px; }
+
+@media (min-width:900px){
+  /* 曲线是主图占满宽度；日历和当日明细收窄居中，格子才不会被拉散 */
+  .cols2 > div:last-child{ max-width:640px; margin:0 auto; }
+}
 </style>

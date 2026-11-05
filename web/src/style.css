@@ -45,6 +45,7 @@ html,body{ margin:0; background:var(--bg); color:var(--ink);
   .has-desk .page{ min-height:calc(100vh - 56px); }
   .page{ padding-bottom:32px; }
   .van-nav-bar.subbar{ top:56px; max-width:1080px; margin:0 auto; }
-  .cols2{ display:grid; grid-template-columns:420px 1fr; gap:4px; align-items:start; }
-  .cols2.even{ grid-template-columns:1fr 1fr; }
+  /* 桌面不再左右同级分屏：所有页面统一限宽单主列，靠纵向顺序建立主次 */
+  .cols2{ max-width:960px; margin:0 auto; }
+  .cols2 > div{ min-width:0; }
 }
