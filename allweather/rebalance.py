@@ -80,6 +80,38 @@ def compute_signal_states(prices):
     return signals
 
 
+# 宏观季节（增长 × 通胀 四象限）：纯展示，不参与目标权重；两端共用这一份判断
+MACRO_QUADRANTS = [
+    {"label": "复苏", "sub": "增长↑ 通胀↓", "growth": True, "inflation": False,
+     "color": "#16703B", "assets": "沪深300 · 标普500"},
+    {"label": "过热", "sub": "增长↑ 通胀↑", "growth": True, "inflation": True,
+     "color": "#C52828", "assets": "黄金 · 有色金属"},
+    {"label": "滞胀", "sub": "增长↓ 通胀↑", "growth": False, "inflation": True,
+     "color": "#B45309", "assets": "黄金（避险）"},
+    {"label": "衰退", "sub": "增长↓ 通胀↓", "growth": False, "inflation": False,
+     "color": "#1E40AF", "assets": "10Y国债 · 30Y国债"},
+]
+
+
+def macro_season(prices, signals) -> dict:
+    """当前宏观象限。
+
+    增长：沪深300 收盘 > SMA120（不含当天，见 compute_signal_states 的 hs300_above_sma120）；
+    通胀：黄金收盘 > SMA75（黄金价格作通胀的粗略代理）。两个二值维度拼成四象限。
+    只作宏观背景展示，**不改目标权重、不触发调仓**。
+    """
+    growth = bool(signals.get("hs300_above_sma120", False))
+    gold = prices["gold"]
+    sma75 = gold.rolling(75).mean().iloc[-1]
+    inflation = bool(pd.notna(sma75) and gold.iloc[-1] > sma75)
+    cur = next(q for q in MACRO_QUADRANTS
+               if q["growth"] == growth and q["inflation"] == inflation)
+    return {"growth": growth, "inflation": inflation,
+            "axis": f"增长{'↑' if growth else '↓'}  通胀{'↑' if inflation else '↓'}",
+            "current": cur["label"], "color": cur["color"], "assets": cur["assets"],
+            "quadrants": [dict(q) for q in MACRO_QUADRANTS]}
+
+
 # ============================================================
 # 权重计算
 # ============================================================

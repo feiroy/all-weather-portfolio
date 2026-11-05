@@ -495,7 +495,7 @@ _SIGNALS = [
 
 
 async def signals(request: Request):
-    from allweather.rebalance import compute_signal_states
+    from allweather.rebalance import compute_signal_states, macro_season
     prices = pd.DataFrame({c: pd.read_csv(DATA_DIR / f"{f}.csv", parse_dates=["date"], index_col="date")["close"]
                            for c, f in _LIVE_FILES.items() if (DATA_DIR / f"{f}.csv").exists()}).sort_index().ffill().dropna()
     sg = compute_signal_states(prices)
@@ -511,7 +511,7 @@ async def signals(request: Request):
                 curves[STRAT_NAME[k]] = {"dates": [f"{d:%Y-%m-%d}" for d in s.index],
                                          "ret": [round((float(v) / float(s.iloc[0]) - 1) * 100, 4) for v in s]}
     return J({"rows": rows, "strategies": [{"key": k, "name": STRAT_NAME[k]} for k in KEYS], "curves": curves,
-              "asof": f"{prices.index[-1]:%Y-%m-%d}"})
+              "asof": f"{prices.index[-1]:%Y-%m-%d}", "macro": macro_season(prices, sg)})
 
 
 async def backtest(request: Request):

@@ -37,6 +37,8 @@
                              :fmt-tip="i => `${d.month.dates[i]}<br/><b>${pct(d.month.ret[i])}</b>　${signed(d.month.money[i], 0)} 元`" />
                 </div>
               </div>
+              <!-- 宏观季节：头卡正下方，一眼能看到当前大环境 -->
+              <MacroSeason />
               <!-- 快捷入口：收益 / 对比 / 体检 / 选基 -->
               <div class="quick">
                 <router-link v-for="q in quick" :key="q.to" :to="`/a/${aid}/${q.to}`">
@@ -82,6 +84,7 @@ import { get, peek, dataVer } from '../api'
 import { money, signed, pct, tone } from '../fmt'
 import TabBar from '../components/TabBar.vue'
 import LineChart from '../components/LineChart.vue'
+import MacroSeason from '../components/MacroSeason.vue'
 import UpdateBtn from '../components/UpdateBtn.vue'
 
 const route = useRoute()

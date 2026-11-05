@@ -17,6 +17,7 @@ import numpy as np
 
 from allweather.rebalance import (
     compute_signal_states,
+    macro_season,
     STRATEGIES,
     ETF_META,
 )
@@ -667,6 +668,29 @@ div[data-testid="stAlert"] p{ color:var(--brand-strong); }
 .st-key-trend_mode_switch button[aria-checked="true"],.st-key-rb_mode_switch button[aria-checked="true"]{background:var(--card) !important;
   box-shadow:0 1px 2px rgba(15,23,42,.08)}
 .st-key-trend_mode_switch button[aria-checked="true"] p,.st-key-rb_mode_switch button[aria-checked="true"] p{color:var(--brand) !important;font-weight:600}
+/* 资产页头卡下的宏观季节条：一行紧凑，点「四个象限」才展开 */
+.st-key-macro_row{ margin:10px 0 4px; }
+.macro-bar{ display:flex; align-items:center; gap:10px; min-width:0; flex:1;
+  background:var(--card); border:1px solid var(--line); border-radius:14px; padding:9px 14px; }
+.macro-ic{ width:32px; height:32px; border-radius:9px; display:inline-flex; align-items:center;
+  justify-content:center; flex:0 0 auto; }
+.macro-ic svg{ width:18px; height:18px; }
+.macro-t{ font-size:12.5px; color:var(--muted); white-space:nowrap; }
+.macro-cur{ font-size:17px; font-weight:700; white-space:nowrap; }
+.macro-axis{ font-size:12.5px; color:var(--sub); white-space:nowrap; }
+.macro-a{ font-size:12.5px; color:var(--muted); margin-left:auto; white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis; }
+.macro-grid{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.macro-q{ border:1px solid var(--line); border-radius:10px; padding:10px; background:var(--card);
+  display:flex; flex-direction:column; gap:3px; }
+.macro-q.on{ border:2px solid var(--q); background:#F8FAFC; }
+.macro-q b{ font-size:14px; color:var(--q); } .macro-q small{ font-size:11.5px; color:var(--muted); }
+.macro-q span{ font-size:12px; color:var(--sub); }
+@media(max-width:700px){
+  .macro-bar{ flex-wrap:wrap; gap:6px 10px; }
+  .macro-a{ margin-left:0; width:100%; }
+  .macro-grid{ grid-template-columns:1fr; }
+}
 /* 入口页账户卡：进入下面的「改名 / 删除」，弱化成一个小操作行 */
 [class*="st-key-lc_ops_"] { margin-top:6px !important; }
 [class*="st-key-lc_ops_"] button{ font-size:12px !important; min-height:28px !important;
@@ -4931,8 +4955,9 @@ def _slot_config_panel() -> None:
 # Tab 1: 信号仪表盘
 # ============================================================
 def _pg_signals() -> None:
-    st.caption("这一页是**项目自带策略模型**算出来的信号（趋势过滤、宏观季节、三个策略的历史走势），"
-               "跟你自己买了什么无关；你的钱这一轮该不该动，看「调仓」页。")
+    st.caption("这一页是**项目自带策略模型**算出来的信号（趋势过滤、三个策略的历史走势），"
+               "跟你自己买了什么无关；你的钱这一轮该不该动，看「调仓」页。"
+               "宏观大环境在「资产」页头卡下面。")
     # ---- ① 三个策略的回测净值同图：原来只画侧边栏选的那一条，现在并排 ----
     _bm = {_strat_display[k]: c for k in _STRAT_KEYS
            if (c := _bench_curve(k)) is not None and len(c) > 30}
@@ -4971,135 +4996,6 @@ def _pg_signals() -> None:
                 '「生效」是这个策略的规则里有这一条、而且这一轮用上了 —— 比如黄金、标普的趋势过滤，'
                 '保守增强回测否决过，所以对它「不适用」。生效的信号已经算进「选基配置」的目标权重里。</div>',
                 unsafe_allow_html=True)
-
-    # 四季象限
-    st.divider()
-    st.subheader("宏观季节")
-
-    growth_up = signals.get("hs300_above_sma120", False)
-    gold_sma75 = prices["gold"].rolling(75).mean().iloc[-1]
-    inflation_up = prices["gold"].iloc[-1] > gold_sma75
-
-    QUADRANTS = [
-        {"label": "复苏", "sub": "增长↑ 通胀↓", "growth": True,  "inflation": False,
-         "icon": _QUAD_ICONS["复苏"], "color": "#16703B", "assets": "沪深300 · 标普500"},
-        {"label": "过热", "sub": "增长↑ 通胀↑",  "growth": True,  "inflation": True,
-         "icon": _QUAD_ICONS["过热"], "color": "#C52828", "assets": "黄金 · 有色金属"},
-        {"label": "滞胀", "sub": "增长↓ 通胀↑", "growth": False, "inflation": True,
-         "icon": _QUAD_ICONS["滞胀"], "color": "#B45309", "assets": "黄金（避险）"},
-        {"label": "衰退", "sub": "增长↓ 通胀↓",  "growth": False, "inflation": False,
-         "icon": _QUAD_ICONS["衰退"], "color": "#1E40AF", "assets": "10Y国债 · 30Y国债"},
-    ]
-
-    current_label = ""
-    for q in QUADRANTS:
-        if q["growth"] == growth_up and q["inflation"] == inflation_up:
-            current_label = q["label"]
-            break
-
-    st.caption(f"当前：**{current_label}**（增长{'↑' if growth_up else '↓'}  通胀{'↑' if inflation_up else '↓'}）")
-
-    cells = []
-    for q in QUADRANTS:
-        active = q["growth"] == growth_up and q["inflation"] == inflation_up
-        border = f"2px solid {_BRAND}" if active else "1px solid #E2E8F0"
-        bg = "#EFF6FF" if active else "#FFFFFF"
-        cells.append(
-            f"<div style='display:flex;align-items:center;gap:12px;border:{border};border-radius:14px;"
-            f"padding:12px 16px;background:{bg};box-shadow:0 1px 2px rgba(15,23,42,.04)'>"
-            f"<span style='display:inline-flex;align-items:center;justify-content:center;"
-            f"width:38px;height:38px;border-radius:10px;background:{q['color']}1A;color:{q['color']};flex:0 0 auto'>"
-            f"<span style='width:20px;height:20px;display:inline-flex'>{q['icon']}</span></span>"
-            f"<span style='min-width:0'>"
-            f"<strong style='font-size:15px;color:#0F172A'>{q['label']}</strong> "
-            f"<span style='color:#94A3B8;font-size:12px'>{q['sub']}</span><br>"
-            f"<span style='font-size:12.5px;color:#475569'>{q['assets']}</span>"
-            f"</span></div>"
-        )
-
-    html = ("<div class='quad-grid' style='display:grid;grid-template-columns:1fr 1fr;gap:12px'>"
-            + "".join(cells) + "</div>")
-    st.markdown(html, unsafe_allow_html=True)
-
-# ============================================================
-# Tab 2: 权重与选基 —— 上半是策略给的目标权重，下半是我的基金配置
-# ============================================================
-def _weight_note(k: str, a: str) -> str:
-    """某策略下某资产这一轮被信号改了什么 —— 直接拿「改前 / 改后」两份权重比，不再手抄一遍规则。
-
-    原来按 strat_key 和 signals 再写一遍「B-RP/V3c 才有黄金过滤」，跟回测引擎
-    是两份规则，改一处忘一处就会标错；比权重差值永远跟实际算出来的一致。
-    """
-    s0 = _W0_ALL[k]
-    b, f = float(s0.get(a, 0) or 0), float(_W_ALL[k].get(a, 0) or 0)
-    if b > 0 and f <= 1e-9:
-        return "趋势过滤 → 0"
-    if f > b * 1.05 + 1e-4:
-        return f"接收 +{(f - b) * 100:.1f}pp"
-    return ""
-
-
-def _strategy_switch_panel() -> None:
-    """账户跟随哪个策略：选 → 预览后果 → 确认写盘。
-
-    这个选择决定「调仓」整张清单，所以不能一点就生效：先把「会清掉哪些位置、
-    哪部分权重在你这儿没位置放、清单变成几笔、要卖多少」摆出来，确认了才写进账户。
-    """
-    if acct is None:
-        st.caption("还没建账户：建账户时在「记录」里选跟随的策略。")
-        return
-    _cur = strat_key
-    with st.container(key="strat_switch"):
-        _c1, _c2 = st.columns([1.2, 2.8], vertical_alignment="bottom")
-        _pick = _c1.selectbox("账户跟随的策略", _STRAT_KEYS, index=_STRAT_KEYS.index(_cur),
-                              format_func=lambda k: _strat_display[k] + ("（当前）" if k == _cur else ""),
-                              key="strat_pick")
-        if _pick == _cur:
-            _c2.markdown(
-                f'<div class="sw-note">「调仓」、状态条、体检的偏离目标、对比页的两条基准，'
-                f'都按 <b>{_strat_display[_cur]}</b> 算。换策略前会先给预览。</div>',
-                unsafe_allow_html=True)
-            return
-        # ---- 预览：换过去之后这一轮的清单 ----
-        _sw = HG.slot_weights(_W_ALL[_pick], holdings)
-        _pv = _hg_plan(_sw)
-        _liq = [o for o in _pv["orders"] if o.get("liq")]
-        _liq_amt = sum(float(o["shares"]) * float(o["nav"]) for o in _liq)
-        _zero = [s for s in HG.active(holdings)
-                 if float(_sw.get(s, 0) or 0) <= 0 and s not in STRATEGIES[_pick]["assets"]]
-        _unp = HG.unplaced_assets(_W_ALL[_pick], holdings)
-        _lines = [
-            f'<b>这一轮清单</b>：{len(_plan["orders"])} 笔 → <b>{len(_pv["orders"])} 笔</b>，'
-            f'买 ¥{_pv["buy"]:,.0f} / 卖 ¥{_pv["sell"]:,.0f}'
-            + (f'，其中<b class="sell">清仓 {len(_liq)} 笔 ¥{_liq_amt:,.0f}</b>' if _liq else "")
-        ]
-        if _zero:
-            _lines.append("<b>资产池里没有</b>：" + "、".join(HG.SLOT_LABEL[s] for s in _zero)
-                          + " —— 这些位置目标是 0，手上的会进清单全部卖掉；不想卖就先在下面把位置关掉"
-                            "（关掉的位置不进调仓，份额留在账上）")
-        for _a, _to in _unp.items():
-            _lines.append(f'<b>你没有位置</b>：{ETF_META.get(_a, {}).get("name", _a)} '
-                          f'{float(_W_ALL[_pick].get(_a, 0)) * 100:.1f}% → {_to}')
-        if _liq:
-            _lines.append("清仓明细：" + "、".join(
-                f'{FL.fund_name(o["code"]) or o["code"]} ¥{float(o["shares"]) * float(o["nav"]):,.0f}'
-                for o in _liq))
-        st.markdown('<div class="sw-preview"><div class="h">换成 '
-                    f'{_strat_display[_pick]} 会怎样</div>'
-                    + "".join(f'<div class="l">{x}</div>' for x in _lines) + '</div>',
-                    unsafe_allow_html=True)
-        _b1, _b2, _ = st.columns([1.3, 1, 4])
-        if _b1.button(f"改为跟随 {_strat_display[_pick]}", type="primary", key="strat_apply"):
-            _a2 = dict(acct)
-            _a2["strategy"] = _pick
-            _save_acct(_a2)
-            st.session_state.pop("strat_pick", None)
-            st.toast(f"账户已改为跟随 {_strat_display[_pick]}", icon=":material/check_circle:")
-            st.rerun()
-        if _b2.button("不换了", key="strat_cancel"):
-            st.session_state.pop("strat_pick", None)
-            st.rerun()
-
 
 def _pg_weights() -> None:
     st.subheader("权重与选基 · 每个位置该占多少、我拿哪只基金去实现")
@@ -5558,6 +5454,27 @@ def _pg_assets() -> None:
         '</div>'),
         unsafe_allow_html=True,
     )
+
+    # ---- 头卡正下方：宏观季节（大环境背景，一眼能看见；点开才展开四象限）----
+    _ms = macro_season(prices, signals)
+    with st.container(key="macro_row", horizontal=True, vertical_alignment="center", gap="small"):
+        st.markdown(
+            '<div class="macro-bar">'
+            f'<span class="macro-ic" style="color:{_ms["color"]};background:{_ms["color"]}1A">'
+            f'{_QUAD_ICONS[_ms["current"]]}</span>'
+            '<span class="macro-t">宏观季节</span>'
+            f'<b class="macro-cur" style="color:{_ms["color"]}">{_ms["current"]}</b>'
+            f'<span class="macro-axis">{_ms["axis"]}</span>'
+            f'<span class="macro-a">对应 {_ms["assets"]}</span>'
+            '</div>', unsafe_allow_html=True, width="stretch")
+        with st.popover("四个象限", icon=":material/grid_view:", key="macro_quads"):
+            _cells = "".join(
+                f'<div class="macro-q{" on" if q["label"] == _ms["current"] else ""}" '
+                f'style="--q:{q["color"]}"><b>{q["label"]}</b><small>{q["sub"]}</small>'
+                f'<span>{q["assets"]}</span></div>' for q in _ms["quadrants"])
+            st.markdown(f'<div class="macro-grid">{_cells}</div>', unsafe_allow_html=True)
+            st.caption("增长看沪深300 是否站上 120 日均线，通胀看黄金是否站上 75 日均线。"
+                       "这是调仓前的宏观背景；具体买卖仍看「调仓」页的清单。")
 
     # ---- 头卡下面一行结论：这一轮要不要动手 ----
     # 只说「有没有事、去哪看」，一个金额都不报 —— 该买该卖多少只存在「调仓」一处，
