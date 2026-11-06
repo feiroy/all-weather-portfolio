@@ -15,6 +15,7 @@
           </div>
           <div class="chips rr"><span v-for="r in ranges" :key="r" class="chip" :class="{ on: rangeK === r }" @click="rangeK = r">{{ r }}</span>
             <span class="seg2 per"><button v-for="p in periods" :key="p" :class="{ on: period === p }" @click="period = p">{{ p }}</button></span></div>
+          <p v-if="chart.dates.length < 2" class="sparse">{{ period }}目前只有 {{ chart.dates.length }} 期数据（账户 {{ firstYear }} 年建立），看走势请切到月线或日线</p>
           <LineChart :dates="chart.dates" :values="chart.values" :labels="chart.labels" :height="220" :unit="unit === '%' ? '%' : ''" zero
                      :reset-key="rangeK + unit + period"
                      :fmt-tip="i => `${chart.dates[i].replace(/-/g, '/')}<br/><b>${unit === '%' ? pct(chart.values[i]) : signed(chart.values[i]) + ' 元'}</b>`" />
@@ -110,6 +111,7 @@ const segRet = computed(() => seg.value.values[seg.value.values.length - 1])
 const periods = ['日线', '月线', '年线'], period = ref('日线')
 const chart = computed(() => aggregate(seg.value.dates, seg.value.values,
   period.value === '日线' ? '日' : period.value === '月线' ? '月' : '年'))
+const firstYear = computed(() => d.value?.dates?.[0]?.slice(0, 4) || '')
 
 // ---------- 日历
 const mode = ref('日'), cu = ref('¥')
@@ -182,6 +184,8 @@ void money
 .rr{ padding:10px 0 4px; flex-wrap:wrap; align-items:center; }
 .per{ margin-left:auto; }
 .note{ font-size:11.5px; color:var(--muted); margin:6px 0 0; line-height:1.6; }
+.sparse{ font-size:12px; color:#92400E; background:#FFFBEB; border-radius:8px;
+  padding:7px 10px; margin:0 0 8px; line-height:1.6; }
 .nav{ display:flex; align-items:center; gap:4px; font-size:14.5px; white-space:nowrap; }
 .cal .ch{ flex-wrap:wrap; row-gap:8px; }
 /* 窄屏（≤400）：月份切换单独占一行居中，两个切换按钮在下一行左右排 */

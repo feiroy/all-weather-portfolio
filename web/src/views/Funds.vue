@@ -53,6 +53,7 @@
               <div><span>年化波动</span><b class="num">{{ stat.vol?.toFixed(2) }}%</b></div>
               <div><span>数据点</span><b class="num">{{ chart.dates.length }}</b></div>
             </div>
+            <p v-if="chart.dates.length < 2" class="sparse">当前区间按{{ period }}只有 {{ chart.dates.length }} 期数据，看走势请切到日线或月线</p>
             <div class="st sub">单位净值走势</div>
             <LineChart :dates="chart.dates" :values="chart.values" :labels="chart.labels" :height="220" unit=""
                        :reset-key="range + period" :fmt-tip="i => tip(i, chart, 4, '')" />
@@ -325,6 +326,8 @@ const cmpStageRows = computed(() => picked.value.map(p => {
 .stat-row span{ display:block; font-size:11.5px; color:var(--muted); }
 .stat-row b{ display:block; font-size:15px; margin-top:2px; }
 .k{ font-size:11.5px; color:var(--muted); margin:10px 0 0; line-height:1.6; }
+.sparse{ font-size:12px; color:#92400E; background:#FFFBEB; border-radius:8px;
+  padding:7px 10px; margin:8px 0; line-height:1.6; }
 .ch{ display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; }
 .cl{ font-size:11.5px; color:var(--muted); }
 .nav{ display:flex; align-items:center; gap:6px; font-size:14px; }

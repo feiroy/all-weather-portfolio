@@ -22,12 +22,13 @@ let chart = null
 function option() {
   const names = Object.keys(props.series || {})
   const all = [...new Set(names.flatMap(n => props.series[n].dates))].sort()
+  const one = all.length < 2
   const series = names.map((n, i) => {
     const m = new Map(props.series[n].dates.map((d, k) => [d, props.series[n].ret[k]]))
     let last = null
     const data = all.map(d => { if (m.has(d)) last = m.get(d); return d < props.series[n].dates[0] ? null : last })
     return {
-      name: n, type: 'line', data, showSymbol: false, connectNulls: true,
+      name: n, type: 'line', data, showSymbol: one, symbolSize: 8, connectNulls: true,
       lineStyle: { width: i === 0 ? 2.2 : 1.6, color: props.colors[i % props.colors.length], type: props.dashed.includes(n) ? 'dashed' : 'solid' },
       itemStyle: { color: props.colors[i % props.colors.length] },
       markLine: i === 0 ? { silent: true, symbol: 'none', label: { show: false }, lineStyle: { color: '#CBD5E1', type: 'solid', width: 1 }, data: [{ yAxis: 0 }] } : undefined,

@@ -24,6 +24,7 @@ const axis = () => props.labels?.length ? props.labels : (props.dates || [])
 
 function option() {
   const v = props.values || []
+  const one = v.length < 2          // 按年/月聚合后可能只剩 1 期：折线画不出来，必须把点画出来
   const up = v.length ? v[v.length - 1] >= (props.zero ? 0 : v[0]) : true
   const col = props.dark ? (up ? '#FCA5A5' : '#86EFAC') : (up ? '#E23B3B' : '#16A34A')
   const axisCol = props.dark ? 'rgba(255,255,255,.55)' : '#9CA3AF'
@@ -56,7 +57,7 @@ function option() {
       axisLabel: { color: axisCol, fontSize: 10, hideOverlap: true, formatter: labelFmt },
     },
     yAxis: {
-      type: 'value', scale: !props.zero, splitNumber: 4,
+      type: 'value', scale: !props.zero && !one, splitNumber: 4,
       axisLabel: { color: axisCol, fontSize: 10, formatter: x => props.unit === '%' ? `${+x.toFixed(2)}%` : x.toFixed(3) },
       splitLine: { lineStyle: { color: gridCol, type: 'dashed' } },
     },
@@ -69,7 +70,7 @@ function option() {
         handleSize: 0, showDetail: false, brushSelect: false },
     ] : undefined,
     series: [{
-      type: 'line', data: v, showSymbol: false, smooth: 0.2, lineStyle: { color: col, width: 2 },
+      type: 'line', data: v, showSymbol: one, symbolSize: 9, smooth: 0.2, lineStyle: { color: col, width: 2 },
       areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: col + '55' }, { offset: 1, color: col + '00' }]) },
       markPoint: marks.length ? { symbol: 'pin', symbolSize: 26, label: { color: '#fff', fontSize: 10 }, data: marks } : undefined,
       markLine: props.zero ? { silent: true, symbol: 'none', label: { show: false }, lineStyle: { color: axisCol, type: 'solid', width: 1 }, data: [{ yAxis: 0 }] } : undefined,
