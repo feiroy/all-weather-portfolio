@@ -1,136 +1,223 @@
 <template>
   <div class="page no-tab">
     <SubBar title="基金检索" :fallback="`/a/${aid}/market`" />
-    <div class="wrap narrow">
-      <div class="seg2 mode">
-        <button :class="{ on: mode === 'one' }" @click="mode = 'one'">单只走势</button>
-        <button :class="{ on: mode === 'cmp' }" @click="mode = 'cmp'">多只对比</button>
-      </div>
+    <div class="wrap">
+      <!-- 搜索：输入时只显示结果，选定后回到下面的完整走势，全都在这一页 -->
+      <van-search v-model="q" placeholder="基金名称或 6 位代码，比如 沪深300 / 000961" shape="round" class="sb" />
+      <van-cell-group inset v-if="q.trim() && rows.length">
+        <van-cell v-for="r in rows" :key="r.code" :title="r.name" :label="r.code" clickable @click="select(r)">
+          <template #value><span class="src">{{ r.src }}</span></template>
+        </van-cell>
+      </van-cell-group>
+      <p v-else-if="q.trim()" class="empty-tip">没找到。试试换个关键词，或直接输入 6 位代码</p>
 
-      <template v-if="mode === 'one'">
-        <van-search v-model="q" placeholder="基金名称或 6 位代码，比如 沪深300 / 000961" shape="round" class="sb" />
-        <van-loading v-if="loading" style="margin:24px 0" vertical>查找中…</van-loading>
-        <van-cell-group inset v-else-if="rows.length">
-          <van-cell v-for="r in rows" :key="r.code" :title="r.name" :label="r.code" is-link
-                    :to="`/a/${aid}/market/fund/${r.code}`">
-            <template #value><span class="src">{{ r.src }}</span></template>
-          </van-cell>
-        </van-cell-group>
-        <p v-else-if="q.trim()" class="empty-tip">没找到。试试换个关键词，或直接输入 6 位代码</p>
-        <template v-else>
-          <div class="card def">
-            <div class="dh"><b>默认关注</b><span>点下面的资产可切换</span></div>
-            <div class="chips defs">
-              <span v-for="f in favs" :key="f.code" class="chip" :class="{ on: defCode === f.code }" @click="defCode = f.code">{{ f.short }}</span>
-            </div>
-            <div class="dn">{{ defInfo?.name || '加载中…' }} <small class="num">{{ defCode }}</small></div>
-            <div class="dv">
-              <div><span>最新单位净值</span><b class="num">{{ defInfo?.last?.toFixed(4) ?? '—' }}</b></div>
-              <div><span>单日</span><b class="num" :class="tone(defInfo?.day)">{{ pct(defInfo?.day) }}</b></div>
-              <div><span>截至</span><b class="num">{{ defInfo?.asof?.replace(/-/g, '/') ?? '—' }}</b></div>
-            </div>
-            <div class="chips rr">
-              <span v-for="r in defRanges" :key="r.k" class="chip" :class="{ on: defRange === r.k }" @click="defRange = r.k">{{ r.k }} {{ defRet(r.m) }}</span>
-            </div>
-            <LineChart :dates="defSeg.dates" :values="defSeg.values" :height="170" unit="" :zoom="false"
-                       :fmt-tip="i => `${defSeg.dates[i].replace(/-/g, '/')}<br/>净值 <b>${defSeg.values[i]?.toFixed(4)}</b>`" />
-            <router-link class="goto" :to="`/a/${aid}/market/fund/${defCode}`">查看完整走势 <van-icon name="arrow" /></router-link>
-          </div>
-          <template v-if="recent.length">
-            <div class="sec-t"><span>最近看过</span><a class="clr" @click="clear">清空</a></div>
-            <div class="chips"><router-link v-for="r in recent" :key="r.code" class="chip" :to="`/a/${aid}/market/fund/${r.code}`">{{ r.name }}</router-link></div>
-          </template>
-        </template>
-      </template>
-
-      <template v-else>
-        <div class="card cmp">
-          <div class="ct"><b>已选 {{ picked.length }} / 4 只</b><a v-if="picked.length" @click="clearPicked">清空</a></div>
-          <div class="chips picked" v-if="picked.length">
-            <span v-for="p in picked" :key="p.code" class="chip on" @click="drop(p.code)">{{ p.name }} ×</span>
-          </div>
-          <van-search v-model="cq" placeholder="搜索基金加入对比（最多 4 只）" shape="round" />
-          <van-cell-group inset v-if="opts.length">
-            <van-cell v-for="r in opts" :key="r.code" :title="r.name" :label="r.code" clickable @click="pick(r)">
-              <template #value><van-icon name="plus" /></template>
-            </van-cell>
-          </van-cell-group>
-          <div class="chips rr" v-if="picked.length >= 2">
-            <span v-for="r in ranges" :key="r.k" class="chip" :class="{ on: range === r.k }" @click="range = r.k">{{ r.k }}</span>
-          </div>
-          <MultiLine v-if="picked.length >= 2 && Object.keys(cmpSeries).length >= 2" :series="cmpSeries" :height="260" />
-          <p v-else class="empty-tip">再选 {{ Math.max(0, 2 - picked.length) }} 只就能同图对比（按区间起点归一到 0%）</p>
+      <template v-if="!q.trim()">
+        <div class="recent" v-if="recent.length">
+          <span class="rl">最近看过</span>
+          <span v-for="r in recent" :key="r.code" class="chip" :class="{ on: r.code === code }" @click="select(r)">{{ shortName(r.name) }}</span>
+          <a class="clr" @click="clearRecent">清空</a>
         </div>
+
+        <van-loading v-if="!d && !err" style="margin:30px 0" vertical>拉取净值…（第一次查要几秒）</van-loading>
+        <p v-else-if="err" class="empty-tip">{{ err }}</p>
+        <template v-else>
+          <!-- 基金概览 -->
+          <div class="card head">
+            <div class="hn"><b>{{ d.name }}</b><span class="num">{{ code }}</span></div>
+            <div class="g">
+              <div><span>最新单位净值</span><b class="num">{{ last?.toFixed(4) }}</b></div>
+              <div><span>单日</span><b class="num" :class="tone(dayPct)">{{ pctS(dayPct) }}</b></div>
+              <div><span>截至</span><b class="num">{{ d.dates[d.dates.length - 1].replace(/-/g, '/') }}</b></div>
+              <div><span>区间收益</span><b class="num" :class="tone(stat.ret)">{{ pctS(stat.ret) }}</b></div>
+            </div>
+            <p class="src-line">{{ d.msg }}</p>
+          </div>
+
+          <!-- 阶段表现：固定区间，不受下面图表拖动影响 -->
+          <div class="card">
+            <div class="st">阶段表现 <span>基准日净值 → 最新净值，同支付宝历史业绩口径</span></div>
+            <div class="stage-grid">
+              <div v-for="s in stageRows" :key="s.k"><span>{{ s.k }}</span><b class="num" :class="tone(s.ret)">{{ pctS(s.ret) }}</b></div>
+            </div>
+          </div>
+
+          <!-- 三张走势图 + 区间统计 -->
+          <div class="card">
+            <div class="chips rr">
+              <span v-for="r in ranges" :key="r" class="chip" :class="{ on: range === r }" @click="range = r">{{ r }}</span>
+              <span class="seg2 per"><button v-for="p in periods" :key="p" :class="{ on: period === p }" @click="period = p">{{ p }}</button></span>
+            </div>
+            <div class="stat-row">
+              <div><span>最大回撤</span><b class="num down">{{ stat.mdd?.toFixed(2) }}%</b></div>
+              <div><span>年化</span><b class="num" :class="tone(stat.cagr)">{{ pctS(stat.cagr) }}</b></div>
+              <div><span>年化波动</span><b class="num">{{ stat.vol?.toFixed(2) }}%</b></div>
+              <div><span>数据点</span><b class="num">{{ chart.dates.length }}</b></div>
+            </div>
+            <div class="st sub">单位净值走势</div>
+            <LineChart :dates="chart.dates" :values="chart.values" :labels="chart.labels" :height="220" unit=""
+                       :reset-key="range + period" :fmt-tip="i => tip(i, chart, 4, '')" />
+            <div class="st sub">累计收益走势 <span>区间起点 = 0%</span></div>
+            <LineChart :dates="retChart.dates" :values="retChart.values" :labels="retChart.labels" :height="170" unit="%" zero
+                       :reset-key="range + period" :fmt-tip="i => tip(i, retChart, 2, '%')" />
+            <div class="st sub">回撤曲线 <span>距区间内历史最高点</span></div>
+            <LineChart :dates="ddChart.dates" :values="ddChart.values" :labels="ddChart.labels" :height="160" unit="%" zero
+                       :reset-key="range + period" :fmt-tip="i => tip(i, ddChart, 2, '%')" />
+            <p class="k">双指/滚轮滑动或按住拖动平移 · ⌘/Ctrl + 滑动缩放 · 双击复位；月/年线取每期最后一条真实记录</p>
+          </div>
+
+          <!-- 收益日历：日 / 月 / 年 三期涨跌 -->
+          <div class="card cal">
+            <div class="ch">
+              <span class="seg2"><button v-for="m in ['日','月','年']" :key="m" :class="{ on: calMode === m }" @click="calMode = m">{{ m }}</button></span>
+              <div class="nav" v-if="calMode !== '年'">
+                <van-icon name="arrow-left" @click="calStep(-1)" :class="{ dis: !canCalStep(-1) }" />
+                <b class="num">{{ calMode === '日' ? `${calY}年${calM}月` : `${calY}年` }}</b>
+                <van-icon name="arrow" @click="calStep(1)" :class="{ dis: !canCalStep(1) }" />
+              </div>
+              <span class="cl">涨红跌绿 · 每期最后一条净值</span>
+            </div>
+            <div class="wk" v-if="calMode === '日'"><span v-for="w in '一二三四五六日'" :key="w">{{ w }}</span></div>
+            <div class="grid7" v-if="calMode === '日'">
+              <div v-for="(c, k) in cal.cells" :key="k" class="cell" :class="[cellCls(c), { empty: !c }]">
+                <template v-if="c"><span class="dd">{{ c.d }}</span><span class="dv num">{{ c.p == null ? '' : pctS(c.p) }}</span></template>
+              </div>
+            </div>
+            <div class="grid3" v-else>
+              <div v-for="(c, k) in cal.cells" :key="k" class="cell big" :class="cellCls(c)">
+                <span class="dd">{{ c.label }}</span><span class="dv num">{{ c.p == null ? '—' : pctS(c.p) }}</span>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <!-- 多只对比：默认收起，不再是二级菜单 -->
+        <van-collapse v-model="cmpOpen" class="cmpbox">
+          <van-collapse-item title="多只基金同图对比" name="c">
+            <div class="cmp">
+              <div class="chips picked" v-if="picked.length">
+                <span v-for="p in picked" :key="p.code" class="chip on" @click="drop(p.code)">{{ shortName(p.name) }} ×</span>
+              </div>
+              <van-search v-model="cq" placeholder="搜索基金加入对比（最多 4 只）" shape="round" />
+              <van-cell-group inset v-if="opts.length">
+                <van-cell v-for="r in opts" :key="r.code" :title="r.name" :label="r.code" clickable @click="pick(r)">
+                  <template #value><van-icon name="plus" /></template>
+                </van-cell>
+              </van-cell-group>
+              <div class="chips rr" v-if="picked.length >= 2">
+                <span v-for="r in cmpRanges" :key="r.k" class="chip" :class="{ on: cmpRange === r.k }" @click="cmpRange = r.k">{{ r.k }}</span>
+              </div>
+              <MultiLine v-if="Object.keys(cmpSeries).length >= 2" :series="cmpSeries" :height="240" />
+              <p v-else class="empty-tip">再选 {{ Math.max(0, 2 - picked.length) }} 只就能同图对比（按区间起点归一到 0%）</p>
+            </div>
+          </van-collapse-item>
+        </van-collapse>
       </template>
     </div>
   </div>
 </template>
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { showFailToast } from 'vant'
 import { get } from '../api'
-import { pct, tone } from '../fmt'
-import LineChart from '../components/LineChart.vue'
+import { tone } from '../fmt'
 import SubBar from '../components/SubBar.vue'
+import LineChart from '../components/LineChart.vue'
 import MultiLine from '../components/MultiLine.vue'
-const aid = useRoute().params.aid
-const mode = ref('one')
-const q = ref(''), rows = ref([]), loading = ref(false)
+import { aggregate, sliceRange, rangeReturn } from '../utils/series'
+import { cumulativeReturn, drawdown, stats, calendarCells } from '../utils/fundSeries'
+
+const route = useRoute(), router = useRouter()
+const aid = route.params.aid
+const code = ref(route.query.code || '510300')
+const d = ref(null), err = ref('')
+const q = ref(''), rows = ref([])
 const recent = ref(JSON.parse(localStorage.getItem('aw-recent-funds') || '[]'))
+const shortName = n => (n || '').replace(/ETF.*$/, 'ETF').slice(0, 8) || n
+const pctS = v => v == null ? '—' : (v > 0 ? '+' : '') + v.toFixed(2) + '%'
+const tip = (i, s, digits, unit) => `${s.dates[i].replace(/-/g, '/')}<br/><b>${s.values[i].toFixed(digits)}${unit}</b>`
+
+async function loadFund(c) {
+  d.value = null; err.value = ''
+  try {
+    const x = await get(`/api/market/fund/${c}`)
+    d.value = x
+    const rc = recent.value.filter(r => r.code !== c)
+    recent.value = [{ code: c, name: x.name }, ...rc].slice(0, 12)
+    localStorage.setItem('aw-recent-funds', JSON.stringify(recent.value))
+  } catch (e) { err.value = e.message }
+}
+loadFund(code.value)
+function select(r) {
+  q.value = ''; rows.value = []
+  code.value = r.code
+  router.replace({ query: { ...route.query, code: r.code } })
+  loadFund(r.code)
+}
+function clearRecent() { recent.value = []; localStorage.removeItem('aw-recent-funds') }
 let t = null
 watch(q, v => {
   clearTimeout(t)
   if (!v.trim()) { rows.value = []; return }
   t = setTimeout(async () => {
-    loading.value = true
-    try {
-      const r = (await get(`/api/market/fund-search?q=${encodeURIComponent(v.trim())}`)).rows
-      rows.value = r.length || !/^\d{6}$/.test(v.trim()) ? r : [{ code: v.trim(), name: `代码 ${v.trim()}`, src: '直接查' }]
-    } finally { loading.value = false }
+    const r = (await get(`/api/market/fund-search?q=${encodeURIComponent(v.trim())}`)).rows
+    rows.value = r.length || !/^\d{6}$/.test(v.trim()) ? r : [{ code: v.trim(), name: `代码 ${v.trim()}`, src: '直接查' }]
   }, 300)
-}, { immediate: true })
-const clear = () => { localStorage.removeItem('aw-recent-funds'); recent.value = [] }
-
-// 默认关注：打开检索页就显示沪深300 ETF，可一键切到其它主要资产
-const favs = [
-  { code: '510300', short: '沪深300' }, { code: '513500', short: '标普500' },
-  { code: '518850', short: '黄金' }, { code: '511260', short: '10年国债' },
-  { code: '511130', short: '30年国债' }, { code: '159980', short: '有色' },
-  { code: '501018', short: '原油' }, { code: '511220', short: '城投债' },
-]
-const defCode = ref('510300')
-const defData = ref(null), defRange = ref('近1年')
-const defRanges = [{ k: '近1月', m: 1 }, { k: '近3月', m: 3 }, { k: '近1年', m: 12 }, { k: '近3年', m: 36 }, { k: '全部', m: 0 }]
-watch(defCode, async c => {
-  localStorage.setItem('aw-def-fund', c)
-  defData.value = null
-  try { defData.value = await get(`/api/market/fund/${c}`) } catch { /* 拉不到就留空 */ }
-}, { immediate: true })
-const defInfo = computed(() => {
-  const n = defData.value
-  if (!n?.values?.length) return null
-  const v = n.values, last = v[v.length - 1], prev = v[v.length - 2]
-  return { name: n.name, last, day: prev ? (last / prev - 1) * 100 : null, asof: n.dates[n.dates.length - 1] }
 })
-function segOf(m) {
-  const n = defData.value
-  if (!n?.dates?.length) return { dates: [], values: [] }
-  if (!m) return n
-  const end = new Date(n.dates[n.dates.length - 1]); end.setMonth(end.getMonth() - m)
-  const i = Math.max(0, n.dates.findIndex(x => x >= end.toISOString().slice(0, 10)))
-  return { dates: n.dates.slice(i), values: n.values.slice(i) }
-}
-const defSeg = computed(() => segOf(defRanges.find(r => r.k === defRange.value).m))
-function defRet(m) {
-  const v = segOf(m).values
-  return v.length > 1 && v[0] ? pct((v[v.length - 1] / v[0] - 1) * 100) : ''
-}
 
-// 多只对比：每只单独取净值，按所选区间起点归一到 0%
+// 区间 / 周期：主图、累计收益、回撤共用同一段数据
+const ranges = ['近1月', '近3月', '近6月', '近1年', '近3年', '近5年', '今年', '全部']
+const range = ref('近1年')
+const periods = ['日线', '月线', '年线'], period = ref('日线')
+const pchar = computed(() => period.value === '日线' ? '日' : period.value === '月线' ? '月' : '年')
+const seg = computed(() => d.value ? sliceRange(d.value.dates, d.value.values, range.value) : { dates: [], values: [] })
+const agg = (dates, values) => aggregate(dates, values, pchar.value)
+const chart = computed(() => agg(seg.value.dates, seg.value.values))
+const retChart = computed(() => agg(seg.value.dates, cumulativeReturn(seg.value.values)))
+const ddChart = computed(() => agg(seg.value.dates, drawdown(seg.value.values)))
+const stat = computed(() => stats(seg.value.values, seg.value.dates))
+const last = computed(() => d.value?.values?.[d.value.values.length - 1])
+const dayPct = computed(() => {
+  const v = d.value?.values
+  return v?.length > 1 && v[v.length - 2] ? (v[v.length - 1] / v[v.length - 2] - 1) * 100 : null
+})
+// 阶段表现：固定区间，与图表视窗无关
+const stages = ['近1月', '近3月', '近6月', '近1年', '近3年', '今年', '全部']
+const stageRows = computed(() => stages.map(k => {
+  const s = d.value ? sliceRange(d.value.dates, d.value.values, k) : { values: [] }
+  return { k, ret: rangeReturn(s.values) }
+}))
+
+// 收益日历
+const lastDate = computed(() => d.value?.dates?.[d.value.dates.length - 1] || '')
+const calY = ref(+lastDate.value.slice(0, 4) || new Date().getFullYear())
+const calM = ref(+lastDate.value.slice(5, 7) || new Date().getMonth() + 1)
+watch(lastDate, v => { calY.value = +v.slice(0, 4); calM.value = +v.slice(5, 7) })
+const calMode = ref('日')
+const cal = computed(() => d.value ? calendarCells(d.value.dates, d.value.values, calMode.value, calY.value, calM.value) : { cells: [], months: [] })
+function canCalStep(k) {
+  if (!d.value) return false
+  const ms = cal.value.months
+  if (calMode.value === '日') {
+    const t = new Date(calY.value, calM.value - 1 + k, 1)
+    return ms.includes(`${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}`)
+  }
+  return ms.some(m => +m.slice(0, 4) === calY.value + k)
+}
+function calStep(k) {
+  if (!canCalStep(k)) return
+  if (calMode.value === '日') {
+    const t = new Date(calY.value, calM.value - 1 + k, 1)
+    calY.value = t.getFullYear(); calM.value = t.getMonth() + 1
+  } else calY.value += k
+}
+const cellCls = c => !c || c.p == null ? '' : c.p > 0 ? 'pos' : c.p < 0 ? 'neg' : ''
+
+// 多只对比（默认收起）
+const cmpOpen = ref([])
 const picked = ref(JSON.parse(localStorage.getItem('aw-cmp') || '[]'))
-const navs = ref({}), cq = ref(''), opts = ref([]), range = ref('近1年')
-const ranges = [{ k: '近1月', m: 1 }, { k: '近3月', m: 3 }, { k: '近1年', m: 12 }, { k: '近3年', m: 36 }, { k: '全部', m: 0 }]
+const navs = ref({}), cq = ref(''), opts = ref([]), cmpRange = ref('近1年')
+const cmpRanges = [{ k: '近1月', m: 1 }, { k: '近3月', m: 3 }, { k: '近1年', m: 12 }, { k: '近3年', m: 36 }, { k: '全部', m: 0 }]
 let t2 = null
 watch(cq, v => {
   clearTimeout(t2)
@@ -140,63 +227,76 @@ watch(cq, v => {
     opts.value = r.length || !/^\d{6}$/.test(v.trim()) ? r : [{ code: v.trim(), name: `代码 ${v.trim()}`, src: '直接加' }]
   }, 300)
 })
-watch(picked, v => localStorage.setItem('aw-cmp', JSON.stringify(v)), { deep: true })
+watch(picked, async v => {
+  localStorage.setItem('aw-cmp', JSON.stringify(v))
+  for (const p of v) if (!navs.value[p.code]) {
+    try { const x = await get(`/api/market/fund/${p.code}`); navs.value = { ...navs.value, [p.code]: x } } catch { /* 拉不到就不画 */ }
+  }
+}, { immediate: true, deep: true })
 async function pick(r) {
   if (picked.value.length >= 4) return showFailToast('最多对比 4 只')
   if (picked.value.some(p => p.code === r.code)) return
   picked.value = [...picked.value, { code: r.code, name: r.name }]
   opts.value = []; cq.value = ''
-  try { const d = await get(`/api/market/fund/${r.code}`); navs.value = { ...navs.value, [r.code]: d } }
-  catch (e) { showFailToast(e.message) }
 }
-function drop(code) { picked.value = picked.value.filter(p => p.code !== code) }
-function clearPicked() { picked.value = []; navs.value = {} }
-// 已选但本会话还没取过净值的，补取
-watch(picked, async v => {
-  for (const p of v) if (!navs.value[p.code]) {
-    try { const d = await get(`/api/market/fund/${p.code}`); navs.value = { ...navs.value, [p.code]: d } } catch { /* 拉不到就不画这一条 */ }
-  }
-}, { immediate: true })
+function drop(c) { picked.value = picked.value.filter(p => p.code !== c) }
 const cmpSeries = computed(() => {
   const out = {}
   for (const p of picked.value) {
     const n = navs.value[p.code]
-    if (!n || !n.dates?.length) continue
-    const m = ranges.find(r => r.k === range.value).m
-    let i0 = 0
-    if (m) {
-      const end = new Date(n.dates[n.dates.length - 1]); end.setMonth(end.getMonth() - m)
-      const s = end.toISOString().slice(0, 10)
-      i0 = Math.max(0, n.dates.findIndex(x => x >= s))
-    }
-    const dates = n.dates.slice(i0), vals = n.values.slice(i0)
-    if (vals.length < 2 || !vals[0]) continue
-    out[p.name] = { dates, ret: vals.map(v => +((v / vals[0] - 1) * 100).toFixed(3)) }
+    if (!n?.dates?.length) continue
+    const s = sliceRange(n.dates, n.values, cmpRange.value)
+    if (s.values.length < 2 || !s.values[0]) continue
+    out[p.name] = { dates: s.dates, ret: cumulativeReturn(s.values) }
   }
   return out
 })
 </script>
 <style scoped>
-.narrow{ max-width:960px !important; }
-.mode{ display:flex; margin:12px 12px 0; width:fit-content; }
 .sb{ background:transparent; padding:10px 12px; }
 .src{ font-size:12px; color:var(--muted); }
-.clr{ color:var(--brand); cursor:pointer; }
-.chips{ flex-wrap:wrap; } .chips a{ text-decoration:none; }
-.cmp{ padding:12px 0; }
-.ct{ display:flex; justify-content:space-between; align-items:baseline; padding:0 14px; font-size:15px; }
-.ct a{ font-size:12.5px; color:var(--brand); cursor:pointer; }
-.picked, .rr{ padding:10px 12px 0; }
-.def{ padding:14px 16px 12px; }
-.dh{ display:flex; justify-content:space-between; align-items:baseline; font-size:14px; }
-.dh span{ font-size:11.5px; color:var(--muted); }
-.defs{ padding:10px 0 0; flex-wrap:wrap; }
-.dn{ font-size:15px; font-weight:600; margin-top:12px; }
-.dn small{ font-size:12px; color:var(--muted); font-weight:400; margin-left:6px; }
-.dv{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:8px; }
-.dv span{ display:block; font-size:11.5px; color:var(--muted); }
-.dv b{ display:block; font-size:16px; margin-top:2px; }
-.def .rr{ padding:10px 0 4px; flex-wrap:wrap; }
-.def .rr .chip{ font-size:11.5px; }
-.goto{ display:inline-flex; align-items:center; gap:3px; margin-top:10px; font-size:13px; color:var(--brand); text-decoration:none; }
+.recent{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:2px 12px 10px; }
+.recent .rl{ font-size:12px; color:var(--muted); }
+.clr{ color:var(--brand); font-size:12px; cursor:pointer; margin-left:auto; }
+.hn{ display:flex; align-items:baseline; gap:8px; font-size:16px; }
+.hn span{ font-size:12px; color:var(--muted); font-weight:400; }
+.g{ display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-top:10px; }
+.g span{ display:block; font-size:11.5px; color:var(--muted); }
+.g b{ display:block; font-size:17px; margin-top:3px; }
+.src-line{ font-size:11.5px; color:var(--muted); margin:10px 0 0; }
+.st{ font-size:13px; font-weight:600; display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
+.st span{ font-size:11.5px; font-weight:400; color:var(--muted); }
+.st.sub{ margin:14px 0 6px; font-weight:500; }
+.stage-grid{ display:grid; grid-template-columns:repeat(7,1fr); gap:6px; margin-top:10px; }
+.stage-grid span{ display:block; font-size:11.5px; color:var(--muted); }
+.stage-grid b{ display:block; font-size:14px; margin-top:3px; }
+.rr{ padding:0 0 6px; flex-wrap:wrap; align-items:center; }
+.per{ margin-left:auto; }
+.stat-row{ display:grid; grid-template-columns:repeat(4,1fr); gap:8px; padding:10px 0 4px; border-bottom:1px solid var(--line); }
+.stat-row span{ display:block; font-size:11.5px; color:var(--muted); }
+.stat-row b{ display:block; font-size:15px; margin-top:2px; }
+.k{ font-size:11.5px; color:var(--muted); margin:10px 0 0; line-height:1.6; }
+.ch{ display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; }
+.cl{ font-size:11.5px; color:var(--muted); }
+.nav{ display:flex; align-items:center; gap:6px; font-size:14px; }
+.nav .van-icon{ cursor:pointer; padding:4px; } .nav .dis{ opacity:.25; cursor:default; }
+.wk{ display:grid; grid-template-columns:repeat(7,1fr); font-size:11px; color:var(--muted); text-align:center; margin:10px 0 4px; }
+.grid7{ display:grid; grid-template-columns:repeat(7,1fr); gap:6px; }
+.grid3{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:10px; }
+.cell{ border-radius:9px; background:#F7F8FA; min-height:52px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; }
+.cell.big{ min-height:62px; }
+.cell.empty{ background:transparent; }
+.cell.pos{ background:#FDECEC; } .cell.pos .dv{ color:var(--up); }
+.cell.neg{ background:#E7F6EC; } .cell.neg .dv{ color:var(--down); }
+.dd{ font-size:11.5px; color:var(--sub); } .dv{ font-size:11.5px; font-weight:600; }
+.cell.big .dd{ font-size:12.5px; } .cell.big .dv{ font-size:13px; }
+.cmpbox{ margin:16px 12px 0; border-radius:12px; overflow:hidden; }
+.cmpbox :deep(.van-collapse-item__content){ padding:8px 12px 14px; }
+.picked{ padding:4px 0 8px; flex-wrap:wrap; }
+.cmp .rr{ padding:8px 0; }
+@media (max-width:700px){
+  .g, .stat-row{ grid-template-columns:repeat(2,1fr); }
+  .stage-grid{ grid-template-columns:repeat(4,1fr); }
+  .cell{ min-height:44px; } .dv{ font-size:10px; }
+}
 </style>

@@ -45,10 +45,13 @@ watch(() => [props.aid, dataVer.value], async () => {
   padding-left:14px; border-left:1px solid var(--line); }
 .acct:hover{ color:var(--brand); }
 .acct .van-icon{ color:var(--muted); font-size:12px; }
-.second{ height:42px; display:flex; align-items:stretch; justify-content:center; gap:4px;
-  border-top:1px solid var(--line); max-width:960px; }
-.second a{ display:flex; align-items:center; justify-content:center; gap:6px; min-width:116px;
-  padding:0 14px; font-size:14px; color:var(--sub); text-decoration:none; border-bottom:2px solid transparent; }
+/* 四个页签均分铺满，宽度与下方内容卡片一致（936）；做成有边界的分段导航条，一眼能认出是导航 */
+.second{ height:42px; display:flex; align-items:stretch; gap:4px;
+  width:calc(100% - 24px); max-width:936px; margin:0 auto; padding:4px; box-sizing:border-box;
+  border-top:0; background:#F1F2F4; border-radius:12px; }
+.second a{ flex:1 1 0; min-width:0; display:flex; align-items:center; justify-content:center; gap:6px;
+  border-radius:9px; font-size:14px; color:var(--sub); text-decoration:none; }
 .second a:hover{ color:var(--brand); }
-.second a.on{ color:var(--brand); border-bottom-color:var(--brand); font-weight:600; }
+.second a.on{ background:#fff; color:var(--brand); font-weight:600;
+  box-shadow:0 1px 3px rgba(15,23,42,.10); }
 </style>

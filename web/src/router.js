@@ -20,7 +20,8 @@ const routes = [
   { path: '/a/:aid/market/backtest', name: 'backtest', component: v('Backtest'), meta: { depth: 2, tab: 'market' } },
   { path: '/a/:aid/market/valuation', name: 'valuation', component: v('Valuation'), meta: { depth: 2, tab: 'market' } },
   { path: '/a/:aid/market/funds', name: 'funds', component: v('Funds'), meta: { depth: 2, tab: 'market' } },
-  { path: '/a/:aid/market/fund/:code', name: 'mfund', component: v('MarketFund'), meta: { depth: 3, tab: 'market' } },
+  // 旧「基金详情」独立页已并入基金检索页（无二级菜单），保留路径兼容外部链接
+  { path: '/a/:aid/market/fund/:code', redirect: to => ({ name: 'funds', params: { aid: to.params.aid }, query: { code: to.params.code } }) },
   { path: '/:p(.*)*', redirect: '/' },
 ]
 
