@@ -21,7 +21,7 @@
           <LineChart :dates="chart.dates" :values="chart.values" :labels="chart.labels" :height="240" unit=""
                      :reset-key="range + period"
                      :fmt-tip="i => `${chart.dates[i].replace(/-/g, '/')}<br/>净值 <b>${chart.values[i].toFixed(4)}</b>`" />
-          <p class="k">拖动曲线左右平移、滚轮缩放、双击复位；月/年线取每期最后一条真实记录</p>
+          <p class="k">双指/滚轮滑动或按住拖动平移 · ⌘/Ctrl + 滑动缩放 · 双击复位；月/年线取每期最后一条真实记录</p>
         </div>
       </template>
     </div>

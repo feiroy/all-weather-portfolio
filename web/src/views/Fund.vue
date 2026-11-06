@@ -26,7 +26,7 @@
             <van-tab v-for="r in ranges" :key="r.k" :title="r.k" :name="r.k" />
           </van-tabs>
           <div class="chips rr"><span class="seg2"><button v-for="p in periods" :key="p" :class="{ on: period === p }" @click="period = p">{{ p }}</button></span>
-            <span class="hint">拖动平移 · 滚轮缩放 · 双击复位</span></div>
+            <span class="hint">滑动/拖动平移 · ⌘/Ctrl 缩放 · 双击复位</span></div>
           <LineChart :dates="chart.dates" :values="chart.values" :labels="chart.labels" :height="220" unit="" :marks="segMarks"
                      :reset-key="range + period"
                      :fmt-tip="i => `${chart.dates[i].replace(/-/g, '/')}<br/>净值 <b>${chart.values[i].toFixed(4)}</b>`" />

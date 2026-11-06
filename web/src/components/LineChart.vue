@@ -1,4 +1,4 @@
-<template><div ref="el" :style="{ height: height + 'px' }"></div></template>
+<template><div ref="el" class="aw-chart" :style="{ height: height + 'px' }"></div></template>
 <script setup>
 // 一条折线（ECharts，按需引入）：坐标轴 + 手指按住看数 + 买卖点 + 拖动平移 / 滚轮缩放 / 双击复位
 // labels：月线 / 年线时传中文期间标签（2026年10月 / 2026年），日线时省略
@@ -7,6 +7,7 @@ import * as echarts from 'echarts/core'
 import { LineChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, MarkPointComponent, MarkLineComponent, DataZoomComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
+import { attachWheel } from '../utils/chartWheel'
 echarts.use([LineChart, GridComponent, TooltipComponent, MarkPointComponent, MarkLineComponent, DataZoomComponent, CanvasRenderer])
 
 const props = defineProps({
@@ -18,7 +19,7 @@ const props = defineProps({
   resetKey: { type: [String, Number], default: 0 },  // 变化即把视窗复位到全区间
 })
 const el = ref(null)
-let chart = null
+let chart = null, detachWheel = null
 const axis = () => props.labels?.length ? props.labels : (props.dates || [])
 
 function option() {
@@ -60,8 +61,8 @@ function option() {
       splitLine: { lineStyle: { color: gridCol, type: 'dashed' } },
     },
     dataZoom: props.zoom ? [
-      { type: 'inside', xAxisIndex: 0, zoomOnMouseWheel: true, moveOnMouseMove: true,
-        moveOnMouseWheel: false, start: 0, end: 100 },
+      { type: 'inside', xAxisIndex: 0, zoomOnMouseWheel: false, moveOnMouseWheel: false,
+        moveOnMouseMove: true, start: 0, end: 100 },
       { type: 'slider', xAxisIndex: 0, height: 16, bottom: 6, borderColor: 'transparent',
         backgroundColor: props.dark ? 'rgba(255,255,255,.08)' : '#F1F2F4',
         fillerColor: props.dark ? 'rgba(255,255,255,.18)' : 'rgba(30,64,175,.10)',
@@ -82,6 +83,8 @@ function onDbl() { reset() }
 onMounted(() => {
   chart = echarts.init(el.value, null, { renderer: 'canvas' })
   chart.setOption(option())
+  el.value.__awChart = chart            // 便于调试 / 自动化校验视窗状态
+  detachWheel = attachWheel(chart, el.value, () => props.zoom)
   el.value.addEventListener('dblclick', onDbl)
   window.addEventListener('resize', resize)
 })
@@ -90,6 +93,7 @@ watch(() => [props.dates, props.values, props.marks, props.labels], () => chart 
 watch(() => props.resetKey, () => chart && chart.setOption(option(), true))
 onBeforeUnmount(() => {
   el.value?.removeEventListener('dblclick', onDbl)
+  detachWheel && detachWheel()
   window.removeEventListener('resize', resize)
   chart && chart.dispose()
 })

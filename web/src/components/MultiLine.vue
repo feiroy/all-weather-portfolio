@@ -1,4 +1,4 @@
-<template><div ref="el" :style="{ height: height + 'px' }"></div></template>
+<template><div ref="el" class="aw-chart" :style="{ height: height + 'px' }"></div></template>
 <script setup>
 // 多条折线同图（对比 / 回测 / 信号页）：各条日期可以不一样，按日期并集对齐；颜色避开红绿
 import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
@@ -6,6 +6,7 @@ import * as echarts from 'echarts/core'
 import { LineChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, LegendComponent, MarkLineComponent, DataZoomComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
+import { attachWheel } from '../utils/chartWheel'
 echarts.use([LineChart, GridComponent, TooltipComponent, LegendComponent, MarkLineComponent, DataZoomComponent, CanvasRenderer])
 
 const props = defineProps({
@@ -38,7 +39,7 @@ function option() {
     legend: { top: 0, left: 0, itemWidth: 14, itemHeight: 3, icon: 'rect', textStyle: { fontSize: 11, color: '#4B5563' } },
     grid: { left: 46, right: 10, top: names.length > 3 ? 48 : 30, bottom: 46 },
     dataZoom: [
-      { type: 'inside', xAxisIndex: 0, zoomOnMouseWheel: true, moveOnMouseMove: true, moveOnMouseWheel: false },
+      { type: 'inside', xAxisIndex: 0, zoomOnMouseWheel: false, moveOnMouseWheel: false, moveOnMouseMove: true },
       { type: 'slider', xAxisIndex: 0, height: 16, bottom: 6, borderColor: 'transparent',
         backgroundColor: '#F1F2F4', fillerColor: 'rgba(30,64,175,.10)', handleSize: 0, showDetail: false, brushSelect: false },
     ],
@@ -62,9 +63,19 @@ function option() {
 onMounted(() => {
   chart = echarts.init(el.value, null, { renderer: 'canvas' })
   chart.setOption(option())
+  el.value.__awChart = chart
+  detachWheel = attachWheel(chart, el.value)
+  el.value.addEventListener('dblclick', onDbl)
   window.addEventListener('resize', resize)
 })
+const onDbl = () => chart && chart.dispatchAction({ type: 'dataZoom', start: 0, end: 100 })
 const resize = () => chart && chart.resize()
+let detachWheel = null
 watch(() => props.series, () => chart && chart.setOption(option(), true))
-onBeforeUnmount(() => { window.removeEventListener('resize', resize); chart && chart.dispose() })
+onBeforeUnmount(() => {
+  el.value?.removeEventListener('dblclick', onDbl)
+  detachWheel && detachWheel()
+  window.removeEventListener('resize', resize)
+  chart && chart.dispose()
+})
 </script>

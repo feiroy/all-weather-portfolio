@@ -18,7 +18,7 @@
           <LineChart :dates="chart.dates" :values="chart.values" :labels="chart.labels" :height="220" :unit="unit === '%' ? '%' : ''" zero
                      :reset-key="rangeK + unit + period"
                      :fmt-tip="i => `${chart.dates[i].replace(/-/g, '/')}<br/><b>${unit === '%' ? pct(chart.values[i]) : signed(chart.values[i]) + ' 元'}</b>`" />
-          <p class="note">收益率 = 持有收益 ÷ 投入本金；区间收益从区间前一天收盘算起。拖动平移、滚轮缩放、双击复位</p>
+          <p class="note">收益率 = 持有收益 ÷ 投入本金；区间收益从区间前一天收盘算起。滑动或按住拖动平移，⌘/Ctrl + 滑动缩放，双击复位</p>
 
           <div class="trend-div"></div>
 
