@@ -53,14 +53,20 @@ def custom_compare(weights: dict, start: str = "2015-01-01", freq: str = "M", na
     w = pd.Series({k: float(weights[k]) for k in keys})
     w = w / w.sum()
 
-    out = {}
+    out, n_reb = {}, {}
     for n in ("V3-B 保守增强", "V3-B 风险平价", "V3c 多元"):
         r = run_strategy_backtest(rets, n, "monthly")
         out[n] = r.nv
+        n_reb[n] = int(r.n_rebal)
     nv = fixed_weight_backtest(rets[keys], w, freq)
     nv.index = rets.index
     label = (str(name or "").strip()[:16]) or "我的组合"
     out[label] = nv / float(nv.iloc[0])
+    if freq == "N":
+        n_reb_custom = 0
+    else:
+        p = rets.index.to_period(freq)
+        n_reb_custom = int((p[1:] != p[:-1]).sum())
 
     r4 = lambda x: round(float(x), 4)  # noqa: E731
     rows, curves = [], {}
@@ -71,7 +77,7 @@ def custom_compare(weights: dict, start: str = "2015-01-01", freq: str = "M", na
             "name": k, "ret": r4((float(nv0.iloc[-1]) / float(nv0.iloc[0]) - 1) * 100),
             "cagr": r4(m["cagr"] * 100), "mdd": r4(m["mdd"] * 100),
             "sharpe": None if short else r4(m["sharpe"]), "vol": r4(m["vol"] * 100),
-            "n": 0, "short": short,
+            "n": n_reb_custom if k == label else n_reb.get(k, 0), "short": short,
         })
         s = nv0 if len(nv0) < 600 else nv0.resample("W-FRI").last().dropna()
         curves[k] = {"dates": [f"{d:%Y-%m-%d}" for d in s.index],

@@ -14,7 +14,7 @@
       <p v-else-if="err" class="empty-tip">{{ err }}</p>
       <div v-else-if="d" class="cols2">
         <div class="metric-grid">
-          <div v-for="r in d.rows" :key="r.name" class="card rcard" :class="{ base: isBase(r.name) }">
+          <div v-for="r in allRows" :key="r.name" class="card rcard" :class="{ base: isBase(r.name) }">
             <div class="r1"><i :style="{ background: colorOf(r.name) }"></i><b>{{ r.name }}</b><span class="k num">调仓 {{ r.n }} 次</span></div>
             <div class="r2">
               <div><span>{{ r.short ? '区间收益' : '年化' }}</span><b class="num" :class="tone(r.short ? r.ret : r.cagr)">{{ pct(r.short ? r.ret : r.cagr) }}</b></div>
@@ -23,21 +23,21 @@
               <div v-if="r.vs != null"><span>比月末</span><b class="num" :class="tone(r.vs)">{{ signed(r.vs) }}pp</b></div>
             </div>
           </div>
-          <p class="k pad" v-if="d.rows.some(r => r.short)">不满一年：只看区间收益和波动，年化和夏普没有意义</p>
+          <p class="k pad" v-if="allRows.some(r => r.short)">不满一年：只看区间收益和波动，年化和夏普没有意义</p>
         </div>
         <div class="card">
           <div class="ct"><b>累计收益</b><span class="k">{{ cad === 'mine' ? '账户建立起' : start.slice(0, 4) + ' 年起' }}</span></div>
-          <MultiLine :series="d.curves" :height="320" :colors="colors" :dashed="Object.keys(d.curves).filter(isBase)" />
+          <MultiLine :series="allCurves" :height="320" :colors="colors" :dashed="Object.keys(allCurves).filter(isBase)" />
         </div>
         <van-collapse v-model="showMore" class="more">
           <van-collapse-item name="p" title="月 / 年收益（月末调仓基准）">
             <span class="seg2 pt"><button v-for="p in [['monthly','月度'],['yearly','年度']]" :key="p[0]"
               :class="{ on: pk === p[0] }" @click="pk = p[0]">{{ p[1] }}</button></span>
             <div class="ptab" v-if="shownPeriods.length">
-              <div class="ph"><span>期间</span><span v-for="s in baseNames" :key="s">{{ s.replace(' · 月末', '') }}</span></div>
-              <div v-for="r in shownPeriods" :key="r.k" class="pr">
+              <div class="ph" :style="gridCols"><span>期间</span><span v-for="s in baseNames" :key="s">{{ s.replace(' · 月末', '') }}</span></div>
+              <div v-for="r in shownPeriods" :key="r.k" class="pr" :style="gridCols">
                 <span class="num">{{ r.k }}</span>
-                <span v-for="s in baseNames" :key="s" class="num" :class="tone(r.v[s])">{{ r.v[s] == null ? '—' : pct(r.v[s]) }}</span>
+                <span v-for="x in shownPeriodsRow(r)" :key="x.k" class="num" :class="tone(x.v)">{{ x.v == null ? '—' : pct(x.v) }}</span>
               </div>
             </div>
             <p v-else class="empty-tip">切换一下调仓节奏就能看到对照数据</p>
@@ -81,19 +81,10 @@
         </div>
         <van-loading v-if="cpLoading" class="ld" vertical>回测计算中…</van-loading>
         <p v-else-if="cpErr" class="empty-tip">{{ cpErr }}</p>
-        <template v-else-if="cpRes">
-          <div class="cp-metrics">
-            <div v-for="r in cpRes.rows" :key="r.name" class="cm">
-              <b>{{ r.name }}</b>
-              <div><span>{{ r.short ? '区间收益' : '年化' }}</span><b class="num" :class="tone(r.short ? r.ret : r.cagr)">{{ pct(r.short ? r.ret : r.cagr) }}</b></div>
-              <div><span>最大回撤</span><b class="num down">{{ r.mdd.toFixed(2) }}%</b></div>
-              <div><span>夏普</span><b class="num">{{ r.sharpe ?? '—' }}</b></div>
-            </div>
-          </div>
-          <div class="ct sub">累计收益对比 <span class="k">单位 %</span></div>
-          <MultiLine :series="cpRes.curves" :height="300" :colors="cpColors" />
-          <p class="k cp-note">自定义策略按所选固定权重 + 再平衡频率跑；内置三策略含各自的趋势过滤。数值为累计净值涨幅，年化按 252 观测日口径。</p>
-        </template>
+        <div v-else-if="cpRes" class="cp-added">
+          <van-icon name="passed" /> 已把「{{ cpRes.name }}」加入上方的指标卡和累计收益曲线，可回到上面看对比。
+          <a @click="clearCp">移除</a>
+        </div>
       </div>
     </div>
   </div>
@@ -121,11 +112,25 @@ watch([cad, start], async () => {
 const PAL = { 保守增强: '#1E40AF', 风险平价: '#F59E0B', V3c: '#8B5CF6' }
 const colorOf = n => Object.entries(PAL).find(([k]) => n.includes(k))?.[1] || '#64748B'
 const isBase = n => cad.value !== 'monthly' && n.endsWith('· 月末')
-const colors = computed(() => Object.keys(d.value?.curves || {}).map(colorOf))
+const custom = ref(null)   // 自定义策略：只把「多出来的那一条」并进主视图，不再另起一套图/卡
+const allRows = computed(() => [...(d.value?.rows || []), ...(custom.value ? [custom.value.row] : [])])
+const allCurves = computed(() => ({ ...(d.value?.curves || {}),
+  ...(custom.value ? { [custom.value.name]: custom.value.curve } : {}) }))
+const colors = computed(() => Object.keys(allCurves.value).map(n => n === custom.value?.name ? '#0EA5E9' : colorOf(n)))
 const showMore = ref([]), pk = ref('monthly')
-const baseNames = computed(() => Object.keys(d.value?.periods?.monthly?.[0]?.v || {}).length
-  ? Object.keys(d.value.periods.monthly[0].v) : Object.keys(d.value?.periods?.yearly?.[0]?.v || {}))
+const baseNames = computed(() => {
+  const a = Object.keys(d.value?.periods?.monthly?.[0]?.v || {})
+  const names = a.length ? a : Object.keys(d.value?.periods?.yearly?.[0]?.v || {})
+  return custom.value ? [...names, custom.value.name] : names
+})
 const shownPeriods = computed(() => d.value?.periods?.[pk.value] || [])
+const gridCols = computed(() => ({ gridTemplateColumns: `1fr repeat(${baseNames.value.length}, minmax(0,1fr))` }))
+// 月/年表里补上自定义策略那一列（值来自 custom-backtest 的 periods）
+function shownPeriodsRow(r) {
+  return baseNames.value.map(k => ({
+    k, v: r.v[k] ?? custom.value?.periods?.[pk.value]?.find(x => x.k === r.k)?.v?.[custom.value.name] ?? null
+  }))
+}
 
 // ---- 策略工厂 · 自定义权重 ----
 const cpAssets = ref([]), cpW = ref({}), cpName = ref('我的组合')
@@ -162,12 +167,17 @@ function delCp(n) {
 }
 async function runCp() {
   cpLoading.value = true; cpErr.value = ''
-  try { cpRes.value = await post('/api/market/custom-backtest', {
-    weights: cpW.value, start: cpStart.value, freq: cpFreq.value, name: cpName.value.trim() || '我的组合'
-  }) }
-  catch (e) { cpErr.value = e.message; cpRes.value = null }
+  try {
+    const r = await post('/api/market/custom-backtest', {
+      weights: cpW.value, start: cpStart.value, freq: cpFreq.value, name: cpName.value.trim() || '我的组合'
+    })
+    const name = r.rows[r.rows.length - 1].name
+    custom.value = { name, row: r.rows[r.rows.length - 1], curve: r.curves[name], periods: r.periods }
+    cpRes.value = { name }
+  } catch (e) { cpErr.value = e.message; cpRes.value = null }
   finally { cpLoading.value = false }
 }
+function clearCp() { custom.value = null; cpRes.value = null }
 </script>
 <style scoped>
 .ctl .row{ display:flex; align-items:center; gap:8px; margin-bottom:8px; }
@@ -224,12 +234,9 @@ async function runCp() {
 .btn:disabled{ opacity:.5; cursor:default; }
 .cp-saved{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:10px; }
 .cp-saved .chip i{ font-style:normal; margin-left:6px; color:var(--muted); }
-.cp-metrics{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:14px; }
-.cm{ border:1px solid var(--line); border-radius:10px; padding:9px 11px; }
-.cm > b{ display:block; font-size:13px; margin-bottom:6px; }
-.cm > div{ display:flex; justify-content:space-between; font-size:12px; padding:2px 0; }
-.cm > div span{ color:var(--muted); }
+.cp-added{ display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-top:12px; padding:9px 11px;
+  background:var(--brand-soft); border-radius:9px; font-size:12.5px; color:var(--brand); }
+.cp-added a{ margin-left:auto; color:var(--brand); cursor:pointer; text-decoration:underline; }
 .cp-note{ margin-top:10px; }
-@media (min-width:900px){ .cp-metrics{ grid-template-columns:repeat(4,minmax(0,1fr)); } }
 @media (max-width:620px){ .cp-w{ grid-template-columns:1fr; } }
 </style>
