@@ -2,7 +2,7 @@
   <div class="page">
     <van-pull-refresh v-model="refreshing" @refresh="load(true)" success-text="已更新">
       <div class="wrap">
-        <div class="ptitle"><b>调仓</b><span class="tag gray" v-if="d">跟随 {{ d.account.strategy_name }}</span></div>
+        <div class="ptitle"><b>调仓</b><span class="tag gray m-only" v-if="d">跟随 {{ d.account.strategy_name }}</span></div>
         <van-skeleton v-if="!d" title :row="8" style="padding:16px" />
         <div v-else class="calc-page">
           <div class="verdict" :class="d.status.kind">

@@ -4,6 +4,7 @@
     <!-- 第一行：身份 + 全局工具；第二行：主导航。两组分开，不再全挤在一行 -->
     <div class="in first">
       <router-link to="/" class="brand"><img src="/icon.svg" alt="" />全天候再平衡</router-link>
+      <span v-if="acct?.strategy_name" class="brand-strat" title="策略在入口页的账户卡片上更换">跟随 {{ acct.strategy_name }}</span>
       <div class="tools">
         <UpdateBtn class="u" label />
         <router-link to="/" class="acct" v-if="acct" title="切换账户">
@@ -40,6 +41,9 @@ watch(() => [props.aid, dataVer.value], async () => {
 .first{ height:50px; display:flex; align-items:center; }
 .brand{ display:flex; align-items:center; gap:8px; font-weight:700; font-size:16px; color:var(--ink); text-decoration:none; }
 .brand img{ width:26px; height:26px; }
+/* 跟随策略提到顶栏、紧贴品牌，比页面内的小标签更醒目 */
+.brand-strat{ font-size:12px; color:var(--brand); background:var(--brand-soft);
+  border-radius:999px; padding:3px 10px; white-space:nowrap; }
 .tools{ margin-left:auto; display:flex; align-items:center; gap:14px; }
 .acct{ display:flex; align-items:center; gap:6px; font-size:13px; color:var(--sub); text-decoration:none;
   padding-left:14px; border-left:1px solid var(--line); }
