@@ -12,11 +12,6 @@
           <van-icon name="arrow" class="go" v-else />
         </router-link>
       </div>
-
-      <template v-if="sig">
-        <div class="sec-t"><span>三个策略 · 近半年</span><span class="num">截至 {{ sig.asof.replace(/-/g, '/') }}</span></div>
-        <div class="card"><MultiLine :series="sig.curves" :height="220" /></div>
-      </template>
     </div>
     <TabBar :aid="aid" active="market" />
   </div>
@@ -28,7 +23,6 @@ import { useRoute } from 'vue-router'
 import { get, peek, dataVer } from '../api'
 import TabBar from '../components/TabBar.vue'
 import UpdateBtn from '../components/UpdateBtn.vue'
-import MultiLine from '../components/MultiLine.vue'
 const aid = useRoute().params.aid
 const sig = ref(peek('/api/market/signals') || null), val = ref(peek('/api/market/valuation') || null)
 const load = async (fresh = false) => {
