@@ -59,4 +59,12 @@ const cards = [
 .mv{ font-size:12px; color:var(--sub); white-space:nowrap; flex:0 0 auto; } .mv b{ font-size:16px; color:var(--brand); }
 .go{ color:#CBD5E1; font-size:14px; flex:0 0 auto; }
 @media (min-width:900px){ .grid{ grid-template-columns:repeat(2,minmax(0,1fr)); } .ptitle{ padding-top:16px; } }
+/* 手机端：标题 + 四张入口卡作为一组垂直居中，避免内容全压在顶部、下半屏大片空白。
+   高度不足 700 的机型保持顶部对齐，防止 flex 居中把内容顶出可视区。 */
+@media (max-width:899px) and (min-height:700px){
+  .page{ min-height:100dvh; display:flex; flex-direction:column; }
+  .wrap{ flex:1 1 auto; display:flex; flex-direction:column; justify-content:center; min-height:0; }
+  .grid{ gap:14px; }
+  .mc{ padding:14px 16px; }
+}
 </style>
