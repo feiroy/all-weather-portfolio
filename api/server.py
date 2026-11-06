@@ -651,6 +651,18 @@ def _do_update():
         _UPD["running"], _UPD["finished"] = False, time.time()
 
 
+# ------------------------------------------------------------------ 自定义策略回测（策略工厂 · 自定义权重）
+async def custom_backtest(request: Request):
+    """POST {weights:{资产key: 百分比}, start, freq}，返回内置三策略 + 自定义策略的对比。计算只在 allweather/custom_backtest.py，不在这重写。"""
+    from allweather.custom_backtest import custom_compare
+    try:
+        b = await request.json()
+        return J(custom_compare(b.get("weights") or {}, b.get("start") or "2015-01-01",
+                                b.get("freq") or "M", b.get("name") or "我的组合"))
+    except ValueError as e:
+        return J({"error": str(e)}, 400)
+
+
 # ------------------------------------------------------------------ 报告导出
 def _report_rows(P, a):
     """账户报告共用的数据：汇总 / 持仓 / 交易流水 / 每日收益。"""
@@ -796,6 +808,7 @@ routes = [
     Route("/api/acct/{aid}/holdings", edit_holdings, methods=["POST"]),
     Route("/api/market/signals", signals),
     Route("/api/market/backtest", backtest),
+    Route("/api/market/custom-backtest", custom_backtest, methods=["POST"]),
     Route("/api/market/valuation", valuation),
     Route("/api/market/valuation/{code}", valuation_hist),
     Route("/api/market/fund-search", fund_search),

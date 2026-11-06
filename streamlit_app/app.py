@@ -6796,24 +6796,9 @@ def _pg_funds() -> None:
 # 自定义组合回测（自选资产/权重，自动算指标）
 # ============================================================
 def _fixed_weight_backtest(rets: pd.DataFrame, weights: pd.Series, freq: str = "M") -> pd.Series:
-    """固定目标权重 + 定期再平衡的净值。freq: M=月, Q=季, N=不再平衡（买并持有）。"""
-    w = (weights / weights.sum()).values
-    h = w.copy()
-    v = 1.0
-    nv = pd.Series(index=rets.index, dtype=float)
-    nv.iloc[0] = 1.0
-    period = rets.index.to_period(freq) if freq != "N" else None
-    arr = rets.values
-    for i in range(1, len(rets)):
-        r = arr[i]
-        v *= 1 + float(np.dot(h, r))
-        nv.iloc[i] = v
-        h = h * (1 + r)
-        s = h.sum()
-        h = h / s if s > 0 else w.copy()
-        if period is not None and period[i] != period[i - 1]:
-            h = w.copy()
-    return nv
+    """固定目标权重 + 定期再平衡的净值（实现移到 allweather/custom_backtest.py，H5 与这里共用）。"""
+    from allweather.custom_backtest import fixed_weight_backtest
+    return fixed_weight_backtest(rets, weights, freq)
 
 
 _CP_MODES = ["等权", "自定义百分比", "逆波动率(20d)", "风险平价(HRP)"]
