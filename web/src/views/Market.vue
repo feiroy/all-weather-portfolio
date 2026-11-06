@@ -6,10 +6,11 @@
         <router-link v-for="c in cards" :key="c.k" :to="`/a/${aid}/market/${c.k}`" class="mc"
                      :style="{ '--mk-bg': c.bg }">
           <i><van-icon :name="c.icon" /></i>
-          <div class="mt"><b>{{ c.t }}</b><span>{{ c.d }}</span></div>
-          <div class="mv" v-if="c.k === 'signals' && sig"><b class="num">{{ sig.rows.filter(r => r.on).length }}</b>/{{ sig.rows.length }} 生效</div>
-          <div class="mv" v-else-if="c.k === 'valuation' && val && val.rows.length"><b class="num">{{ val.rows.filter(r => r.lv === '低估').length }}</b> 个低估</div>
-          <van-icon name="arrow" class="go" v-else />
+          <div class="mt"><b>{{ c.t }}</b><span>
+            <em v-if="c.k === 'signals' && sig" class="st num">{{ sig.rows.filter(r => r.on).length }}/{{ sig.rows.length }} 生效</em>
+            <em v-else-if="c.k === 'valuation' && val && val.rows.length" class="st num">{{ val.rows.filter(r => r.lv === '低估').length }} 个低估</em>
+            {{ c.d }}</span></div>
+          <van-icon name="arrow" class="go" />
         </router-link>
       </div>
     </div>
@@ -53,6 +54,8 @@ const cards = [
 .mt b{ flex:0 0 auto; font-size:15px; color:var(--ink); white-space:nowrap; }
 .mt span{ flex:1 1 auto; min-width:0; font-size:12px; color:var(--muted);
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+/* 实时状态并入描述行，放在最前面；四张卡右端统一为箭头 */
+.mt em.st{ color:var(--brand); font-style:normal; font-weight:600; margin-right:6px; }
 .mv{ font-size:12px; color:var(--sub); white-space:nowrap; flex:0 0 auto; } .mv b{ font-size:16px; color:var(--brand); }
 .go{ color:#CBD5E1; font-size:14px; flex:0 0 auto; }
 @media (min-width:900px){ .grid{ grid-template-columns:repeat(2,minmax(0,1fr)); } .ptitle{ padding-top:16px; } }
