@@ -65,6 +65,43 @@
             <p class="k">双指/滚轮滑动或按住拖动平移 · ⌘/Ctrl + 滑动缩放 · 双击复位；月/年线取每期最后一条真实记录</p>
           </div>
 
+        <!-- 多只对比：紧跟三张走势图，默认展开；与单只走势同页，不做二级菜单 -->
+        <van-collapse v-model="cmpOpen" class="cmpbox">
+          <van-collapse-item title="多只基金同图对比" name="c">
+            <div class="cmp">
+              <div class="chips picked" v-if="picked.length">
+                <span v-for="p in picked" :key="p.code" class="chip on" @click="drop(p.code)">{{ shortName(p.name) }} ×</span>
+              </div>
+              <van-search v-model="cq" placeholder="搜索基金加入对比（最多 4 只）" shape="round" />
+              <van-cell-group inset v-if="opts.length">
+                <van-cell v-for="r in opts" :key="r.code" :title="r.name" :label="r.code" clickable @click="pick(r)">
+                  <template #value><van-icon name="plus" /></template>
+                </van-cell>
+              </van-cell-group>
+              <template v-if="picked.length >= 2">
+                <div class="chips rr">
+                  <span v-for="r in cmpRanges" :key="r.k" class="chip" :class="{ on: cmpRange === r.k }" @click="cmpRange = r.k">{{ r.k }}</span>
+                  <span class="seg2 per"><button v-for="p in periods" :key="p" :class="{ on: cmpPeriod === p }" @click="cmpPeriod = p">{{ p }}</button></span>
+                </div>
+                <div class="st sub">相对起点涨跌幅 <span>区间首值 = 0%</span></div>
+                <MultiLine :series="cmpSeries" :height="240" />
+                <div class="st sub">单期涨跌 <span>每{{ cmpPeriod === '日线' ? '日' : cmpPeriod === '月线' ? '月' : '年' }}相对上一期</span></div>
+                <MultiLine :series="periodSeries" :height="170" />
+                <div class="st sub">阶段表现 <span>各基金固定区间涨跌，与图表视窗无关</span></div>
+                <div class="stage-tbl-wrap">
+                  <table class="stage-tbl">
+                    <thead><tr><th>基金</th><th v-for="k in cmpStageKeys" :key="k">{{ k }}</th></tr></thead>
+                    <tbody><tr v-for="row in cmpStageRows" :key="row.name">
+                      <td>{{ row.name }}</td>
+                      <td v-for="(v, k) in row.vals" :key="k" class="num" :class="tone(v)">{{ pctS(v) }}</td>
+                    </tr></tbody>
+                  </table>
+                </div>
+              </template>
+              <p v-else class="empty-tip">再选 {{ Math.max(0, 2 - picked.length) }} 只就能同图对比（最多 4 只）</p>
+            </div>
+          </van-collapse-item>
+        </van-collapse>
           <!-- 收益日历：日 / 月 / 年 三期涨跌 -->
           <div class="card cal">
             <div class="ch">
@@ -90,27 +127,6 @@
           </div>
         </template>
 
-        <!-- 多只对比：默认收起，不再是二级菜单 -->
-        <van-collapse v-model="cmpOpen" class="cmpbox">
-          <van-collapse-item title="多只基金同图对比" name="c">
-            <div class="cmp">
-              <div class="chips picked" v-if="picked.length">
-                <span v-for="p in picked" :key="p.code" class="chip on" @click="drop(p.code)">{{ shortName(p.name) }} ×</span>
-              </div>
-              <van-search v-model="cq" placeholder="搜索基金加入对比（最多 4 只）" shape="round" />
-              <van-cell-group inset v-if="opts.length">
-                <van-cell v-for="r in opts" :key="r.code" :title="r.name" :label="r.code" clickable @click="pick(r)">
-                  <template #value><van-icon name="plus" /></template>
-                </van-cell>
-              </van-cell-group>
-              <div class="chips rr" v-if="picked.length >= 2">
-                <span v-for="r in cmpRanges" :key="r.k" class="chip" :class="{ on: cmpRange === r.k }" @click="cmpRange = r.k">{{ r.k }}</span>
-              </div>
-              <MultiLine v-if="Object.keys(cmpSeries).length >= 2" :series="cmpSeries" :height="240" />
-              <p v-else class="empty-tip">再选 {{ Math.max(0, 2 - picked.length) }} 只就能同图对比（按区间起点归一到 0%）</p>
-            </div>
-          </van-collapse-item>
-        </van-collapse>
       </template>
     </div>
   </div>
@@ -213,8 +229,8 @@ function calStep(k) {
 }
 const cellCls = c => !c || c.p == null ? '' : c.p > 0 ? 'pos' : c.p < 0 ? 'neg' : ''
 
-// 多只对比（默认收起）
-const cmpOpen = ref([])
+// 多只对比（默认展开，位置紧跟三张走势图）
+const cmpOpen = ref(['c'])
 const picked = ref(JSON.parse(localStorage.getItem('aw-cmp') || '[]'))
 const navs = ref({}), cq = ref(''), opts = ref([]), cmpRange = ref('近1年')
 const cmpRanges = [{ k: '近1月', m: 1 }, { k: '近3月', m: 3 }, { k: '近1年', m: 12 }, { k: '近3年', m: 36 }, { k: '全部', m: 0 }]
@@ -240,17 +256,50 @@ async function pick(r) {
   opts.value = []; cq.value = ''
 }
 function drop(c) { picked.value = picked.value.filter(p => p.code !== c) }
+const cmpPeriod = ref('日线')
+const cmpChar = computed(() => cmpPeriod.value === '日线' ? '日' : cmpPeriod.value === '月线' ? '月' : '年')
+const cmpSeg = p => {
+  const n = navs.value[p.code]
+  if (!n?.dates?.length) return null
+  const s = sliceRange(n.dates, n.values, cmpRange.value)
+  if (s.values.length < 2 || !s.values[0]) return null
+  return s
+}
+// 相对起点涨跌幅：按当前周期取每期最后一条
 const cmpSeries = computed(() => {
   const out = {}
   for (const p of picked.value) {
-    const n = navs.value[p.code]
-    if (!n?.dates?.length) continue
-    const s = sliceRange(n.dates, n.values, cmpRange.value)
-    if (s.values.length < 2 || !s.values[0]) continue
-    out[p.name] = { dates: s.dates, ret: cumulativeReturn(s.values) }
+    const s = cmpSeg(p)
+    if (!s) continue
+    const a = aggregate(s.dates, cumulativeReturn(s.values), cmpChar.value)
+    out[p.name] = { dates: a.dates, ret: a.values }
   }
   return out
 })
+// 单期涨跌：净值先按周期聚合，再算相邻两期涨跌（保留期首相对上期末）
+const periodSeries = computed(() => {
+  const out = {}
+  for (const p of picked.value) {
+    const s = cmpSeg(p)
+    if (!s) continue
+    const a = aggregate(s.dates, s.values, cmpChar.value)
+    out[p.name] = {
+      dates: a.dates,
+      ret: a.values.map((v, i) => i && a.values[i - 1] ? (v / a.values[i - 1] - 1) * 100 : 0),
+    }
+  }
+  return out
+})
+const cmpStageKeys = ['近1月', '近3月', '近6月', '近1年', '近3年', '今年', '全部']
+const cmpStageRows = computed(() => picked.value.map(p => {
+  const n = navs.value[p.code]
+  const vals = {}
+  for (const k of cmpStageKeys) {
+    const s = n?.dates?.length ? sliceRange(n.dates, n.values, k) : { values: [] }
+    vals[k] = rangeReturn(s.values)
+  }
+  return { name: shortName(p.name), vals }
+}))
 </script>
 <style scoped>
 .sb{ background:transparent; padding:10px 12px; }
@@ -291,6 +340,15 @@ const cmpSeries = computed(() => {
 .dd{ font-size:11.5px; color:var(--sub); } .dv{ font-size:11.5px; font-weight:600; }
 .cell.big .dd{ font-size:12.5px; } .cell.big .dv{ font-size:13px; }
 .cmpbox{ margin:16px 12px 0; border-radius:12px; overflow:hidden; }
+.cmp .st{ font-size:13px; font-weight:600; display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
+.cmp .st span{ font-size:11.5px; font-weight:400; color:var(--muted); }
+.cmp .st.sub{ margin:14px 0 6px; font-weight:500; }
+.stage-tbl-wrap{ overflow-x:auto; margin-top:8px; }
+.stage-tbl{ width:100%; min-width:640px; border-collapse:collapse; font-size:12px; }
+.stage-tbl th, .stage-tbl td{ padding:7px 8px; border-bottom:1px solid var(--line); text-align:right; white-space:nowrap; }
+.stage-tbl th:first-child, .stage-tbl td:first-child{ text-align:left; padding-left:2px; }
+.stage-tbl th{ font-size:11px; color:var(--muted); font-weight:500; }
+.stage-tbl td:first-child{ color:var(--ink); }
 .cmpbox :deep(.van-collapse-item__content){ padding:8px 12px 14px; }
 .picked{ padding:4px 0 8px; flex-wrap:wrap; }
 .cmp .rr{ padding:8px 0; }
