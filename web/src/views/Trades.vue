@@ -18,11 +18,16 @@
           <div class="bar"><i :style="{ width: (plan.length ? matched / plan.length * 100 : 0) + '%' }"></i></div>
           <p>按「基金 + 买卖方向」把最近 7 天的实际记录和当前调仓清单对照；金额以支付宝实际成交为准</p>
         </div>
-        <div class="chips filt">
+        <div class="filt">
           <span class="chip" :class="{ on: !code }" @click="code = ''">全部</span>
           <span class="chip" :class="{ on: code === '$' }" @click="code = '$'">资金进出</span>
-          <span v-for="c in d.codes" :key="c.code" class="chip" :class="{ on: code === c.code }" @click="code = c.code">{{ short(c.name) }}</span>
+          <button class="fsel" :class="{ on: code && code !== '$' }" @click="showFund = true">
+            <span class="fs-txt">{{ fundLabel }}</span><van-icon name="arrow-down" />
+          </button>
+          <span class="fcount num">{{ rows.length }} 笔</span>
         </div>
+        <van-action-sheet v-model:show="showFund" :actions="fundActs" cancel-text="取消"
+                          description="只看某一只基金的成交" close-on-click-action @select="pickFund" />
         <template v-for="g in groups" :key="g.date">
           <div class="sec-t"><span class="num">{{ g.date.replace(/-/g, '/') }} {{ wk(g.date) }}</span>
             <span class="num">{{ g.rows.length }} 笔</span></div>
@@ -79,6 +84,16 @@ const load = async (fresh = false) => { d.value = await get(url, { fresh }) }
 load(); onActivated(() => load()); watch(dataVer, () => load(true))
 
 const rows = computed(() => (d.value?.rows || []).filter(t => !code.value ? true : code.value === '$' ? !t.code : t.code === code.value))
+// 15 只基金不再各占一个按钮，收进一个下拉；「全部 / 资金进出」是高频项保留
+const showFund = ref(false)
+const fundLabel = computed(() => {
+  if (!code.value || code.value === '$') return '按基金筛选'
+  const c = (d.value?.codes || []).find(x => x.code === code.value)
+  return c ? short(c.name) : '按基金筛选'
+})
+const fundActs = computed(() => [{ name: '全部基金', value: '' },
+  ...(d.value?.codes || []).map(c => ({ name: c.name, value: c.code }))])
+function pickFund(x) { code.value = x.value }
 const groups = computed(() => {
   const m = new Map()
   for (const t of rows.value) { if (!m.has(t.date)) m.set(t.date, []); m.get(t.date).push(t) }
@@ -114,7 +129,12 @@ async function remove(t) {
 .sum{ display:grid; grid-template-columns:repeat(3,1fr); margin:12px 12px 0; background:#fff; border-radius:14px; padding:12px 8px; text-align:center; }
 .sum span{ display:block; font-size:12px; color:var(--muted); } .sum b{ display:block; font-size:16px; margin-top:4px; }
 .sum small{ font-size:11px; color:var(--muted); }
-.filt{ margin-top:12px; }
+.filt{ margin-top:12px; padding:0 12px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.fsel{ display:inline-flex; align-items:center; gap:5px; max-width:180px; padding:5px 10px;
+  border:1px solid var(--line); border-radius:16px; background:#fff; color:var(--sub); font-size:12.5px; }
+.fsel.on{ color:var(--brand); border-color:var(--brand); background:var(--brand-soft); }
+.fs-txt{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.fcount{ margin-left:auto; font-size:12px; color:var(--muted); }
 .t1{ display:flex; align-items:center; gap:6px; }
 .tn{ font-size:14.5px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .t2{ font-size:12px; color:var(--muted); margin-top:3px; }
