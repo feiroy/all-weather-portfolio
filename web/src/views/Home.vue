@@ -128,8 +128,8 @@ const statusLabel = computed(() => {
 })
 </script>
 <style scoped>
-.top{ display:flex; align-items:center; gap:8px; padding:calc(12px + env(safe-area-inset-top)) 16px 4px; }
-.acct{ display:flex; align-items:center; gap:4px; font-size:18px; margin-right:2px; white-space:nowrap; cursor:pointer; }
+.top{ display:flex; align-items:center; gap:8px; padding:calc(24px + env(safe-area-inset-top)) 16px 10px; }
+.acct{ display:flex; align-items:center; gap:4px; font-size:21px; font-weight:650; margin-right:2px; white-space:nowrap; cursor:pointer; }
 .acct .van-icon{ font-size:13px; color:var(--muted); }
 /* 头卡与全站卡片统一白底，靠大字号金额建立主次，不用深色块压住首屏 */
 .hero{ margin:10px 12px 0; padding:18px 18px 10px; border-radius:18px; color:var(--ink);

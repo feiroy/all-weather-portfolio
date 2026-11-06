@@ -40,7 +40,8 @@ const cards = [
 ]
 </script>
 <style scoped>
-.ptitle{ display:flex; align-items:baseline; gap:8px; padding:calc(14px + env(safe-area-inset-top)) 16px 2px; font-size:20px; }
+.ptitle b{ font-size:24px; font-weight:700; color:var(--ink); letter-spacing:-.3px; line-height:1.25; }
+.ptitle{ display:flex; align-items:baseline; gap:8px; padding:calc(26px + env(safe-area-inset-top)) 16px 14px; font-size:20px; }
 .ptitle .sub{ font-size:12px; color:var(--muted); }
 .upd{ margin-left:auto; align-self:center; }
 .grid{ display:grid; gap:10px; padding:12px 12px 0; grid-template-columns:minmax(0,1fr); }
@@ -59,11 +60,8 @@ const cards = [
 .mv{ font-size:12px; color:var(--sub); white-space:nowrap; flex:0 0 auto; } .mv b{ font-size:16px; color:var(--brand); }
 .go{ color:#CBD5E1; font-size:14px; flex:0 0 auto; }
 @media (min-width:900px){ .grid{ grid-template-columns:repeat(2,minmax(0,1fr)); } .ptitle{ padding-top:16px; } }
-/* 手机端：标题 + 四张入口卡作为一组垂直居中，避免内容全压在顶部、下半屏大片空白。
-   高度不足 700 的机型保持顶部对齐，防止 flex 居中把内容顶出可视区。 */
-@media (max-width:899px) and (min-height:700px){
-  .page{ min-height:100dvh; display:flex; flex-direction:column; }
-  .wrap{ flex:1 1 auto; display:flex; flex-direction:column; justify-content:center; min-height:0; }
+/* 手机端入口稍作舒展（不再整组垂直居中，页头留白由 .ptitle 统一处理） */
+@media (max-width:899px){
   .grid{ gap:14px; }
   .mc{ padding:14px 16px; }
 }

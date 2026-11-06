@@ -124,7 +124,8 @@ async function remove(t) {
 .exec .bar{ height:6px; border-radius:3px; background:#F1F2F4; margin:10px 0 6px; overflow:hidden; }
 .exec .bar i{ display:block; height:100%; background:var(--brand); border-radius:3px; }
 .exec p{ font-size:11.5px; color:var(--muted); line-height:1.6; margin:0; }
-.ptitle{ display:flex; align-items:center; gap:8px; padding:calc(14px + env(safe-area-inset-top)) 16px 2px; font-size:20px; }
+.ptitle b{ font-size:24px; font-weight:700; color:var(--ink); letter-spacing:-.3px; line-height:1.25; }
+.ptitle{ display:flex; align-items:center; gap:8px; padding:calc(26px + env(safe-area-inset-top)) 16px 14px; font-size:20px; }
 .add{ margin-left:auto; }
 .sum{ display:grid; grid-template-columns:repeat(3,1fr); margin:12px 12px 0; background:#fff; border-radius:14px; padding:12px 8px; text-align:center; }
 .sum span{ display:block; font-size:12px; color:var(--muted); } .sum b{ display:block; font-size:16px; margin-top:4px; }

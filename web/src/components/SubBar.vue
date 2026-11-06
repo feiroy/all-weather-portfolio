@@ -12,4 +12,9 @@ const back = () => (window.history.state?.back ? router.back() : router.replace(
 </script>
 <style scoped>
 .subbar{ position:sticky; top:0; z-index:20; }
+/* 手机端返回栏别贴屏幕顶；标题放大，和正文拉开层级 */
+@media (max-width:899px){
+  .subbar{ padding-top:calc(12px + env(safe-area-inset-top)); }
+}
+.subbar :deep(.van-nav-bar__title){ font-size:17px; font-weight:650; color:var(--ink, #111827); }
 </style>
