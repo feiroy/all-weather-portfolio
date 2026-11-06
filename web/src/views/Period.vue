@@ -34,10 +34,11 @@
                 </div>
                 <span class="seg2"><button :class="{ on: cu === '¥' }" @click="cu = '¥'">¥</button><button :class="{ on: cu === '%' }" @click="cu = '%'">%</button></span>
               </div>
-              <div class="sumline" v-if="mode !== '年'">
-                {{ mode === '日' ? '本月' : '本年' }}收益 <b class="num" :class="tone(curSum.v)">{{ signed(curSum.v) }}</b>
+              <div class="sumline">
+                {{ mode === '日' ? '本月' : mode === '年' ? cur.y + '年' : '本年' }}收益 <b class="num" :class="tone(curSum.v)">{{ signed(curSum.v) }}</b>
                 <b class="num" :class="tone(curSum.p)">{{ pct(curSum.p) }}</b>
               </div>
+              <p v-if="mode !== '日'" class="cal-note">账户自 {{ firstDate }} 起有数据，更早的期间显示「—」；点有数据的格子可下钻</p>
               <template v-if="mode === '日'">
                 <div class="wk"><span v-for="w in '一二三四五六日'" :key="w">{{ w }}</span></div>
                 <div class="grid7">
@@ -58,9 +59,10 @@
           </div>
         </div>
         <!-- 选中那天：每只基金赚了多少（点选后才出现，单独一张卡） -->
-        <div class="card det" v-if="mode === '日' && sel && d.detail[sel]">
+        <div class="card det" v-if="sel && d.detail[sel]">
           <div class="ch"><b class="num">{{ sel.replace(/-/g, '/') }} 收益</b>
             <b class="num" :class="tone(selDay)">{{ signed(selDay) }}</b></div>
+          <p v-if="mode !== '日'" class="det-note">这是上面所选那天的每只基金明细；切回「日」点日历格子可换一天</p>
           <div v-for="r in d.detail[sel]" :key="r[0]" class="drow" @click="$router.push(`/a/${aid}/fund/${r[0]}`)">
             <div class="dn"><div>{{ d.funds[r[0]] || r[0] }}</div>
               <small>{{ r[0] }}<span v-if="r[4]" class="tag" :class="r[4] === '买入' ? 'buy' : 'sell'">{{ r[4] }}</span>
@@ -112,6 +114,7 @@ const periods = ['日线', '月线', '年线'], period = ref('日线')
 const chart = computed(() => aggregate(seg.value.dates, seg.value.values,
   period.value === '日线' ? '日' : period.value === '月线' ? '月' : '年'))
 const firstYear = computed(() => d.value?.dates?.[0]?.slice(0, 4) || '')
+const firstDate = computed(() => d.value?.dates?.[0]?.replace(/-/g, '/') || '')
 
 // ---------- 日历
 const mode = ref('日'), cu = ref('¥')
@@ -186,6 +189,8 @@ void money
 .note{ font-size:11.5px; color:var(--muted); margin:6px 0 0; line-height:1.6; }
 .sparse{ font-size:12px; color:#92400E; background:#FFFBEB; border-radius:8px;
   padding:7px 10px; margin:0 0 8px; line-height:1.6; }
+.cal-note, .det-note{ font-size:11.5px; color:var(--muted); line-height:1.6; margin:2px 0 6px; }
+.det-note{ margin-top:8px; }
 .nav{ display:flex; align-items:center; gap:4px; font-size:14.5px; white-space:nowrap; }
 .cal .ch{ flex-wrap:wrap; row-gap:8px; }
 /* 窄屏（≤400）：月份切换单独占一行居中，两个切换按钮在下一行左右排 */
