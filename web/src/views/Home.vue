@@ -33,7 +33,7 @@
                   <div class="mh"><span>近一个月</span>
                     <b class="num" :class="toneD(last(d.month.ret))">{{ pct(last(d.month.ret)) }}</b>
                     <span class="num">{{ signed(last(d.month.money), 0) }} 元</span></div>
-                  <LineChart :dates="d.month.dates" :values="d.month.ret" :height="130" dark zero :zoom="false"
+                  <LineChart :dates="d.month.dates" :values="d.month.ret" :height="130" zero :zoom="false"
                              :fmt-tip="i => `${d.month.dates[i]}<br/><b>${pct(d.month.ret[i])}</b>　${signed(d.month.money[i], 0)} 元`" />
                 </div>
               </div>
@@ -93,7 +93,7 @@ const url = () => `/api/acct/${aid.value}/home`
 const d = ref(peek(url()) || null)
 const refreshing = ref(false)
 const last = a => a[a.length - 1]
-const toneD = v => tone(v)   // 蓝底上的颜色在样式里换浅色
+const toneD = v => tone(v)   // 涨红跌绿由 .hero 内的样式统一控制
 async function load(fresh = false) {
   try { d.value = await get(url(), { fresh }) } finally { refreshing.value = false }
 }
@@ -122,18 +122,21 @@ const statusLabel = computed(() => {
 .top{ display:flex; align-items:center; gap:8px; padding:calc(12px + env(safe-area-inset-top)) 16px 4px; }
 .acct{ display:flex; align-items:center; gap:4px; font-size:18px; margin-right:2px; white-space:nowrap; cursor:pointer; }
 .acct .van-icon{ font-size:13px; color:var(--muted); }
-.hero{ margin:10px 12px 0; padding:18px 18px 10px; border-radius:18px; color:#fff;
-  background:linear-gradient(135deg,#1E3A8A 0%,#1E40AF 55%,#3B82F6 100%); box-shadow:0 8px 24px rgba(30,64,175,.22); }
-.hero .k{ font-size:12px; opacity:.78; }
-.hero .asof{ float:right; opacity:.85; }
-.total{ font-size:34px; font-weight:700; letter-spacing:-1px; margin:4px 0 12px; }
-.grid3{ display:grid; grid-template-columns:repeat(3,1fr); gap:6px; padding-top:12px; border-top:1px solid rgba(255,255,255,.18); }
-.grid3 .v{ font-size:16px; font-weight:650; margin-top:3px; }
-.grid3 .s{ font-size:12px; opacity:.85; margin-top:1px; }
-.hero .up{ color:#FCA5A5 } .hero .down{ color:#86EFAC }
-.month{ margin-top:14px; padding-top:10px; border-top:1px solid rgba(255,255,255,.18); }
+/* 头卡与全站卡片统一白底，靠大字号金额建立主次，不用深色块压住首屏 */
+.hero{ margin:10px 12px 0; padding:18px 18px 10px; border-radius:18px; color:var(--ink);
+  background:#fff; border:1px solid var(--line); }
+.hero .k{ font-size:12px; color:var(--muted); }
+.hero .asof{ float:right; color:var(--muted); }
+.total{ font-size:34px; font-weight:700; letter-spacing:-1px; margin:4px 0 12px; color:var(--ink); }
+.grid3{ display:grid; grid-template-columns:repeat(3,1fr); gap:6px; padding-top:12px; border-top:1px solid var(--line); }
+.grid3 .v{ font-size:16px; font-weight:650; margin-top:3px; color:var(--ink); }
+.grid3 .s{ font-size:12px; color:var(--muted); margin-top:1px; }
+/* 白底上必须明确的涨红跌绿；提高特异性覆盖 .grid3 .v 的 --ink */
+.hero .grid3 .v.up, .hero .grid3 .s.up, .hero .mh b.up{ color:var(--up) }
+.hero .grid3 .v.down, .hero .grid3 .s.down, .hero .mh b.down{ color:var(--down) }
+.month{ margin-top:14px; padding-top:10px; border-top:1px solid var(--line); }
 .mh{ display:flex; gap:8px; align-items:baseline; font-size:12px; }
-.mh span{ opacity:.8 } .mh b{ font-size:15px; }
+.mh span{ color:var(--muted); } .mh b{ font-size:15px; }
 .status{ margin-top:12px !important; }
 .upd{ margin-left:auto; }
 .strat{ font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
