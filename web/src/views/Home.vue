@@ -45,6 +45,15 @@
                   <i :style="{ background: q.bg, color: q.c }"><van-icon :name="q.icon" /></i><span>{{ q.t }}</span>
                 </router-link>
               </div>
+              <!-- 持仓体检有异常：在首页直接提醒，不用点进体检页才发现 -->
+              <router-link v-if="d.health_warn?.n" :to="`/a/${aid}/health`" class="health-warn">
+                <van-icon name="warning-o" class="hw-i" />
+                <div class="hw-t">
+                  <b>持仓体检：{{ d.health_warn.n }} 项需要留意</b>
+                  <span>{{ d.health_warn.items.map(i => `${i.label} ${i.over}`).join(' · ') }}</span>
+                </div>
+                <van-icon name="arrow" class="hw-go" />
+              </router-link>
               <!-- 这一轮要不要动手 -->
               <van-cell-group inset class="status">
                 <van-cell is-link :to="`/a/${aid}/calc`" :title="statusTitle" :label="statusLabel">
@@ -137,6 +146,14 @@ const statusLabel = computed(() => {
 .month{ margin-top:14px; padding-top:10px; border-top:1px solid var(--line); }
 .mh{ display:flex; gap:8px; align-items:baseline; font-size:12px; }
 .mh span{ color:var(--muted); } .mh b{ font-size:15px; }
+.health-warn{ display:flex; align-items:center; gap:10px; margin:12px 12px 0; padding:11px 14px;
+  background:#FFFBEB; border-left:3px solid #F59E0B; border-radius:10px; text-decoration:none; }
+.hw-i{ font-size:19px; color:#D97706; flex:0 0 auto; }
+.hw-t{ min-width:0; flex:1; }
+.hw-t b{ display:block; font-size:13.5px; color:var(--ink); }
+.hw-t span{ display:block; font-size:11.5px; color:var(--sub); margin-top:2px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.hw-go{ color:#D97706; flex:0 0 auto; }
 .status{ margin-top:12px !important; }
 .upd{ margin-left:auto; }
 .strat{ font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }

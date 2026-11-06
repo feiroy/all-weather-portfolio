@@ -207,8 +207,12 @@ async def trash_purge(request: Request):
 @acct_view
 async def home(request, aid, P, a):
     s = P.summary()
+    h = P.health()          # 体检异常要在资产首页露出来，不必等用户点进体检页
+    warn = {"n": len(h["bad"]),
+            "items": [{"label": i["label"], "over": i["over"]} for i in h["bad"]]}
     return J({"account": _acct_info(aid, a), "summary": {k: (_r(v) if isinstance(v, float) else v) for k, v in s.items()},
               "status": {k: (_r(v) if isinstance(v, float) else v) for k, v in P.status().items()},
+              "health_warn": warn,
               "month": P.month_curve(), "holdings": [_hj(P.holding(it)) for it in P.items() if not it.get("dup")]})
 
 
