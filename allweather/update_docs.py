@@ -28,6 +28,18 @@ class _NpEncoder(json.JSONEncoder):
         return super().default(obj)
 
 
+def _json_safe(obj):
+    """NaN / ±Inf → None。浏览器 JSON.parse 不认 NaN：风险平价（短融，2015 起）没有 2008 等压力事件的数据，
+    原样写出 `NaN` 会让 docs/index.html 整页解析失败。"""
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(v) for v in obj]
+    if isinstance(obj, (float, np.floating)) and not np.isfinite(obj):
+        return None
+    return obj
+
+
 def _pct(v, d=2):
     """float → "X.XX%" 字符串。"""
     if v is None or (isinstance(v, float) and np.isnan(v)):
@@ -136,7 +148,7 @@ def save_docs_json(perf_results, yearly_results, event_results,
 
     json_path = DOCS_DIR / "data.json"
     json_path.write_text(
-        json.dumps(data, ensure_ascii=False, indent=2, cls=_NpEncoder),
+        json.dumps(_json_safe(data), ensure_ascii=False, indent=2, cls=_NpEncoder, allow_nan=False),
         encoding="utf-8",
     )
     print(f"  ok {json_path.name}（指标快照，供 index.html 渲染）")
@@ -179,13 +191,13 @@ def _generate_sync_script(S):
 
         yr = S.get(s, {}).get("yearly")
         if yr:
-            Y[s] = {str(k): round(float(v), 6) for k, v in yr.items()}
+            Y[s] = {str(k): round(float(v), 6) for k, v in yr.items() if v is not None}
         ev = S.get(s, {}).get("events")
         if ev:
-            E[s] = {str(k): round(float(v), 6) for k, v in ev.items()}
+            E[s] = {str(k): round(float(v), 6) for k, v in ev.items() if v is not None}   # 起点之前的事件（风险平价没有 2008）不写
         bt = S.get(s, {}).get("bootstrap")
         if bt:
-            B[s] = {k: round(float(v), 6) for k, v in bt.items()}
+            B[s] = {k: round(float(v), 6) for k, v in bt.items() if v is not None}
         rg = S.get(s, {}).get("regime")
         if rg:
             R[s] = rg
@@ -195,7 +207,7 @@ def _generate_sync_script(S):
     if E: payload["_events"] = E
     if B: payload["_bootstrap"] = B
     if R: payload["_regime"] = R
-    ts_json = json.dumps(payload, ensure_ascii=False, cls=_NpEncoder)
+    ts_json = json.dumps(_json_safe(payload), ensure_ascii=False, cls=_NpEncoder, allow_nan=False)
 
     return f"""
 <script>

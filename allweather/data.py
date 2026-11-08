@@ -2,7 +2,7 @@
 import functools
 import pandas as pd
 import numpy as np
-from .config import DATA_DIR, BACKTEST_START, BACKTEST_END, BOND_30Y_TENOR, SAFETY_DEDUCT
+from .config import DATA_DIR, BACKTEST_START, BACKTEST_END, BOND_30Y_TENOR, SAFETY_DEDUCT, LATE_START_ASSETS
 
 
 @functools.lru_cache(maxsize=32)
@@ -116,10 +116,10 @@ def synthesize_bond_30y(s_10y: pd.Series | None, s_30y_etf: pd.Series) -> pd.Ser
         raise FileNotFoundError(
             "合成 30Y 需要 data/cgb_yields.csv（中债国债收益率曲线，2014 起）和 bond_30y_etf.csv；"
             "运行 py main.py 或 python -c 'from allweather.fetch import fetch_all; fetch_all()' 拉取")
-    # 面板共同起点是 2015-01（中证短融指数起点），收益率必须覆盖到它之前，否则 30Y 会把整个面板截短
-    if y30.index.min() > pd.Timestamp("2015-01-05"):
-        raise ValueError(f"cgb_yields.csv 只从 {y30.index.min().date()} 开始，覆盖不到回测起点 2015-01；"
-                         "删掉该文件后重新拉取（fetch_all 会按年补全到 2014）")
+    # 面板共同起点是 2006-07-14（黄金真实数据起点），收益率必须覆盖到它，否则 30Y 会把整个面板截短
+    if y30.index.min() > pd.Timestamp("2006-07-14"):
+        raise ValueError(f"cgb_yields.csv 只从 {y30.index.min().date()} 开始，覆盖不到面板起点 2006-07；"
+                         "删掉该文件后重新拉取（fetch_all 会按年从 2006 补全）")
     recon = bond_total_return_from_yield(y30, BOND_30Y_TENOR)
     # 对齐到交易所日历：银行间在调休周六也有收益率（2015~2026 多 46 天），不对齐会把这些日子
     # 塞进面板 —— 其它资产当天收益为 0、月末判断也会落到周六。用 10Y ETF/指数的交易日历。
@@ -183,25 +183,26 @@ def _load_gold_cny() -> pd.Series:
     gold_cny = london * usdcny
     gold_cny.name = "close"
 
-    # 2005-2006: 黄金 ETF 持仓数据推算金价（伦敦金数据从 2006-05 起）
+    # 2004-11 ~ 2006-07：伦敦金还没数据，用 SPDR 持仓「总价值/总库存」推算美元金价（与伦敦金重合期日收益相关 0.88，
+    # 2004-11→2006-07 +45.7%，同期现货约 +48%）。
+    # 2026-11-08 审计修复上游 bug：原来用 `gold_cny.index.min()` 当拼接点，但 gold_cny 的索引并进了汇率（2005-01 起），
+    # 伦敦金 2006-07-14 前全是 NaN —— 拼接点落在 2005-01，只接进了几个点，之后一年半 ffill 成常数 0.2472，
+    # 接上伦敦金当天单日 +85.2%（V3c 年化被多算 0.28pp）。现在拼接点 = 伦敦金第一个真实日。
+    gold_cny = gold_cny.dropna()
+    cut = gold_cny.index.min()
     mg = _load_macro_gold_cached()
-    if mg is not None:
-        mg["date"] = pd.to_datetime(mg["日期"])
-        mg["proxy"] = mg["总价值"] / mg["总库存"]
-        mg = mg.set_index("date").sort_index()
-
-        cd = mg.index.intersection(gold_cny.index)
-        if len(cd) > 10:
-            ratio = (gold_cny.loc[cd] / mg.loc[cd, "proxy"]).mean()
-            mg_pre = mg[mg.index < gold_cny.index.min()].copy()
-            if len(mg_pre) > 0:
-                mg_pre["gold_cny"] = mg_pre["proxy"] * ratio
-                full_cal = mg_pre.index.union(usdcny.index).union(
-                    pd.date_range(mg_pre.index.min(), gold_cny.index.min(), freq="B"))
-                mg_daily = mg_pre["gold_cny"].reindex(full_cal).sort_index().ffill()
-                mg_daily = mg_daily[mg_daily.index < gold_cny.index.min()]
-                if len(mg_daily) > 0:
-                    gold_cny = pd.concat([mg_daily, gold_cny]).sort_index()
+    if mg is not None and len(mg):
+        mg = mg.assign(date=pd.to_datetime(mg["日期"])).set_index("date").sort_index()
+        proxy = (mg["总价值"] / mg["总库存"]).astype(float)
+        pre = proxy[proxy.index < cut].dropna()
+        if len(pre) > 10:
+            # 美元口径接到伦敦金首日（同一天水平相等，拼接处不跳），再乘当日汇率换成人民币
+            anchor = proxy[proxy.index <= cut].dropna().iloc[-1]
+            usd = pre * (float(london.loc[cut]) / float(anchor))
+            cal = pd.date_range(pre.index.min(), cut, freq="B", inclusive="left").union(pre.index)
+            fx = usdcny.reindex(cal.union(usdcny.index)).ffill().bfill().reindex(cal)
+            pre_cny = (usd.reindex(cal).ffill() * fx).dropna()
+            gold_cny = pd.concat([pre_cny, gold_cny]).sort_index()
 
     if etf.empty:
         return gold_cny
@@ -332,15 +333,24 @@ def load_panel(include_wti: bool = True, end: str | None = None) -> pd.DataFrame
 
     # 找到所有资产都开始有数据的起始日，而非一个资产缺失就整行删除
     # 避免早期部分资产无 proxy 时截断太狠
-    valid_start = panel.apply(lambda s: s.first_valid_index())
-    earliest_all_valid = valid_start.max()  # 最晚的 first-valid = 全部就绪日
+    # LATE_START_ASSETS（短融）不参与：它们起点之前保持 NaN，用到它们的策略在 run_strategy_backtest 里
+    # 自己从它们的起点开始；不用它们的策略（保守增强 / V3c）不受影响。
+    core = [c for c in panel.columns if c not in LATE_START_ASSETS]
+    valid_start = panel[core].apply(lambda s: s.first_valid_index())
+    earliest_all_valid = valid_start.max()  # 最晚的 first-valid = 核心资产全部就绪日
     if earliest_all_valid is not None and earliest_all_valid > panel.index[0]:
         panel = panel.loc[earliest_all_valid:]
 
-    # 至此所有资产都有数据；dropna 仅做安全网（应无操作）
-    panel = panel.dropna()
+    # 至此核心资产都有数据；dropna 仅做安全网（应无操作）
+    panel = panel.dropna(subset=core)
 
     return panel
+
+
+def panel_returns(panel: pd.DataFrame) -> pd.DataFrame:
+    """面板 → 日收益。不能用 `pct_change().dropna()`：那会把短融起点（2015）之前的行整行删掉，
+    等于又把所有策略截到 2015。这里只去掉第一行，晚起点资产起点前保持 NaN。"""
+    return panel.pct_change(fill_method=None).iloc[1:]
 
 
 

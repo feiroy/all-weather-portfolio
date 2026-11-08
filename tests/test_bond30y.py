@@ -43,3 +43,23 @@ def test_panel_bond30y_pre_listing_not_amplified():
     yrs = (p.index[-1] - p.index[0]).days / 365.25
     cagr = (p.iloc[-1] / p.iloc[0]) ** (1 / yrs) - 1
     assert cagr < 0.07
+
+
+def test_late_start_asset_does_not_truncate_other_strategies():
+    # 2026-10-30 c7e0bc6 回归：短融（2015 起）只给风险平价用，不能把保守增强 / V3c 也截到 2015
+    from allweather.data import panel_returns
+    from allweather.pipeline import strategy_window
+    r = panel_returns(load_panel())
+    assert r["bond_short"].first_valid_index() >= pd.Timestamp("2015-01-01")
+    # 三个策略都不用短融（风险平价 2026-11-08 撤掉），全部从面板共同起点（2006）开始
+    for s in ("V3-B 保守增强", "V3-B 风险平价", "V3c 多元"):
+        w = strategy_window(r, s)
+        assert w.index[0] < pd.Timestamp("2007-01-01"), s
+        assert "bond_short" not in w.columns and not w.isna().any().any()
+
+
+def test_gold_has_no_splice_jump():
+    # 上游 bug：持仓推算段拼接点取错，2006-07-14 单日 +85%
+    from allweather.data import _load_gold_cny
+    r = _load_gold_cny().pct_change().dropna()
+    assert r.max() < 0.15

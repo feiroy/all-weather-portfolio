@@ -656,7 +656,7 @@ async def signals(request: Request):
 
 
 async def backtest(request: Request):
-    from allweather.data import load_panel
+    from allweather.data import load_panel, panel_returns
     from allweather.pipeline import run_strategy_backtest
     from allweather.stats import perf_metrics
     start = request.query_params.get("start") or "2015-01-01"
@@ -670,7 +670,7 @@ async def backtest(request: Request):
         if not a or not dates:
             return J({"error": "这个账户还没有买卖记录，没有「操作日」可以回测"}, 400)
         c0 = pd.Timestamp(a.get("created") or dates[0])
-        rets = load_panel(end=pd.Timestamp.today().strftime("%Y-%m-%d")).pct_change().dropna()
+        rets = panel_returns(load_panel(end=pd.Timestamp.today().strftime("%Y-%m-%d")))
         ix = rets.index
         pre = [d for k, d in enumerate(ix) if d < c0 and (k + 1 == len(ix) or ix[k + 1].month != d.month)]
         for n in names:
@@ -680,7 +680,7 @@ async def backtest(request: Request):
                 out[f"{n} · {tag}"] = (nv / float(nv.iloc[0]), int((r.weight_df.index >= c0).sum()))
             base[f"{n} · 我的操作日"] = f"{n} · 月末"
     else:
-        rets = load_panel().loc[start:].pct_change().dropna()
+        rets = panel_returns(load_panel().loc[start:])   # 每个策略在 run_strategy_backtest 里按自己的资产定起点
         for n in names:
             r = run_strategy_backtest(rets, n, cad)
             lbl = n if cad == "monthly" else f"{n} · {dict(biweekly='双周', weekly='每周')[cad]}"

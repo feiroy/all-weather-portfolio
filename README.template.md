@@ -5,7 +5,7 @@
 [![Pages](https://img.shields.io/badge/docs-online-blue)](https://idealauror.github.io/all-weather-portfolio/)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
-[![Backtest](https://img.shields.io/badge/backtest-2005--2026-green)]()
+[![Backtest](https://img.shields.io/badge/backtest-2006--2026-green)]()
 </div>
 
 <div align="center">
@@ -14,7 +14,7 @@
 
 </div>
 
-基于 A 股 / 债 / 商品 ETF 真实数据的全天候风险平价回测工程，覆盖 **2005–2026 年（~21 年完整牛熊）**，提供 **3 套可落地策略**，每套支持 3-4 档现金管理（100% / 85% / 70% / 动态），共 11 个回测。
+基于 A 股 / 债 / 商品 ETF 真实数据的全天候风险平价回测工程，覆盖 **2006-03 → 至今（~20.7 年，含 2008 金融危机、2013 钱荒）**，提供 **3 套可落地策略**，每套支持 3-4 档现金管理（100% / 85% / 70% / 动态），共 11 个回测。
 
 在线文档：[https://idealauror.github.io/all-weather-portfolio/](https://idealauror.github.io/all-weather-portfolio/)
 

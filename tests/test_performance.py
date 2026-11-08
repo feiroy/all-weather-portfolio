@@ -353,8 +353,10 @@ def test_run_strategy_dispatches_correct_engine_assets_and_runtime(monkeypatch, 
     chosen.assert_called_once()
     unused.assert_not_called()
     args, kwargs = chosen.call_args
-    assets = config.V3B_RP_ASSETS if strategy == "V3-B 风险平价" else config.V3B_CON_ASSETS
-    expected_rets = rets if strategy == "V3c 多元" else rets[assets]
+    # 三个策略都只拿到自己用到的资产列（V3c 引擎内部原本也是 rets[assets]，行为等价）
+    assets = {"V3-B 风险平价": config.V3B_RP_ASSETS, "V3-B 保守增强": config.V3B_CON_ASSETS,
+              "V3c 多元": config.V3C_ASSETS}[strategy]
+    expected_rets = rets[assets]
     pd.testing.assert_frame_equal(args[0], expected_rets)
     expected = expected_strategy_kwargs(strategy, frequency)
     assert set(kwargs) == set(expected) | set(runtime)

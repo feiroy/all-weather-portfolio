@@ -305,7 +305,7 @@ def _fetch_sp500_idx(start, end):
     return df[["date", "close"]].sort_values("date")
 
 
-CGB_YIELDS_START = 2014   # 30Y 合成要覆盖回测起点 2015-01 之前的预热
+CGB_YIELDS_START = 2006   # 中债 30Y 曲线最早 2006-03-01；30Y 重建要覆盖面板共同起点（2006-07 黄金真实数据起）
 
 
 def fetch_cgb_yields(existing: pd.DataFrame | None = None):

@@ -5,7 +5,7 @@
 [![Pages](https://img.shields.io/badge/docs-online-blue)](https://idealauror.github.io/all-weather-portfolio/)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
-[![Backtest](https://img.shields.io/badge/backtest-2005--2026-green)]()
+[![Backtest](https://img.shields.io/badge/backtest-2006--2026-green)]()
 </div>
 
 <div align="center">
@@ -14,7 +14,7 @@
 
 </div>
 
-A risk-parity backtesting framework based on real China A-share/bond/commodity ETF data, covering **2005–2026 (~21 years of full bull-bear cycles)** with **3 deployable strategies**, each supporting 3-4 cash tiers (100% / 85% / 70% / Dynamic), totaling 11 backtests.
+A risk-parity backtesting framework based on real China A-share/bond/commodity ETF data, covering **Mar 2006 – present (~20.7 years, incl. the 2008 GFC and the 2013 liquidity crunch)** with **3 deployable strategies**, each supporting 3-4 cash tiers (100% / 85% / 70% / Dynamic), totaling 11 backtests.
 
 Online docs: [https://idealauror.github.io/all-weather-portfolio/](https://idealauror.github.io/all-weather-portfolio/)
 

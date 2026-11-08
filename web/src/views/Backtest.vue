@@ -134,14 +134,15 @@ import { aggregate, aggregateSeries, unionDates, windowForRange, rangeStartIndex
 const aid = useRoute().params.aid
 const router = useRouter()
 const cads = [{ k: 'monthly', t: '每月末' }, { k: 'biweekly', t: '每两周' }, { k: 'weekly', t: '每周' }, { k: 'mine', t: '我的操作日' }]
-const years = Array.from({ length: new Date().getFullYear() - 2015 + 1 }, (_, i) => 2015 + i)
-const cad = ref(sessionStorage.getItem('aw-bt-cad') || 'monthly'), start = ref(sessionStorage.getItem('aw-bt-start') || '2015-01-01')
+// 2006 起：面板共同起点 2006-03（中债 30Y 曲线起点），三个策略都能回到 2006（风险平价 2026-11-08 撤掉短融后不再受 2015 限制）
+const years = Array.from({ length: new Date().getFullYear() - 2006 + 1 }, (_, i) => 2006 + i)
+const cad = ref(sessionStorage.getItem('aw-bt-cad') || 'monthly'), start = ref(sessionStorage.getItem('aw-bt-start2') || '2006-01-01')
 const d = ref(null), loading = ref(false), err = ref('')
 // 连续切起点 / 调仓节奏时，只认最后一次请求的结果，避免旧响应回来覆盖新区间
 let btSeq = 0
 watch([cad, start], async () => {
   const seq = ++btSeq
-  sessionStorage.setItem('aw-bt-cad', cad.value); sessionStorage.setItem('aw-bt-start', start.value)
+  sessionStorage.setItem('aw-bt-cad', cad.value); sessionStorage.setItem('aw-bt-start2', start.value)
   loading.value = true; err.value = ''
   try {
     const r = await get(`/api/market/backtest?start=${start.value}&cadence=${cad.value}&acct=${aid}`)
@@ -242,7 +243,7 @@ const anyShort = computed(() => allRows.value.some(r => r.short))
 const allCurves = computed(() => ({ ...(d.value?.curves || {}),
   ...Object.fromEntries(customs.value.map(c => [c.name, c.curve])) }))
 const colors = computed(() => Object.keys(curvesAgg.value).map(n => colorOf(n)))
-// 时间区间：全站统一 8 档 + 日/月/年线；回测曲线从 2015 起，默认「近1年」
+// 时间区间：全站统一 8 档 + 日/月/年线；回测曲线从所选起点起（默认 2006 = 最长可信历史），默认「近1年」
 const periods = ['日线', '月线', '年线']
 const range = ref('近1年'), period = ref('日线'), bump = ref(0)
 const curvesAgg = computed(() => aggregateSeries(allCurves.value, period.value))

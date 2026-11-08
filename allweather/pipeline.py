@@ -4,7 +4,7 @@
 """
 import time
 import pandas as pd
-from .data import load_panel
+from .data import load_panel, panel_returns
 
 from .backtest import backtest_iv
 from .data import load_hs300_pb, load_hs300_pe
@@ -39,7 +39,7 @@ def step_1_load_data():
     print("─" * 60)
     t0 = time.time()
     panel = load_panel()
-    rets = panel.pct_change().dropna()
+    rets = panel_returns(panel)   # 不能 dropna()：会按短融起点把所有策略截到 2015
     print(f"  ok 数据期间: {panel.index.min().date()} ~ {panel.index.max().date()}")
     print(f"  ok 资产数: {panel.shape[1]}, 交易日数: {len(panel)}")
     print(f"  ok 用时: {time.time()-t0:.2f}s")
@@ -81,14 +81,30 @@ def strategy_backtest_kwargs(strategy: str, rebal_freq: str = "monthly") -> dict
     return dict(common, **params)
 
 
+STRATEGY_ASSETS = {"V3-B 风险平价": V3B_RP_ASSETS, "V3-B 保守增强": V3B_CON_ASSETS, "V3c 多元": V3C_ASSETS}
+
+
+def strategy_window(rets: pd.DataFrame, strategy: str) -> pd.DataFrame:
+    """策略自己的回测区间：从它用到的资产全部有收益的那天开始，只保留它用到的列。
+
+    面板里短融（2015 起）之前是 NaN —— 只有风险平价用短融，所以只有它从 2015 开始；
+    保守增强 / V3c 不用短融，照样从面板共同起点（2006-07）开始。
+    """
+    cols = [c for c in STRATEGY_ASSETS[strategy] if c in rets.columns]
+    ok = rets[cols].notna().all(axis=1)
+    if not ok.any():
+        raise ValueError(f"{strategy}: 资产 {cols} 没有共同有数据的区间")
+    return rets.loc[ok.idxmax():, cols]
+
+
 def run_strategy_backtest(rets, strategy: str, rebal_freq: str = "monthly", **runtime):
     """只运行指定策略；runtime 用于流水线跟踪或复用 PB/PE，不负责写文件。"""
     kwargs = strategy_backtest_kwargs(strategy, rebal_freq)
     kwargs.update(runtime)
+    r = strategy_window(rets, strategy)
     if strategy == "V3c 多元":
-        return backtest_iv(rets, **kwargs)
-    assets = V3B_RP_ASSETS if strategy == "V3-B 风险平价" else V3B_CON_ASSETS
-    return backtest_b(rets[assets], **kwargs)
+        return backtest_iv(r, **kwargs)
+    return backtest_b(r, **kwargs)
 
 
 # 实盘（网页 / 命令行）用的策略 key → 回测里的策略名
@@ -109,7 +125,7 @@ def live_target_weights(key: str, panel: pd.DataFrame | None = None) -> tuple[pd
     """
     if panel is None:
         panel = load_panel(end=pd.Timestamp.today().strftime("%Y-%m-%d"))
-    rets = panel.pct_change().dropna()
+    rets = panel_returns(panel)
     last = [rets.index[-1]]
 
     def _one(**extra):
@@ -264,7 +280,7 @@ def step_4_bootstrap(rets, nv_results=None, weight_history=None):
                     proxy_w = hierarchical_rp_weights(
                         boot_rets[V3B_RP_ASSETS].tail(20), rp_buckets_boot_rp, 20,
                         0.20, 0.02, bucket_method="equal")
-            rets_for_p = rets[list(proxy_w.index)]
+            rets_for_p = rets[list(proxy_w.index)].dropna()   # 短融 2015 前是 NaN，自举只用全资产都有数据的日子
             boot[portfolio] = block_bootstrap(proxy_w, rets_for_p)
 
     # 沪深300满仓基准
