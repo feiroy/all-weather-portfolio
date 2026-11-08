@@ -371,6 +371,23 @@
   "size": 106879396730.03,
   "type": "指数型-股票"
  },
+ "510500": {
+  "buy_rate": null,
+  "buy_rate_raw": null,
+  "code": "510500",
+  "company": "南方基金",
+  "exchange": true,
+  "fetched_at": "2026-11-08",
+  "inception": "2013-01-10",
+  "manager": "罗文杰,龚涛",
+  "min_buy": null,
+  "name": "中证500ETF南方",
+  "note": "场内佣金",
+  "redeem": [],
+  "risk": "高",
+  "size": 41907550937.88,
+  "type": "指数型-股票"
+ },
  "511130": {
   "buy_rate": null,
   "buy_rate_raw": null,

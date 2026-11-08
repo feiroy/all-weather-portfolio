@@ -9,14 +9,16 @@
 import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import * as echarts from 'echarts/core'
 import { LineChart, BarChart } from 'echarts/charts'
-import { GridComponent, TooltipComponent, LegendComponent, MarkLineComponent, DataZoomComponent } from 'echarts/components'
+import { GridComponent, TooltipComponent, LegendComponent, MarkLineComponent, DataZoomComponent, GraphicComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import { attachWheel } from '../utils/chartWheel'
 import ChartState from './ChartState.vue'
 import { axisLabel, rangeText, decimalsFor, decimalsOf, pctText } from '../utils/chartAxis'
 import { CHART, TIP_BASE, SERIES_COLORS, dotSize, tipRows } from '../utils/chartTheme'
 import { joinGroup, leaveGroup, syncGroup } from '../utils/chartGroup'
-echarts.use([LineChart, BarChart, GridComponent, TooltipComponent, LegendComponent, MarkLineComponent, DataZoomComponent, CanvasRenderer])
+// GraphicComponent 别漏：三层联动图每个 grid 左上角的小标题是 graphic 文本，
+// 少了它 ECharts 会静默忽略 graphic 选项（面板没名字，用户就看不出每层画的是什么）
+echarts.use([LineChart, BarChart, GridComponent, TooltipComponent, LegendComponent, MarkLineComponent, DataZoomComponent, GraphicComponent, CanvasRenderer])
 
 const props = defineProps({
   series: Object,            // { 名字: { dates:[], ret:[] } }
@@ -33,8 +35,15 @@ const props = defineProps({
   kind: { type: String, default: 'line' },      // 'line' | 'bar'：柱形只换 series type，配色/坐标/tooltip/状态行全部复用
   // 下方面板（如回撤）：与上方面板共用 x 轴与缩放，独立 y 轴；不传就是原来的单面板
   second: { type: Object, default: null },
+  // 下方面板的单位（默认跟主图一致）：主图画净值（unit=''）时，副图画回撤要用 '%'
+  secondUnit: { type: String, default: '' },
   secondRatio: { type: Number, default: 0.3 },  // 下方面板占绘图区高度的比例
   secondLabel: { type: String, default: '' },   // 下方面板左上角的说明（如「回撤」）
+  // 通用多面板（基金详情页）：一个图里叠 N 个 grid，共用时间轴 / 缩放 / tooltip / 状态行。
+  // 每项 { key, label, unit, tipUnit?, decimals?, ratio, color?, zeroLine?, series:{名字:{dates,ret}} }
+  // 后续 MACD / 神奇九转就是往这个数组里加一项：MACD 用多序列 + bar，九转在净值面板挂 markPoint。
+  // 传了 panels 就忽略 series / second（panels[0] 即主面板）；不传则完全走原来的单/双面板逻辑。
+  panels: { type: Array, default: null },
 })
 const el = ref(null)
 const visRange = ref('')
@@ -42,10 +51,20 @@ const visRange = ref('')
 const sparse = computed(() => (axisDatesRaw().length < 2 ? `当前周期只有 ${axisDatesRaw().length} 期数据，切到日线 / 月线看走势` : ''))
 let chart = null
 
+// 通用多面板：每个面板可以有 1~N 条序列（MACD 未来就是 3 条）
+const usePanels = () => Array.isArray(props.panels) && props.panels.length > 0
+const panelList = () => (usePanels() ? props.panels : [])
+const panelSeries = p => p.series || {}
+const panelNames = () => [...new Set(panelList().flatMap(p => Object.keys(panelSeries(p))))]
+// 每层只有一条线时（单只基金），面板标题就是名字，再画图例是重复信息；有多条线（对比）才要图例
+const panelLegend = () => panelList().some(p => Object.keys(panelSeries(p)).length > 1)
+const multiPanel = () => (usePanels() ? panelList().length > 1 : hasSecond())
+
 // 所有线共用的日期轴（并集升序）——MultiLine 内部 option / 状态行 / 窗口换算都用它
 const axisDatesRaw = () => [...new Set([
   ...Object.keys(props.series || {}).flatMap(n => props.series[n].dates),
   ...Object.keys(props.second || {}).flatMap(n => props.second[n].dates),
+  ...panelList().flatMap(p => Object.values(panelSeries(p)).flatMap(s => s.dates || [])),
 ])].sort()
 // 有没有下方面板
 const hasSecond = () => !!props.second && Object.keys(props.second).length > 0
@@ -76,9 +95,11 @@ function visValues(src = props.series) {
 }
 let curDec = 2          // 当前小数位（setOption 前先给 2）
 let curDec2 = 2         // 下方面板（回撤）自己的小数位
+let curDecs = []        // 通用多面板：每个面板坐标轴的小数位（按可见跨度自适应，刻度不必 4.5000 这么长）
 function calcDec() {
   curDec = decimalsFor(visValues())
   if (hasSecond()) curDec2 = decimalsFor(visValues(props.second))
+  if (usePanels()) curDecs = panelList().map(p => decimalsFor(visValues(panelSeries(p))))
 }
 
 // 数据点圆点直径：与 iframe 图同规则，随可见点数自适应（见 chartTheme.dotRadius）
@@ -86,11 +107,13 @@ const GRID_L = 46, GRID_R = 34
 let curDot = 4
 function calcDot() {
   const n = axisDates().length
-  let span = 1
-  // 首次在 setOption 之前就会调用，那时 getOption() 还没有 dataZoom，必须容错
+  // 首次在 setOption 之前就会调用，那时还没有 dataZoom：用即将生效的窗口（winPct）算，
+  // 否则会按「全历史 3000+ 点」算出 1px 半径，首屏近1月 23 个点也画成看不见的小点
+  const w = winPct()
+  let span = (w.end - w.start) / 100
   if (chart) {
     const dz = ((chart.getOption() || {}).dataZoom || [])[0]
-    if (dz) span = ((dz.end ?? 100) - (dz.start ?? 0)) / 100
+    if (dz && dz.start != null) span = ((dz.end ?? 100) - (dz.start ?? 0)) / 100
   }
   const visible = Math.max(1, Math.round(n * (span > 0 ? span : 1)))
   curDot = dotSize((el.value?.clientWidth || 320) - GRID_L - GRID_R, visible)
@@ -114,7 +137,37 @@ function legendRows(names, avail) {
   return rows
 }
 function gridTop() {
+  if (usePanels()) {
+    // 多面板：首个 grid 上方放一行面板标题；有图例（对比）再按图例行数加高
+    return 24 + (panelLegend() ? legendRows(panelNames(), (el.value?.clientWidth || 320) - 10) * 15 + 4 : 0)
+  }
   return 15 + legendRows(Object.keys(props.series || {}), (el.value?.clientWidth || 320) - 10) * 15
+}
+
+// 通用多面板的布局：按 ratio 分配绘图区高度，面板之间留 30px 放各自的标题，
+// 只有最下面那个 grid 显示横轴日期（上面几个共用同一条时间轴，不重复画刻度）
+function panelGrids() {
+  const ps = panelList(), top = gridTop()
+  const axisH = 26, gap = 30, H = props.height
+  const avail = Math.max(120, H - top - axisH - gap * (ps.length - 1))
+  const weights = ps.map(p => p.ratio > 0 ? p.ratio : 1)
+  const sum = weights.reduce((a, b) => a + b, 0)
+  let y = top
+  return ps.map((p, i) => {
+    const h = Math.round(avail * weights[i] / sum)
+    const g = { left: GRID_L, right: GRID_R, top: y, height: h }
+    y += h + gap
+    return g
+  })
+}
+// 每个面板左上角的小标题（graphic 绝对像素定位，resize 时按新 grid 重算）
+function panelsGraphic(gc) {
+  return gc.map((g, i) => ({
+    // 标题从绘图区左缘起、整行落在两层之间的空白里：x 上避开左侧 Y 刻度，y 上避开上一层最底那个刻度
+    type: 'text', left: g.left, top: g.top - 19, silent: true,
+    style: { text: panelList()[i].label || '', fill: CHART.axisText,
+      font: '600 11px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif' },
+  }))
 }
 
 // 布局：单面板时就是原来那个 grid 对象；双面板时返回 [上, 下] 两个 grid，
@@ -132,7 +185,100 @@ function gridConf() {
   ]
 }
 
+// 通用多面板 option：一个 ECharts 实例里叠 N 个 grid，共用一条 x 轴 / 一次缩放 / 一个 tooltip /
+// 一条状态行。与 iframe 三层图（净值 / 累计 / 柱）同构；基金详情页的净值主图永远在 panels[0]。
+function panelsOption() {
+  const ps = panelList(), all = axisDates(), gc = panelGrids()
+  const labelOf = new Map()
+  for (const p of ps) for (const s of Object.values(panelSeries(p))) {
+    if (s.labels && s.labels.length === s.dates.length) s.dates.forEach((d, i) => labelOf.set(d, s.labels[i]))
+  }
+  const xLabels = all.map(d => labelOf.get(d) || d)
+  const dot = c => `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:${c}"></span>`
+  const fmtPanel = (v, d, unit) => {
+    if (v == null) return '—'
+    return `${unit === '%' && +v > 0 ? '+' : ''}${(+v).toFixed(decimalsOf(v, d))}${unit}`
+  }
+  const series = [], rowsByPanel = []
+  ps.forEach((p, pi) => {
+    const rows = []
+    Object.entries(panelSeries(p)).forEach(([n, s], k) => {
+      if (!s.dates?.length) return
+      const m = new Map(s.dates.map((d, i) => [d, s.ret[i]]))
+      const col = s.color || p.color || props.colors[k % props.colors.length]
+      const isBar = (s.kind || p.kind || 'line') === 'bar'
+      let last = null
+      const data = all.map(d => { if (m.has(d)) last = m.get(d); return d < s.dates[0] ? null : last })
+      const dec = p.decimals ?? curDecs[pi] ?? 2   // tooltip：面板指定位数优先（净值 4 位）
+      series.push({
+        name: n, type: isBar ? 'bar' : 'line', data, xAxisIndex: pi, yAxisIndex: pi,
+        showSymbol: !isBar, symbol: 'circle', symbolSize: () => curDot,
+        connectNulls: true, smooth: false,
+        ...(isBar ? { barMaxWidth: 14, barGap: '8%', barCategoryGap: '34%' } : {
+          lineStyle: { width: pi === 0 && k === 0 ? CHART.lineWidth : 1.6, color: col,
+            type: props.dashed.includes(n) ? 'dashed' : 'solid', cap: 'round', join: 'round' },
+        }),
+        itemStyle: { color: col },
+        // 零轴虚线：区间涨跌 / 回撤这类以 0 为分界的面板才画，净值面板不画。
+        // 面板自带 markPoint / markLine 时优先用自带的 —— 神奇九转的 1~9 数字标记就挂在这里。
+        markLine: s.markLine || (p.zeroLine && k === 0 ? { silent: true, symbol: 'none', label: { show: false },
+          lineStyle: { color: CHART.zero, type: 'dashed', width: 1 }, data: [{ yAxis: 0 }] } : undefined),
+        markPoint: s.markPoint || undefined,
+      })
+      rows.push({ name: n, map: m, color: col, unit: p.tipUnit ?? p.unit ?? '%', dec })
+    })
+    rowsByPanel.push({ label: p.label || '', rows })
+  })
+  const axisFmt = (x, i) => {
+    const u = ps[i].unit ?? '%'
+    return u === '%' ? pctText(x, curDecs[i] ?? 2) : `${(+x).toFixed(curDecs[i] ?? 2)}${u}`
+  }
+  return {
+    animation: false,
+    legend: { show: panelLegend(), top: 0, left: 0, itemWidth: 14, itemHeight: 3, icon: 'rect', data: panelNames(),
+      textStyle: { fontSize: 11, color: CHART.axisText } },
+    grid: gc,
+    graphic: panelsGraphic(gc),
+    // 只有一套时间轴交互：inside + 拖动/水平滚轮/⌘缩放/双击复位，不挂 slider 滑块
+    dataZoom: [{ type: 'inside', xAxisIndex: ps.map((_, i) => i),
+      zoomOnMouseWheel: false, moveOnMouseWheel: false, moveOnMouseMove: true, ...winPct() }],
+    tooltip: {
+      trigger: 'axis', ...TIP_BASE,
+      axisPointer: { type: 'line', lineStyle: { color: CHART.axisMuted, type: 'dashed' }, link: [{ xAxisIndex: 'all' }] },
+      // 悬停一次就同时读到三层的值：日期 → 单位净值 → 区间涨跌 → 回撤（tipRows 统一两列结构）
+      formatter: pp => {
+        const label = pp[0]?.axisValue
+        const i = xLabels.findIndex(x => x === label)
+        if (i < 0) return ''
+        const rows = []
+        // 每层一条线：一行一个值；每层多条线（对比）：先一行层名做小标题，下面逐只基金
+        rowsByPanel.forEach(({ label: pl, rows: list }) => {
+          if (list.length > 1) rows.push([`<b style="color:${CHART.tipInk}">${pl}</b>`, ' '])
+          list.forEach(r => rows.push([dot(r.color) + r.name, fmtPanel(r.map.get(all[i]), r.dec, r.unit)]))
+        })
+        return tipRows(axisLabel(label), rows)
+      },
+    },
+    xAxis: gc.map((g, i) => ({
+      type: 'category', data: xLabels, boundaryGap: false, gridIndex: i,
+      axisTick: { show: false }, axisLine: { lineStyle: { color: CHART.axisLine } },
+      // 只有最下面那个面板画日期，上面两个共用同一条时间轴、不重复刻度
+      axisLabel: i === gc.length - 1
+        ? { color: CHART.axisText, fontSize: 10, hideOverlap: true, formatter: axisLabel }
+        : { show: false },
+    })),
+    yAxis: gc.map((g, i) => ({
+      type: 'value', scale: true, splitNumber: i === 0 ? 3 : 2, gridIndex: i,
+      axisLine: { show: false }, axisTick: { show: false },
+      axisLabel: { color: CHART.axisText, fontSize: 10, formatter: x => axisFmt(x, i) },
+      splitLine: { lineStyle: { color: CHART.grid, type: 'solid' } },
+    })),
+    series,
+  }
+}
+
 function option() {
+  if (usePanels()) return panelsOption()
   const names = Object.keys(props.series || {})
   const all = axisDates()
   // 横轴展示用标签：柱形图按「2026年10月」这种期间标签显示，但排序/窗口仍用真实日期，
@@ -183,7 +329,7 @@ function option() {
   const maps = names.map(n => new Map(props.series[n].dates.map((d, k) => [d, props.series[n].ret[k]])))
   const secMaps = secNames.map(n => new Map(props.second[n].dates.map((d, k) => [d, props.second[n].ret[k]])))
   const dot = c => `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:${c}"></span>`
-  const fmt = (v, d) => v == null ? '—' : `${v > 0 ? '+' : ''}${(+v).toFixed(d)}${props.unit}`
+  const fmt = (v, d, unit = props.unit) => v == null ? '—' : `${v > 0 && unit === '%' ? '+' : ''}${(+v).toFixed(d)}${unit}`
 
   return {
     animation: false,
@@ -244,7 +390,7 @@ function option() {
         name: props.secondLabel, nameLocation: 'end', nameGap: 9,
         nameTextStyle: { fontSize: 11, color: CHART.axisText, align: 'left' },
         axisLabel: { color: CHART.axisText, fontSize: 10,
-          formatter: x => (props.unit === '%' ? pctText(x, curDec2) : `${(+x).toFixed(curDec2)}${props.unit}`) },
+          formatter: x => (props.secondUnit === '%' ? pctText(x, curDec2) : `${(+x).toFixed(curDec2)}${props.secondUnit}`) },
         splitLine: { lineStyle: { color: CHART.grid, type: 'solid' } } },
     ] : {
       type: 'value', scale: true, splitNumber: 4,
@@ -269,8 +415,17 @@ function syncRange() {
   visRange.value = rangeText(all[i], all[j])
 }
 // 缩放 / 平移后同组（同一页共用一个时间轴）的图一起走
+// 圆点大小变了要推回图表：symbolSize 回调只在渲染时取值，dataZoom 之后才重算的 curDot 不会自动生效
+function applyDot() {
+  if (!chart) return
+  const prev = curDot
+  calcDot()
+  if (Math.abs(prev - curDot) < 0.05) return
+  const n = ((chart.getOption() || {}).series || []).length
+  if (n) chart.setOption({ series: Array.from({ length: n }, () => ({ symbolSize: curDot })) })
+}
 const onZoom = () => {
-  calcDot(); syncRange()
+  applyDot(); syncRange()
   syncGroup(props.group, chart, ((chart.getOption() || {}).dataZoom || [])[0])
 }
 // 双面板（多个 grid）时 ECharts 自带的 moveOnMouseMove 拖不动（实测 dataZoom 不变），
@@ -285,11 +440,12 @@ function dzState() {
   return { start: x.start ?? 0, end: x.end ?? 100 }
 }
 function onPanDown(e) {
-  if (!chart || !hasSecond()) return
+  if (!chart || !multiPanel()) return
   // 只接管绘图区（图例区仍要让 ECharts 收点击），并且必须拦住 zrender 自己的 mousedown，
   // 否则它在每次 mousemove 按自己的（失效的）拖拽状态把窗口拉回原位
   const r = el.value.getBoundingClientRect()
-  const top = (gridConf()[0] || {}).top || 0
+  const g = usePanels() ? panelGrids() : gridConf()
+  const top = (Array.isArray(g) ? g[0] : g)?.top || 0
   if (e.clientY - r.top < top - 4) return
   e.stopPropagation()
   panFrom = { x: e.clientX, dz: dzState() }
@@ -326,21 +482,24 @@ const onDbl = () => reset()
 const resize = () => {
   if (!chart) return
   calcDot(); chart.resize()
-  chart.setOption({ grid: gridConf() })
+  chart.setOption(usePanels()
+    ? (() => { const gc = panelGrids(); return { grid: gc, graphic: panelsGraphic(gc) } })()
+    : { grid: gridConf() })
 }
 let detachWheel = null
 watch(() => props.series, () => { if (chart) { calcDot(); calcDec(); chart.setOption(option(), true); syncRange() } })
 // 下方面板可能比上方面板晚一步到（两个 computed 各自触发），必须单独监听，
 // 否则首帧按空面板算出的 grid / 精度会一直留着
 watch(() => props.second, () => { if (chart) { calcDot(); calcDec(); chart.setOption(option(), true); syncRange() } })
-// 下方面板可能比上方面板晚一步到（两个 computed 各自触发），必须单独监听，
-// 否则首帧按空面板算出的 grid / 精度会一直留着
-watch(() => props.second, () => { if (chart) { calcDot(); calcDec(); chart.setOption(option(), true); syncRange() } })
+// 通用多面板：panels 是 computed 出来的数组，内部序列变化也要重画（含 grid / 标题 / 精度）
+watch(() => props.panels, () => { if (chart && usePanels()) { calcDot(); calcDec(); chart.setOption(option(), true); syncRange() } }, { deep: true })
 watch(() => props.resetKey, () => { if (chart) { reset(); calcDot(); syncRange() } })
 watch(() => props.window, () => {
   if (!chart) return
   // 换区间 = 可见数据的量级变了 → 精度要跟着变，否则又会退回「一列 0%」
-  calcDec(); chart.setOption({ series: option().series, yAxis: option().yAxis })
+  calcDec()
+  const o = option()
+  chart.setOption({ series: o.series, yAxis: o.yAxis })
   reset(); calcDot(); syncRange()
 })
 onBeforeUnmount(() => {

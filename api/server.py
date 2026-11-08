@@ -791,10 +791,9 @@ async def fund_detail(request: Request):
             "inception": fr.get("inception"), "manager": fr.get("manager"), "company": fr.get("company"),
             "risk": fr.get("risk"), "exchange": fr.get("exchange"), "fee_desc": FEES.describe(code),
             "profile": FEES.profile_text(code),
-            "profile": FEES.profile_text(code),
             "buy_rate": fr.get("buy_rate"), "buy_rate_raw": fr.get("buy_rate_raw"),
             "redeem": fr.get("redeem") or [], "min_buy": fr.get("min_buy")}
-    return J({"code": code, "name": FL.fund_name(code) or code, "msg": msg, "meta": meta,
+    return J({"code": code, "name": FL.fund_name(code) or code, "msg": msg, "ok": bool(ok), "meta": meta,
               # 场内/场外与持仓里「买卖单位」同一套判断：fund_lookup 的申购表优先，
               # 查不到再按代码兜底（0 开头场外、5/15/16 开头场内），不在这里另立规则
               "otc": HG.default_unit(code) == "份额",
