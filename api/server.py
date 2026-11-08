@@ -25,7 +25,7 @@ from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import FileResponse, JSONResponse
+from starlette.responses import FileResponse, HTMLResponse, JSONResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
@@ -35,8 +35,10 @@ sys.path.insert(0, str(ROOT / "streamlit_app"))
 
 from allweather import accounts as AC  # noqa: E402
 from allweather import holdings as HG  # noqa: E402
+from allweather.chart_html import pnl_chart_html, trend_chart_data, trend_chart_html  # noqa: E402
 from allweather.config import DATA_DIR, ETF_META, STRATEGY_PARAMS  # noqa: E402,F401
 from allweather.portfolio import Portfolio, close_trade_idx  # noqa: E402
+from allweather.sim_account import fund_pnl  # noqa: E402
 import fund_lookup as FL  # noqa: E402
 
 DIST = ROOT / "web" / "dist"
@@ -229,6 +231,97 @@ async def holding(request, aid, P, a):
                          for t in P.trades_of(code)]})
 
 
+# ------------------------------------------------------------------ 持仓详情内嵌图表（iframe）
+def _frame_doc(inner: str, height: int) -> str:
+    """把组件 HTML 包成完整文档；body 上带 data-frame-height 供父页面自适应 iframe 高度。
+
+    额外注入一段高度上报：手机窄屏时控件换行、stats 折行会让内容比预设高度高，
+    ResizeObserver 把真实 scrollHeight postMessage 给父页面，避免图底被裁掉。
+    """
+    # 用 #wrap 的真实底部而不是 documentElement.scrollHeight：后者在内容不足时至少等于
+    # iframe 视口高度，和「父页面按上报值放大 iframe」会形成正反馈，把卡片越撑越长。
+    reporter = (
+        '<script>(function(){'
+        'var w=document.getElementById("wrap");'
+        'function send(){try{'
+        'var h=w?Math.ceil(w.getBoundingClientRect().bottom+window.scrollY+6):document.body.scrollHeight;'
+        'parent.postMessage({__awFrameHeight:h},"*")'
+        '}catch(e){}}'
+        'addEventListener("load",send);'
+        'if(w)new ResizeObserver(send).observe(w);'
+        'send();'
+        '})();</script>'
+    )
+    return ('<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width,initial-scale=1">'
+            '<title>基金走势</title>'
+            '<style>html,body{font:13px/1.6 -apple-system,"PingFang SC",sans-serif;color:#334155}</style>'
+            '</head>'
+            f'<body data-frame-height="{int(height)}" style="margin:0">{inner}{reporter}</body></html>')
+
+
+def _frame_notice(text: str, height: int = 170) -> str:
+    """单点 / 无数据时给一句明确的说明，不留一个空白 iframe。"""
+    return _frame_doc(
+        '<div style="padding:22px 18px;color:#475569;background:#F8FAFC;'
+        'border:1px solid #E2E8F0;border-radius:10px;margin:14px">'
+        f'{text}</div>', height)
+
+
+@acct_view
+async def holding_chart(request, aid, P, a):
+    """持仓详情图表：与 Streamlit 版 st.iframe 同源同码的完整 HTML。
+
+    「买卖点」= 三层面板（净值 / 相对起点 / 单期涨跌）+ 全历史有界视窗拖动缩放 + 成交三角 tooltip；
+    「累计盈亏」= 元为单位的零轴填色曲线。前端用 <iframe src> 加载，同源可共享 localStorage 区间记忆。
+    """
+    code = request.path_params["code"]
+    view = request.query_params.get("view", "trade")
+    it = next((x for x in P.items() if x["code"] == code and not x.get("dup")), None)
+    if it is None:
+        return HTMLResponse(_frame_notice("这只基金不在当前账户里。"))
+    unit = P.holding(it).get("unit") or HG.default_unit(code)
+    nv = P.nav(code)
+
+    # 与 app.py::_code_trades 同口径：日期 2026/10/27、份额单位、逐笔份额与成交净值
+    trades = []
+    for t in P.trades_of(code):
+        if t["side"] not in ("买入", "卖出"):
+            continue
+        try:
+            day = pd.Timestamp(str(t["date"])).strftime("%Y/%m/%d")
+        except Exception:  # noqa: BLE001 - 日期写坏了就跳过这一笔
+            continue
+        sh, nav = float(t["shares"]), float(t["nav"])
+        qty = f"{sh:,.0f} 股" if unit == "股" else f"{sh:,.2f} 份"
+        trades.append({"date": day, "side": t["side"],
+                       "label": f"{qty} @ {nav:.4f}" if nav > 0 else qty})
+    trades.sort(key=lambda x: x["date"])
+
+    if view == "pnl":
+        rows = [t for t in (a.get("trades") or []) if str(t.get("code") or "") == str(code)]
+        pnl = fund_pnl(rows, nv)
+        if len(pnl) <= 1:
+            msg = ("累计盈亏要等有净值数据才能画：这只基金缺净值，拉取后自动出现。"
+                   if not trades else "净值停在成交那天，之后还没有新的净值 —— "
+                                      "下一个净值日出来，曲线才会从这一点往上（或往下）长。")
+            return HTMLResponse(_frame_notice(msg))
+        h = 460 if len(pnl) > 20 else 300
+        inner = pnl_chart_html(pnl, trades=trades, store="awPnl.fund", default_range="近1月",
+                               heading="", height=h)
+        return HTMLResponse(_frame_doc(inner, h + 160))
+
+    # 默认「买卖点」
+    if len(nv) < 2:
+        return HTMLResponse(_frame_notice("这只基金还没有净值数据，拉取后才有走势图。"))
+    hist = trend_chart_data(nv)
+    d = hist["日"]
+    inner = trend_chart_html(d["labels"], d["prices"], d["windows"]["近1月"]["count"],
+                             rets=d["rets"], histories=hist, trades=trades,
+                             store="awTrend.fund", default_range="近1月", heading="", height=440)
+    return HTMLResponse(_frame_doc(inner, 700))
+
+
 @acct_view
 async def record_options(request, aid, P, a):
     return J({"account": _acct_info(aid, a), "funds": P.slot_options(), "cash": _r(P.cash), "asof": f"{P.last:%Y-%m-%d}"})
@@ -252,21 +345,37 @@ def _held_skip(a, code, day, skip):
     return h
 
 
+def _hold_days(a: dict, code: str, day: str) -> int | None:
+    """估算持有天数：取该基金最早一笔还没卖完的买入（赎回费按 FIFO 先进先出）。"""
+    try:
+        d = pd.Timestamp(day)
+        buys = sorted(pd.Timestamp(t["date"]) for t in (a.get("trades") or [])
+                      if t.get("code") == code and t.get("side") == "买入" and pd.Timestamp(t["date"]) <= d)
+        return int((d - buys[0]).days) if buys else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _trade_from_body(b: dict, a: dict, skip: int | None = None) -> dict:
     """记一笔 / 改一笔的校验，与 Streamlit 版同：金额、单价 > 0，卖出不超过当时持有。"""
     side, code, slot = b.get("side"), str(b.get("code") or ""), str(b.get("slot") or "")
     day = str(b.get("date") or "")[:10]
-    amount, nav, fee = float(b.get("amount") or 0), float(b.get("nav") or 0), float(b.get("fee") or 0)
-    if side in ("转入", "转出"):          # 资金进出：shares 记金额、nav 记 1（与 Streamlit 版台账同）
-        if amount <= 0 or not day:
-            raise ValueError("金额要大于 0，日期要填")
-        return {"date": day, "side": side, "slot": "", "code": "", "shares": round(amount, 2), "nav": 1.0, "fee": 0.0}
+    amount, nav = float(b.get("amount") or 0), float(b.get("nav") or 0)
+    # 手续费：前端没传就按该基金的真实费率算（场外申购/赎回费、场内佣金），传了就用传入值（可手工改）
+    fee = b.get("fee")
+    fee = None if fee is None or fee == "" else float(fee)
+    # 账户模型里没有资金转入转出：钱全在基金里，只记买入 / 卖出
+    if side in ("转入", "转出", "入金", "出金"):
+        raise ValueError("这个账户只记买入和卖出 —— 钱都在基金里，没有「资金转入账户」这一步")
     if side not in ("买入", "卖出") or not code or not day:
         raise ValueError("类型、基金、日期都要填")
     if amount <= 0:
         raise ValueError("金额要大于 0")
     if nav <= 0:
         raise ValueError("单价要大于 0 —— 换一天或手工填那天的成交净值")
+    if fee is None:
+        from allweather import fees as FEES
+        fee = FEES.buy_fee(code, amount) if side == "买入" else FEES.sell_fee(code, amount, _hold_days(a, code, day))
     shares = (amount - fee) / nav if side == "买入" else (amount + fee) / nav
     if side == "卖出":
         held = _held_skip(a, code, day, -1 if skip is None else skip)
@@ -359,28 +468,54 @@ async def period(request, aid, P, a):
 async def compare(request, aid, P, a):
     from allweather import benchmark as BM
     stg = a.get("strategy") or "B-Con"
+    col = BENCH_COL.get(stg, "")
     curves = {}
     mine = P.daily["nav"].astype(float) if len(P.daily) else pd.Series(dtype=float)
     if len(mine) > 1:
         curves["我的账户"] = mine
-    bd = P.bench_index(BM.replay_target(_live()["w"][stg], a.get("created"), nav_getter=HG.nav_series))
-    if len(bd) > 1:
-        curves["项目默认基金"] = bd
-    bs = P.bench_index(BM.strategy_curve(BENCH_COL.get(stg, ""), start=a.get("created")))
-    if len(bs) > 1:
-        curves["策略理论"] = bs
+    # 三条线：我的账户 / 默认基金·我的操作日 / 策略理论（标准执行）。
+    # 中间这条 = 默认 9 只 ETF + 当期建议权重，但调仓日换成账户里真实的成交日，
+    # 于是「我的账户 − 它」= 选基差异，「它 − 策略理论」= 下单时点差异，两个差各归各位。
+    # （「项目默认基金·固定权重」那条已下线，它用今天这套权重往回套，没有执行意义。）
+    tdays = sorted({pd.Timestamp(t["date"]) for t in (a.get("trades") or [])
+                    if t.get("side") in ("买入", "卖出") and t.get("date")})
+    if col and len(tdays) > 1:
+        adv = BM.replay_advice(col, a.get("created"), tdays, nav_getter=HG.nav_series)
+        if len(adv) > 1:
+            ba = P.bench_index(adv)
+            if len(ba) > 1:
+                curves["默认基金 · 我的操作日"] = ba
+    # 理论曲线口径：全量回测截止日，以及延长后覆盖到的行情日
+    theory = {}
+    try:
+        nv = pd.read_csv(ROOT / "output" / "nv_curves.csv", index_col=0, parse_dates=True)
+        if col in nv.columns:
+            theory["backtest_end"] = f"{nv[col].dropna().index[-1]:%Y-%m-%d}"
+    except Exception:  # noqa: BLE001
+        pass
+    full = BM.strategy_curve(col)
+    if full is not None:
+        theory["asof"] = f"{full.index[-1]:%Y-%m-%d}"
+        created = a.get("created")
+        s = full.loc[full.index >= pd.Timestamp(created)] if created else full
+        bs = P.bench_index(s)
+        if len(bs) > 1:
+            curves["策略理论"] = bs
+    theory["tracked"] = bool(theory.get("backtest_end") and theory.get("asof")
+                             and theory["backtest_end"] != theory["asof"])
     out = {}
     for k, s in curves.items():
         s = s.dropna()
         out[k] = {"dates": [f"{d:%Y-%m-%d}" for d in s.index], "ret": [round((float(v) / float(s.iloc[0]) - 1) * 100, 4) for v in s]}
     gap = {}
-    for k in ("项目默认基金", "策略理论"):
+    for k in ("默认基金 · 我的操作日", "策略理论"):
         if k in curves and "我的账户" in curves:
             x, y = curves["我的账户"], curves[k]
             e = min(x.index[-1], y.index[-1])
             gap[k] = _r((float(x.loc[:e].iloc[-1] / x.iloc[0]) - float(y.loc[:e].iloc[-1] / y.iloc[0])) * 100)
     return J({"account": _acct_info(aid, a), "curves": out, "gap": gap,
-              "mine": _r(out["我的账户"]["ret"][-1]) if "我的账户" in out else None})
+              "mine": _r(out["我的账户"]["ret"][-1]) if "我的账户" in out else None,
+              "theory": theory})
 
 
 @acct_view
@@ -511,7 +646,9 @@ async def signals(request: Request):
         df = pd.read_csv(fp, index_col=0, parse_dates=True)
         for k in KEYS:
             if BENCH_COL[k] in df.columns:
-                s = df[BENCH_COL[k]].dropna().tail(125)
+                # 给全历史，前端用统一区间控件切（原来写死 tail(125) = 近半年，
+                # 于是这页压根没有时间区间可选，被用户 2026-11-08 抓出来）
+                s = df[BENCH_COL[k]].dropna()
                 curves[STRAT_NAME[k]] = {"dates": [f"{d:%Y-%m-%d}" for d in s.index],
                                          "ret": [round((float(v) / float(s.iloc[0]) - 1) * 100, 4) for v in s]}
     return J({"rows": rows, "strategies": [{"key": k, "name": STRAT_NAME[k]} for k in KEYS], "curves": curves,
@@ -565,7 +702,9 @@ async def backtest(request: Request):
                             else (m["cagr"] - mb["cagr"])) * 100)
             row["vs_mdd"] = _r((m["mdd"] - mb["mdd"]) * 100)
         rows.append(row)
-        s = nv if len(nv) < 600 else nv.resample("W-FRI").last().dropna()
+        # 不再把长区间降采样成周收盘：卡片里的「最大回撤」是按日净值算的，
+        # 曲线若只到周收盘，同一页会出现「图 -3.45% / 卡 -3.89%」两个数（用户 2026-11-08 要求这页显示回撤）
+        s = nv
         curves[k] = {"dates": [f"{d:%Y-%m-%d}" for d in s.index], "ret": [round((float(v) / float(s.iloc[0]) - 1) * 100, 3) for v in s]}
     # 月 / 年收益：只看基准三策略（月末调仓那条），按期间最后一条净值算，保留期首相对上期末的涨跌
     base_nv = {k: nv for k, (nv, _n) in out.items() if cad == "monthly" or k.endswith("· 月末")}
@@ -592,17 +731,20 @@ async def backtest(request: Request):
 
 async def valuation(request: Request):
     from allweather import valuation as V
+    from allweather.config import ETF_META
     snap = V.load_snapshot()
     if snap.empty:
         return J({"rows": [], "date": None})
+    mine = {v: k for k, v in V.ASSET_INDEX.items()}
     rows = []
     for r in snap.to_dict("records"):
         dd = V.drawdown_10y(r["代码"])
-        tot, _vs, _ps, lb = V.score(r["PE百分位"], r["PB百分位"], dd)
+        tot, vs, ps, lb = V.score(r["PE百分位"], r["PB百分位"], dd)
         rows.append({"code": r["代码"], "name": r["名称"], "mkt": r["市场"], "lv": r["估值"],
                      "pe": _r(r["PE"]), "pep": _r(r["PE百分位"]), "pb": _r(r["PB"]), "pbp": _r(r["PB百分位"]),
                      "dy": _r(r["股息率"]), "roe": _r(r["ROE"]), "dd": _r(dd * 100) if dd is not None else None,
-                     "sc": tot, "rt": lb})
+                     "sc": tot, "rt": lb, "vs": vs, "ps": ps,
+                     "mine": ETF_META.get(mine[r["代码"]], {}).get("name", "") if r["代码"] in mine else ""})
     return J({"rows": rows, "date": f"{pd.Timestamp(snap['数据日'].max()):%Y-%m-%d}"})
 
 
@@ -622,13 +764,40 @@ async def fund_search(request: Request):
     return J({"rows": [{"code": r["代码"], "name": r["名称"], "src": r["来源"]} for r in d.to_dict("records")]})
 
 
+async def fund_fee(request: Request):
+    """某只基金的费率（申购/赎回/场内佣金）。记一笔时用它预估手续费，也让页面能解释费率来源。"""
+    from allweather import fees as FEES
+    code = request.path_params["code"]
+    amt = float(request.query_params.get("amount") or 0)
+    side = request.query_params.get("side") or "买入"
+    out = dict(FEES.get(code))
+    out["exchange"] = FEES.is_exchange(code)
+    out["desc"] = FEES.describe(code)
+    if amt > 0:
+        out["fee"] = FEES.buy_fee(code, amt) if side == "买入" else FEES.sell_fee(code, amt, None)
+    return J(out)
+
+
 async def fund_detail(request: Request):
     code = request.path_params["code"]
     ok, msg = FL.ensure_fresh(code)
     nv = FL.build_nav(code)
     if nv is None or not len(nv):
         return J({"error": msg or "没有这只基金的净值"}, 404)
-    return J({"code": code, "name": FL.fund_name(code) or code, "msg": msg,
+    # 基础信息 + 费率：基金规模/类型/成立/经理/公司/风险 + 申赎费（页面「基金检索」详情展示）
+    from allweather import fees as FEES
+    fr = FEES.get(code)
+    meta = {"size": fr.get("size"), "size_text": FEES.size_text(fr.get("size")), "type": fr.get("type"),
+            "inception": fr.get("inception"), "manager": fr.get("manager"), "company": fr.get("company"),
+            "risk": fr.get("risk"), "exchange": fr.get("exchange"), "fee_desc": FEES.describe(code),
+            "profile": FEES.profile_text(code),
+            "profile": FEES.profile_text(code),
+            "buy_rate": fr.get("buy_rate"), "buy_rate_raw": fr.get("buy_rate_raw"),
+            "redeem": fr.get("redeem") or [], "min_buy": fr.get("min_buy")}
+    return J({"code": code, "name": FL.fund_name(code) or code, "msg": msg, "meta": meta,
+              # 场内/场外与持仓里「买卖单位」同一套判断：fund_lookup 的申购表优先，
+              # 查不到再按代码兜底（0 开头场外、5/15/16 开头场内），不在这里另立规则
+              "otc": HG.default_unit(code) == "份额",
               "dates": [f"{d:%Y-%m-%d}" for d in nv.index], "values": [round(float(v), 4) for v in nv]})
 
 
@@ -651,16 +820,45 @@ def _do_update():
         _UPD["running"], _UPD["finished"] = False, time.time()
 
 
-# ------------------------------------------------------------------ 自定义策略回测（策略工厂 · 自定义权重）
+# ------------------------------------------------------------------ 自定义策略（策略工厂）
+async def strategy_funds(request: Request):
+    """设计策略页的候选基金池：9 个长历史策略资产 + 本地已缓存净值的基金，带各自数据起始日。"""
+    from allweather.config import ETF_META
+    from allweather.data import load_panel
+    panel = load_panel()
+    assets = [{"key": k, "code": ETF_META[k]["code"], "name": ETF_META[k]["name"],
+               "from": f"{panel[k].first_valid_index():%Y-%m-%d}", "src": "策略资产"}
+              for k in ETF_META if k in panel.columns]
+    codes = {a["code"] for a in assets}
+    funds = []
+    for c in FL.cached_codes():
+        if c in codes:
+            continue
+        s = FL.build_nav(c)
+        if s is None or len(s) < 2:
+            continue
+        funds.append({"key": c, "code": c, "name": FL.fund_name(c) or c,
+                      "from": f"{s.index[0]:%Y-%m-%d}", "src": "基金净值"})
+    return J({"assets": assets, "funds": funds})
+
+
 async def custom_backtest(request: Request):
-    """POST {weights:{资产key: 百分比}, start, freq}，返回内置三策略 + 自定义策略的对比。计算只在 allweather/custom_backtest.py，不在这重写。"""
+    """POST {funds:[{key,weight}], start, freq, name}，返回内置三策略 + 自定义策略的对比。
+    计算只在 allweather/custom_backtest.py，不在这重写；兼容旧 {weights} 写法。"""
     from allweather.custom_backtest import custom_compare
     try:
         b = await request.json()
-        return J(custom_compare(b.get("weights") or {}, b.get("start") or "2015-01-01",
-                                b.get("freq") or "M", b.get("name") or "我的组合"))
+        return J(custom_compare(weights=b.get("weights") or {},
+                                start=b.get("start") or "2015-01-01",
+                                freq=b.get("freq") or "M",
+                                name=b.get("name") or "我的组合",
+                                funds=b.get("funds")))
     except ValueError as e:
         return J({"error": str(e)}, 400)
+    except Exception as e:  # noqa: BLE001 — 数据异常要显式报给前端，服务端同时留痕
+        import traceback
+        traceback.print_exc()
+        return J({"error": f"回测失败：{str(e)[:160]}"}, 400)
 
 
 # ------------------------------------------------------------------ 报告导出
@@ -792,6 +990,7 @@ routes = [
     Route("/api/trash/{file}", trash_purge, methods=["DELETE"]),
     Route("/api/acct/{aid}/home", home),
     Route("/api/acct/{aid}/holding/{code}", holding),
+    Route("/api/acct/{aid}/holding/{code}/chart", holding_chart),
     Route("/api/acct/{aid}/record-options", record_options),
     Route("/api/acct/{aid}/nav/{code}", nav_on),
     Route("/api/acct/{aid}/trades", trades),
@@ -809,10 +1008,12 @@ routes = [
     Route("/api/market/signals", signals),
     Route("/api/market/backtest", backtest),
     Route("/api/market/custom-backtest", custom_backtest, methods=["POST"]),
+    Route("/api/market/strategy-funds", strategy_funds),
     Route("/api/market/valuation", valuation),
     Route("/api/market/valuation/{code}", valuation_hist),
     Route("/api/market/fund-search", fund_search),
     Route("/api/market/fund/{code}", fund_detail),
+    Route("/api/market/fund/{code}/fee", fund_fee),
     Route("/api/acct/{aid}/export", export_report),
     Route("/api/update", update, methods=["GET", "POST"]),
 ]

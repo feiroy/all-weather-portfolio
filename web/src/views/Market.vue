@@ -1,7 +1,7 @@
 <template>
   <div class="page">
     <div class="wrap">
-      <div class="ptitle"><b>市场</b><span class="sub">所有账户共用</span><UpdateBtn class="m-only upd" /></div>
+      <div class="ptitle"><b>研究</b><span class="sub">所有账户共用</span><UpdateBtn class="m-only upd" /></div>
       <div class="grid">
         <router-link v-for="c in cards" :key="c.k" :to="`/a/${aid}/market/${c.k}`" class="mc"
                      :style="{ '--mk-bg': c.bg }">

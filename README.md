@@ -76,9 +76,19 @@ python main.py                         # Full backtest (auto incremental data + 
 # python main.py --force-fetch         # Force re-fetch all data
 # python main.py --no-excel            # Skip Excel report
 # python main.py --no-markdown         # Skip Markdown report
-# 双击 streamlit_app/run.bat  打开 Web 再平衡面板
 python -m allweather.rebalance         # CLI rebalancing (legacy)
 ```
+
+**Web UI (H5)** — builds the frontend and starts the API server; open http://127.0.0.1:8600
+
+```bash
+scripts/run_h5.sh                      # npm install / npm run build, then uvicorn
+# From a phone on the same Wi-Fi: HOST=0.0.0.0 scripts/run_h5.sh, then http://<LAN-IP>:8600
+# Frontend-only hot reload: cd web && npm run dev  → http://127.0.0.1:5173 (/api proxied to 8600)
+```
+
+> H5 is the only actively maintained UI (`web/` frontend + `api/server.py`).
+> `streamlit_app/` (the old 8501 panel) is frozen and read-only, kept for reference only.
 
 **Output files**:
 
@@ -122,7 +132,15 @@ python -m allweather.rebalance         # CLI rebalancing (legacy)
 │   ├── experiment_log.py    Experiment log
 │   ├── rebalance.py         Real-portfolio rebalancing tool
 │   └── pipeline.py          6-step pipeline orchestrator
-├── streamlit_app/           # Web rebalancing panel
+├── web/                     # H5 frontend (Vue 3 + Vite + Vant) — the maintained UI
+│   ├── src/                 Pages and chart components
+│   └── dist/                Build output, served by api/server.py
+├── api/
+│   └── server.py            H5 JSON API + static files (Starlette)
+├── scripts/
+│   ├── run_h5.sh            Build frontend + start H5
+│   └── build_web.py         Package the hosted build
+├── streamlit_app/           # Legacy 8501 panel — frozen, read-only
 ├── joinquant/               # JoinQuant platform implementations
 ├── portfolio_comparison/    # Multi-strategy comparison tool
 ├── data/                    # Historical data CSV

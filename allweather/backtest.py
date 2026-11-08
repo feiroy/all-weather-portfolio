@@ -274,6 +274,7 @@ def backtest(
     hs300_pe_data: pd.Series | None = None,
     hs300_pb_pct: pd.Series | None = None,
     hs300_pe_pct: pd.Series | None = None,
+    fee_rate: float = 1.5e-4,          # 单边费率（场内 ETF 佣金万 1.5）；0 = 不计费
     track_dynamic_nav: bool = False,
     rebal_mode: str = REBAL_MODE,
     rebal_freq: str = "monthly",
@@ -479,6 +480,12 @@ def backtest(
             w = _apply_trend_dip(w, price_arr, i, col_idx, sma_params, dip_base, post_process_max_w)
             gold_boosted = dip_base["gold_boosted_flag"]
             eff_cash = 1.0 - w.sum()
+            if fee_rate:
+                # 换手 = 需要卖掉的金额占净值比例（买卖额相等），买卖各收一次
+                _turn = 0.5 * float(np.abs(np.asarray(w, dtype=float) - np.asarray(h, dtype=float)).sum())
+                if _turn > 1e-9:
+                    v *= 1.0 - _turn * 2.0 * fee_rate
+                    nv.loc[d] = v
             h = w
 
             # --- Dynamic variant (if tracking) ---

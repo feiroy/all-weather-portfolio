@@ -8,18 +8,20 @@
         <!-- 曲线和日历同属一张卡：不存在「上下两张卡不一样宽」，也不用往两侧塞东西 -->
         <div class="card trend">
           <div class="ch">
-            <div><div class="k">{{ rangeK }}{{ unit === '%' ? '收益率' : '收益' }}</div>
-              <b class="num big" :class="tone(segRet)">{{ unit === '%' ? pct(segRet) : signed(segRet) }}</b></div>
-            <span class="seg2"><button :class="{ on: unit === '%' }" @click="unit = '%'">收益率</button>
-              <button :class="{ on: unit === '¥' }" @click="unit = '¥'">金额</button></span>
+            <!-- 不再放「收益率/金额」开关：曲线固定看收益率，tooltip 里同时给收益率和收益金额 -->
+            <div><div class="k">{{ rangeK }}收益率</div>
+              <b class="num big" :class="tone(segRet)">{{ pct(segRet) }}</b></div>
           </div>
-          <div class="chips rr"><span v-for="r in ranges" :key="r" class="chip" :class="{ on: rangeK === r }" @click="rangeK = r">{{ r }}</span>
-            <span class="seg2 per"><button v-for="p in periods" :key="p" :class="{ on: period === p }" @click="period = p">{{ p }}</button></span></div>
-          <p v-if="chart.dates.length < 2" class="sparse">{{ period }}目前只有 {{ chart.dates.length }} 期数据（账户 {{ firstYear }} 年建立），看走势请切到月线或日线</p>
-          <LineChart :dates="chart.dates" :values="chart.values" :labels="chart.labels" :height="220" :unit="unit === '%' ? '%' : ''" zero
-                     :reset-key="rangeK + unit + period"
-                     :fmt-tip="i => `${chart.dates[i].replace(/-/g, '/')}<br/><b>${unit === '%' ? pct(chart.values[i]) : signed(chart.values[i]) + ' 元'}</b>`" />
-          <p class="note">收益率 = 持有收益 ÷ 投入本金；区间收益从区间前一天收盘算起。滑动或按住拖动平移，⌘/Ctrl + 滑动缩放，双击复位</p>
+          <RangeBar :range="rangeK" :period="period" :periods="periods"
+                    @update:range="setRange" @update:period="p => period = p" />
+          <p v-if="visCount < 2" class="sparse">{{ period }}在{{ rangeK }}只有 {{ visCount }} 期数据（账户 {{ firstYear }} 年建立），看走势请切到月线或日线</p>
+          <LineChart :dates="chart.dates" :values="chart.values" :labels="chart.labels" :height="220" unit="%" zero
+                     :window="win" :reset-key="resetKey"
+                     :fmt-tip="i => tipRows(dateText(chart.dates[i]), [
+                       ['收益率', pct(chart.values[i])],
+                       ['收益金额', pnlOf(chart.dates[i]) == null ? '—' : signed(pnlOf(chart.dates[i]), 0) + ' 元'],
+                     ])" />
+          <p class="note">收益率 = 持有收益 ÷ 投入本金；区间收益从区间基准日收盘算起。滑动或按住拖动平移（可向左拖出区间外的历史），⌘/Ctrl + 滑动缩放，双击复位到当前区间</p>
 
           <div class="trend-div"></div>
 
@@ -61,7 +63,10 @@
         <!-- 选中那天：每只基金赚了多少（点选后才出现，单独一张卡） -->
         <div class="card det" v-if="sel && d.detail[sel]">
           <div class="ch"><b class="num">{{ sel.replace(/-/g, '/') }} 收益</b>
-            <b class="num" :class="tone(selDay)">{{ signed(selDay) }}</b></div>
+            <div class="dv2">
+              <b class="num" :class="tone(selDay)">{{ signed(selDay) }}</b>
+              <small class="num" :class="tone(selPct)">{{ selPct == null ? '—' : pct(selPct) }}</small>
+            </div></div>
           <p v-if="mode !== '日'" class="det-note">这是上面所选那天的每只基金明细；切回「日」点日历格子可换一天</p>
           <div v-for="r in d.detail[sel]" :key="r[0]" class="drow" @click="$router.push(`/a/${aid}/fund/${r[0]}`)">
             <div class="dn"><div>{{ d.funds[r[0]] || r[0] }}</div>
@@ -82,7 +87,10 @@ import { get, peek, dataVer } from '../api'
 import { money, signed, pct, tone } from '../fmt'
 import SubBar from '../components/SubBar.vue'
 import LineChart from '../components/LineChart.vue'
-import { aggregate } from '../utils/series'
+import RangeBar from '../components/RangeBar.vue'
+import { tipRows } from '../utils/chartTheme'
+import { dateText } from '../utils/chartAxis'
+import { aggregate, rangeStartIndex, RANGE_KEYS } from '../utils/series'
 
 const aid = useRoute().params.aid
 const url = `/api/acct/${aid}/period`
@@ -91,28 +99,40 @@ const load = async (fresh = false) => { d.value = await get(url, { fresh }) }
 load(); watch(dataVer, () => load(true))
 
 // ---------- 走势
-const unit = ref('%'), rangeK = ref('全部')
-const ranges = ['近1月', '近3月', '今年', '全部']
-const seg = computed(() => {
-  const x = d.value
-  const last = x.dates[x.dates.length - 1]
-  let s = x.dates[0]
-  if (rangeK.value === '今年') s = last.slice(0, 4) + '-01-01'
-  else if (rangeK.value !== '全部') {
-    const t = new Date(last); t.setMonth(t.getMonth() - (rangeK.value === '近1月' ? 1 : 3)); s = t.toISOString().slice(0, 10)
-  }
-  // 区间从「起点前一天」算起：第一个点是 0
-  let i0 = x.dates.findIndex(v => v >= s); i0 = Math.max(0, i0 - 1)
-  const n0 = x.nav[i0], p0 = x.pnl[i0]
-  const dates = x.dates.slice(i0)
-  const values = unit.value === '%' ? x.nav.slice(i0).map(v => (v / n0 - 1) * 100) : x.pnl.slice(i0).map(v => v - p0)
-  if (rangeK.value === '全部') return { dates, values: unit.value === '%' ? x.nav.map(v => (v - 1) * 100) : x.pnl }
-  return { dates, values }
-})
-const segRet = computed(() => seg.value.values[seg.value.values.length - 1])
+// 数据给全历史、区间只决定初始视窗：和基金详情 iframe 图表一样，往左能拖出区间外的历史
+const rangeK = ref('近1月')
+const ranges = RANGE_KEYS
 const periods = ['日线', '月线', '年线'], period = ref('日线')
-const chart = computed(() => aggregate(seg.value.dates, seg.value.values,
-  period.value === '日线' ? '日' : period.value === '月线' ? '月' : '年'))
+const pchar = computed(() => period.value === '日线' ? '日' : period.value === '月线' ? '月' : '年')
+// 点同一个区间也要复位视窗（拖走后再点当前区间，rangeK 没变不会触发 watch，所以要 bump）
+const bump = ref(0)
+const setRange = k => { rangeK.value = k; bump.value++ }
+const resetKey = computed(() => `${rangeK.value}|${period.value}|${bump.value}`)
+// 区间起点 = 基准条目（今年来 = 去年最后一个交易日），收益率和收益金额都以它为 0
+const baseIdx = computed(() => d.value ? rangeStartIndex(d.value.dates, rangeK.value) : 0)
+const chart = computed(() => {
+  const x = d.value
+  if (!x) return { dates: [], values: [], labels: [] }
+  const nav0 = x.nav[baseIdx.value]
+  return aggregate(x.dates, x.nav.map(v => (v / nav0 - 1) * 100), pchar.value)
+})
+// tooltip 第二行：这一天相对区间基准日的累计盈亏金额
+const pnlOf = (dt) => {
+  const x = d.value
+  if (!x) return null
+  const i = x.dates.indexOf(dt)
+  return i < 0 ? null : x.pnl[i] - x.pnl[baseIdx.value]
+}
+
+// 可见窗口（聚合后的下标，含首尾）：右端固定到最新，左端落在区间基准那条记录上
+const win = computed(() => {
+  const a = chart.value
+  if (!d.value || !a.dates.length) return null
+  const i = a.dates.findIndex(v => v >= d.value.dates[baseIdx.value])
+  return [Math.max(0, i), a.dates.length - 1]
+})
+const visCount = computed(() => (win.value ? win.value[1] - win.value[0] + 1 : 0))
+const segRet = computed(() => chart.value.values[chart.value.values.length - 1])
 const firstYear = computed(() => d.value?.dates?.[0]?.slice(0, 4) || '')
 const firstDate = computed(() => d.value?.dates?.[0]?.replace(/-/g, '/') || '')
 
@@ -176,6 +196,8 @@ function step(k) {
 }
 function drill(c) { if (mode.value === '年') { cur.value = { y: c.y, m: cur.value.m }; mode.value = '月' } else { cur.value = { y: c.y, m: c.m }; mode.value = '日' } }
 const selDay = computed(() => byDay.value.get(sel.value)?.v)
+// 选中那天的收益率：账户净值相对前一交易日的涨跌，与每只基金那行的 % 同一口径
+const selPct = computed(() => byDay.value.get(sel.value)?.p)
 const short = v => { const a = Math.abs(v); const s = a >= 10000 ? (a / 10000).toFixed(1) + '万' : a >= 1000 ? Math.round(a) : a.toFixed(a >= 100 ? 0 : 1); return (v > 0 ? '+' : v < 0 ? '-' : '') + s }
 const pctS = p => (p == null ? '' : (p > 0 ? '+' : '') + p.toFixed(2) + '%')
 void money

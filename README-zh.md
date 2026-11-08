@@ -23,9 +23,9 @@
 
 | 方案 | 风格 | CAGR | 波动率 | 最大回撤 | Sharpe | 一句话 |
 |------|:----:|:----:|:------:|:--------:|:-----:|--------|
-| **V3-B 保守增强(20d)** | 保守增强 | **7.92%** | 3.37% | **-3.89%** | **1.84** | 逆波动率 20d + nonferr(75d) |
-| **V3-B 风险平价(20d)** | 学院派 | 8.20% | 4.08% | -6.19% | 1.59 | 4 桶等权 HRP + nonferr/gold/sp500/hs300 趋势 + 波动率控制 |
-| **V3c 多元** | 多元全天候 | **9.00%** | 4.77% | -6.03% | 1.53 | 6 资产逆波动率 20d + nonferr/gold/sp500 趋势(75d) |
+| **V3-B 保守增强(20d)** | 保守增强 | **7.78%** | 3.38% | **-3.89%** | **1.80** | 逆波动率 20d + nonferr(75d) |
+| **V3-B 风险平价(20d)** | 学院派 | 8.08% | 4.08% | -6.19% | 1.57 | 4 桶等权 HRP + nonferr/gold/sp500/hs300 趋势 + 波动率控制 |
+| **V3c 多元** | 多元全天候 | **8.83%** | 4.77% | -6.05% | 1.50 | 6 资产逆波动率 20d + nonferr/gold/sp500 趋势(75d) |
 
 > V3-B RP 四重趋势过滤：nonferr(75d) + gold(75d) + sp500(75d) + hs300(30d)；V3c 三重趋势过滤：nonferr(75d) + gold(75d) + sp500(75d)。不含 bond_10y（CAGR +1.43pp, Sharpe -0.02）。V3c 多元 6 资产逆波动率 20d，同样不含 bond_10y。三策略均含原油（WTI 75d 趋势过滤，默认集成）。
 
@@ -77,8 +77,18 @@ python main.py                         # 全量回测（自动增量更新数据
 # python main.py --no-excel            # 跳过 Excel 报告
 # python main.py --no-markdown         # 跳过 Markdown 报告
 python -m allweather.rebalance         # CLI 再平衡
-# 或双击 streamlit_app/run.bat  打开 Web 面板（推荐）
 ```
+
+**网页版（H5）** —— 构建前端 + 起接口服务，浏览器打开 http://127.0.0.1:8600 ：
+
+```bash
+scripts/run_h5.sh                      # 自动 npm install / npm run build，再起 uvicorn
+# 手机同一 Wi-Fi：HOST=0.0.0.0 scripts/run_h5.sh，再用 http://<电脑局域网IP>:8600 打开
+# 只改前端、想热更新：cd web && npm run dev  → http://127.0.0.1:5173（/api 代理到 8600）
+```
+
+> H5 是当前唯一维护的界面（`web/` 前端 + `api/server.py` 接口）。
+> `streamlit_app/`（8501 旧版面板）已冻结、只读不改，仅作历史对照。
 
 **输出文件**:
 
@@ -123,7 +133,15 @@ python -m allweather.rebalance         # CLI 再平衡
 │   ├── experiment_log.py    实验日志
 │   ├── rebalance.py         实盘再平衡（CLI）
 │   └── pipeline.py          6 步流水线编排
-├── streamlit_app/           # Web 再平衡面板（推荐）
+├── web/                     # H5 前端（Vue 3 + Vite + Vant）—— 当前唯一维护的界面
+│   ├── src/                 页面与图表组件
+│   └── dist/                构建产物，由 api/server.py 托管
+├── api/
+│   └── server.py            H5 的 JSON 接口 + 静态文件（Starlette）
+├── scripts/
+│   ├── run_h5.sh            构建前端 + 启动 H5
+│   └── build_web.py         打包线上版
+├── streamlit_app/           # 旧版 Web 再平衡面板（8501）—— 已冻结，只读不改
 │   ├── app.py
 │   ├── run.bat              双击启动
 │   └── run.py               自动开浏览器

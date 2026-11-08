@@ -1,12 +1,25 @@
-"""自定义固定权重策略的回测计算（H5 策略工厂与 Streamlit 策略工厂共用）。
+"""自定义策略的回测计算（H5 策略工厂）。
 
-只做「自定义百分比」一种模式：选若干回测资产、给每个百分比、按频率再平衡。
-计算与内置策略回测同一份净值面板、同一套 perf_metrics 口径，不另写一套。
+基金池里的每一项可以是：
+  * 9 个策略资产 key（hs300 / gold / ...）—— 用 load_panel() 的长历史面板，与内置三策略同基准；
+  * 任意 6 位基金代码 —— 用 streamlit_app/fund_lookup.py 的复权净值。
+
+所有选中基金对齐到同一交易日轴，并自动把回测起点提升到「所有基金都有数据」的最早共同日，
+保证自定义策略与内置三策略在同一区间、同一口径下对比。没数据的基金显式报错，不静默跳过。
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
+
+# fund_lookup 在 streamlit_app/ 下，api/server.py 已把它加入 sys.path；
+# 这里补一层兜底，便于单独 import 本模块跑测试。
+_SS = Path(__file__).resolve().parent.parent / "streamlit_app"
+if str(_SS) not in sys.path:
+    sys.path.insert(0, str(_SS))
 
 
 def fixed_weight_backtest(rets: pd.DataFrame, weights: pd.Series, freq: str = "M") -> pd.Series:
@@ -34,39 +47,90 @@ def fixed_weight_backtest(rets: pd.DataFrame, weights: pd.Series, freq: str = "M
     return nv
 
 
-def custom_compare(weights: dict, start: str = "2015-01-01", freq: str = "M", name: str = "我的组合") -> dict:
-    """内置三策略（每月末调仓）+ 自定义权重策略的对比结果，结构与 /api/market/backtest 一致。
+def _resolve(key: str, panel: pd.DataFrame):
+    """一个 key → (净值序列, 名称, 来源, 展示代码)。"""
+    import fund_lookup as FL
+    from allweather.config import ETF_META
 
-    weights: {资产 key: 百分比}，前端传的是 0~100 的数字，这里按合计归一。
+    code2asset = {v["code"]: k for k, v in ETF_META.items()}
+    asset = code2asset.get(key, key)
+    if asset in panel.columns:
+        m = ETF_META.get(asset, {})
+        return panel[asset], m.get("name") or asset, "策略资产", m.get("code") or key
+
+    nav = FL.build_nav(key)
+    if nav is None or len(nav) < 2:
+        try:
+            FL.ensure_fresh(key)
+        except Exception:  # noqa: BLE001 — 网络失败在下面统一变成明确报错
+            pass
+        nav = FL.build_nav(key)
+    if nav is None or len(nav) < 2:
+        raise ValueError(f"基金 {key} 拉不到净值，换一只或先到「基金检索」查一次")
+    return nav, FL.fund_name(key) or key, "基金净值", key
+
+
+def custom_compare(weights: dict | None = None, start: str = "2015-01-01",
+                   freq: str = "M", name: str = "我的组合",
+                   funds: list | None = None) -> dict:
+    """内置三策略（每月末调仓）+ 自定义基金组合的对比，结构与 /api/market/backtest 一致。
+
+    funds: [{key: 资产key或6位代码, weight: 百分比, name?, code?}, ...]；
+    不传 funds 时兼容旧的 {资产key: 百分比} 写法。权重按合计归一。
     """
     from allweather.data import load_panel
     from allweather.pipeline import run_strategy_backtest
     from allweather.stats import perf_metrics
 
-    panel = load_panel().loc[start:]
-    rets = panel.pct_change().dropna()
-    keys = [k for k, v in weights.items() if v is not None and float(v) > 0 and k in rets.columns]
-    if not keys:
+    panel = load_panel()
+    items = funds if funds is not None else [{"key": k, "weight": v} for k, v in (weights or {}).items()]
+    items = [it for it in items
+             if it.get("weight") is not None and float(it["weight"]) > 0]
+    if not items:
         raise ValueError("至少选一只基金并给一个大于 0 的权重")
     if freq not in ("M", "Q", "N"):
         freq = "M"
-    w = pd.Series({k: float(weights[k]) for k in keys})
-    w = w / w.sum()
 
+    cols, meta, wmap = {}, {}, {}
+    for it in items:
+        key = str(it.get("key") or "").strip()
+        if not key or key in cols:
+            continue
+        s, nm, src, code = _resolve(key, panel)
+        cols[key] = s.reindex(panel.index).ffill()
+        meta[key] = {"name": it.get("name") or nm, "code": it.get("code") or code, "src": src}
+        wmap[key] = float(it["weight"])
+    keys = list(cols)
+    px = pd.DataFrame(cols)
+    first = {k: px[k].first_valid_index() for k in keys}
+    bad = [meta[k]["name"] for k in keys if first[k] is None]
+    if bad:
+        raise ValueError(f"{'、'.join(bad)} 在回测区间内没有净值")
+    eff = max(pd.Timestamp(start), max(first.values()))
+    seg = px.loc[eff:]
+    if len(seg) < 2:
+        raise ValueError("所选基金的可用区间太短，换更早成立的基金或把起点提前")
+    fund_rets = seg.pct_change().iloc[1:]
+    panel_rets = panel.loc[eff:].pct_change().iloc[1:]
+    # 二者同起点同交易日轴；万一有缺行，补齐后按 0 收益处理，不让曲线错位
+    if len(fund_rets) != len(panel_rets):
+        fund_rets = fund_rets.reindex(panel_rets.index).fillna(0.0)
+
+    w = pd.Series({k: wmap[k] for k in keys})
+    w = w / w.sum()
     out, n_reb = {}, {}
     for n in ("V3-B 保守增强", "V3-B 风险平价", "V3c 多元"):
-        r = run_strategy_backtest(rets, n, "monthly")
+        r = run_strategy_backtest(panel_rets, n, "monthly")
         out[n] = r.nv
         n_reb[n] = int(r.n_rebal)
-    nv = fixed_weight_backtest(rets[keys], w, freq)
-    nv.index = rets.index
+    nv = fixed_weight_backtest(fund_rets[keys], w, freq)
+    nv.index = panel_rets.index
     label = (str(name or "").strip()[:16]) or "我的组合"
+    if label in out:
+        label = label[:12] + "·自定义"
     out[label] = nv / float(nv.iloc[0])
-    if freq == "N":
-        n_reb_custom = 0
-    else:
-        p = rets.index.to_period(freq)
-        n_reb_custom = int((p[1:] != p[:-1]).sum())
+    n_reb_custom = 0 if freq == "N" else int(
+        (panel_rets.index.to_period(freq)[1:] != panel_rets.index.to_period(freq)[:-1]).sum())
 
     r4 = lambda x: round(float(x), 4)  # noqa: E731
     rows, curves = [], {}
@@ -98,4 +162,8 @@ def custom_compare(weights: dict, start: str = "2015-01-01", freq: str = "M", na
         return [{"k": k, "v": v} for k, v in sorted(acc.items(), reverse=True)[:limit]]
     periods = {"monthly": _periods("ME", 24), "yearly": _periods("YE", 12)}
     return {"rows": rows, "curves": curves, "periods": periods,
-            "weights": {k: r4(w[k] * 100) for k in keys}, "freq": freq, "start": start}
+            "weights": {k: r4(w[k] * 100) for k in keys},
+            "funds": [{"key": k, "name": meta[k]["name"], "code": meta[k]["code"],
+                       "src": meta[k]["src"], "w": r4(w[k] * 100),
+                       "from": f"{first[k]:%Y-%m-%d}"} for k in keys],
+            "start": start, "start_actual": f"{eff:%Y-%m-%d}", "freq": freq}

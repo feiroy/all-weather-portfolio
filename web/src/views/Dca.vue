@@ -13,7 +13,7 @@
           <div><span>剩下</span><b class="num">¥{{ money(+amount - d.buy, 0) }}</b></div>
           <div><span>投完总额</span><b class="num">¥{{ money(d.after, 0) }}</b></div>
         </div>
-        <p class="hint" v-if="d.lost > 1">有 ¥{{ money(d.lost, 0) }} 因为不够一手买不进，先留着现金，下次一起投</p>
+        <p class="hint" v-if="d.lost > 1">有 ¥{{ money(d.lost, 0) }} 因为不够一手买不进，这次先不投，下次一起买</p>
         <div class="sec-t"><span>每只买多少 · 按目标比例</span><span>金额</span></div>
         <van-cell-group inset>
           <van-cell v-for="r in d.rows" :key="r.code">
@@ -60,7 +60,9 @@ watch(amount, v => {
 .amt span{ font-size:24px; font-weight:600; }
 .amt input{ flex:1; border:0; outline:0; font-size:32px; font-weight:700; width:100%; background:transparent; font-variant-numeric:tabular-nums; }
 .q{ padding:12px 0 0; }
-.sum{ display:grid; grid-template-columns:repeat(3,1fr); margin:12px 12px 0; background:#fff; border-radius:14px; padding:12px 8px; text-align:center; }
+/* 三格汇总：等分列 + 每格居中（与首页资产卡同一套，见 CLAUDE.md「KPI 行对齐」） */
+.sum{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin:12px 12px 0; background:#fff; border-radius:14px; padding:12px 14px; }
+.sum > div{ min-width:0; text-align:center; }
 .sum span{ display:block; font-size:12px; color:var(--muted); } .sum b{ display:block; font-size:16px; margin-top:4px; }
 .hint{ font-size:12px; color:var(--muted); margin:8px 18px 0; line-height:1.6; }
 .rn{ font-size:14.5px; font-weight:500; } .rs{ font-size:12px; color:var(--muted); margin-top:2px; }

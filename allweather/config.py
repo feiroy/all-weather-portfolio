@@ -1,4 +1,5 @@
 """配置常量 - ETF 代码、桶定义、回测期间、调仓规则参数。"""
+from datetime import date
 from pathlib import Path
 
 # === 路径 ===
@@ -8,7 +9,10 @@ OUTPUT_DIR = ROOT / "output"
 
 # === 回测期间 ===
 BACKTEST_START = "2005-04-08"
-BACKTEST_END   = "2026-10-16"
+# 回测 / 抓取 / 页面的截止日：**默认今天**，不再写死某一天
+# （写死会出现在「行情已更新到 11 月、页面还停在 10 月」的错觉，2026-11-08 用户踩过）
+# 需要复现某次历史回测，调用处显式传 end= 即可。
+BACKTEST_END   = date.today().isoformat()
 
 # === 30 年国债合成参数 ===
 # 2024-03 之前没有 30Y ETF 数据，用 10Y 国债指数 × 久期放大系数合成

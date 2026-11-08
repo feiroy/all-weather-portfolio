@@ -21,8 +21,11 @@
           </div>
         </div>
         <div class="card">
-          <div class="ct"><b>三个策略 · 近半年</b><span class="k">回测净值，含趋势过滤</span></div>
-          <MultiLine :series="d.curves" :height="260" />
+          <div class="ct"><b>三个策略 · 区间涨跌</b><span class="k">基准 {{ (axis[baseIdx] || '').replace(/-/g, '/') }} = 0%，含趋势过滤</span></div>
+          <!-- 与全站同一套区间控件（原来这页固定只给近半年，没有区间可选） -->
+          <RangeBar :range="range" :period="period" :periods="periods"
+                    @update:range="setRange" @update:period="setPeriod" />
+          <MultiLine :series="curvesChg" :height="260" :window="win" :reset-key="resetKey" group="signals" />
         </div>
         <van-collapse v-model="showW" class="wts">
           <van-collapse-item name="w" title="三个策略今天的目标权重（公共信息）">
@@ -40,11 +43,13 @@
   </div>
 </template>
 <script setup>
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { get, peek, dataVer } from '../api'
 import SubBar from '../components/SubBar.vue'
 import MultiLine from '../components/MultiLine.vue'
+import RangeBar from '../components/RangeBar.vue'
+import { aggregateSeries, unionDates, windowForRange, rangeStartIndex, rebaseSeries } from '../utils/series'
 const aid = useRoute().params.aid
 const url = '/api/market/signals'
 const d = ref(peek(url) || null)
@@ -53,6 +58,19 @@ get('/api/acct/' + aid + '/weights').then(x => { w.value = x })
 const showW = ref([])
 const load = async (fresh = false) => { d.value = await get(url, { fresh }) }
 load(); watch(dataVer, () => load(true))
+
+// 统一区间：默认近6月（这页过去就是「近半年」，行为不变但可切换了）
+const periods = ['日线', '月线', '年线']
+const range = ref('近6月'), period = ref('日线'), bump = ref(0)
+const curvesAgg = computed(() => aggregateSeries(d.value?.curves || {}, period.value))
+const axis = computed(() => unionDates(curvesAgg.value))
+const baseIdx = computed(() => rangeStartIndex(axis.value, range.value))
+// 同回测页：以区间基准日为 0%，选区间才看得出谁涨得猛
+const curvesChg = computed(() => rebaseSeries(curvesAgg.value, axis.value, baseIdx.value))
+const win = computed(() => windowForRange(axis.value, range.value))
+const resetKey = computed(() => `${range.value}|${period.value}|${bump.value}`)
+const setRange = r => { if (range.value === r) bump.value++; else range.value = r }
+const setPeriod = p => { if (period.value === p) bump.value++; else period.value = p }
 </script>
 <style scoped>
 .ct{ display:flex; justify-content:space-between; align-items:baseline; font-size:15px; margin-bottom:6px; }

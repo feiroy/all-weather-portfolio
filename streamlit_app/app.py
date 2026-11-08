@@ -1405,9 +1405,17 @@ __CMP_CSS__
   svg.addEventListener('pointerleave', () => { if (pinned === null && !dragging) showTip(null); });
   svg.addEventListener('wheel', e => {
     if (!PW || !count) return;
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault(); pinned = null;
+      zoom(Math.exp(clamp(e.deltaY, -400, 400) * .003), localX(e));
+      return;
+    }
+    // 规则（CLAUDE.md「时间轴平移交互规范」）：只有水平滚动才平移时间轴；
+    // 上下滑动页面（deltaY 为主）原样交给页面滚动，图表不动、也不 preventDefault。
+    const dx = e.deltaX || 0, dy = e.deltaY || 0;
+    if (Math.abs(dx) <= Math.abs(dy) || Math.abs(dx) < 1) return;
     e.preventDefault(); pinned = null;
-    if (e.ctrlKey || e.metaKey) zoom(Math.exp(clamp(e.deltaY, -400, 400) * .003), localX(e));
-    else { const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY; update(start + delta * (e.deltaMode === 1 ? 16 : 1) * count / PW, count); }
+    update(start + dx * (e.deltaMode === 1 ? 16 : 1) * count / PW, count);
   }, {passive: false});
   svg.addEventListener('dblclick', () => useRange(lastRange));
   new ResizeObserver(requestDraw).observe(wrap);
@@ -1593,7 +1601,7 @@ __RANGE_BTNS__
     const step = PW / count;
     const pts = [], bw = Math.min(20, Math.max(.8, step * .45));
     for (let i = first; i <= last; i++) if (valid(P.prices[i])) pts.push(`${x(i)},${y(P.prices[i])}`);
-    marks += `<polyline points="${pts.join(' ')}" fill="none" stroke="#3B82F6" stroke-width="2" stroke-linejoin="round"/>`;
+    marks += `<polyline points="${pts.join(' ')}" fill="none" stroke="#3B82F6" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
     for (let i = first; i <= last; i++) if (valid(P.prices[i])) {
       marks += `<circle data-index="${i}" cx="${x(i)}" cy="${y(P.prices[i])}" r="${Math.min(3.5,Math.max(1,step*.12))}" fill="#3B82F6"/>`;
     }
@@ -1759,12 +1767,17 @@ __RANGE_BTNS__
   svg.addEventListener('pointerleave',()=>{if(pinned===null&&!dragging) showTip(null);});
   svg.addEventListener('wheel', e => {
     if(!PW || !count) return;
-    e.preventDefault(); pinned=null;
-    if(e.ctrlKey||e.metaKey) zoom(Math.exp(clamp(e.deltaY,-400,400)*.003),localX(e));
-    else {
-      const delta=Math.abs(e.deltaX)>Math.abs(e.deltaY)?e.deltaX:e.deltaY;
-      update(start+delta*(e.deltaMode===1?16:1)*count/PW,count);
+    if(e.ctrlKey||e.metaKey){
+      e.preventDefault(); pinned=null;
+      zoom(Math.exp(clamp(e.deltaY,-400,400)*.003),localX(e));
+      return;
     }
+    // 规则（CLAUDE.md「时间轴平移交互规范」）：只有水平滚动才平移时间轴；
+    // 上下滑动页面（deltaY 为主）原样交给页面滚动，图表不动、也不 preventDefault。
+    const dx=e.deltaX||0, dy=e.deltaY||0;
+    if(Math.abs(dx)<=Math.abs(dy)||Math.abs(dx)<1) return;
+    e.preventDefault(); pinned=null;
+    update(start+dx*(e.deltaMode===1?16:1)*count/PW,count);
   },{passive:false});
   // 未展示工具栏：双击复位即可，交互能力不减
   function reset(){useRange(lastRange);}
@@ -3460,7 +3473,7 @@ __HEAD_BLOCK__
         : (delta > 0 ? '盈利 ' : '亏损 ') + fmt(Math.abs(delta)));
     }
     elSel.style.color = delta > .005 ? '#C52828' : (delta < -.005 ? '#16703B' : '#475569');
-    elRange.textContent = DATES[start] + ' ~ ' + DATES[last];
+    elRange.textContent = DATES[start] + ' — ' + DATES[last];
     document.querySelectorAll('[data-range]').forEach(b =>
       b.setAttribute('aria-pressed', String(b.dataset.range === cur)));
     hover = -1; hideTip(); requestDraw();
@@ -3515,8 +3528,8 @@ __HEAD_BLOCK__
     ticks.forEach(v => {
       const Y = ys(v);
       g += '<line x1="' + L + '" x2="' + (W - RT) + '" y1="' + Y.toFixed(1) + '" y2="' + Y.toFixed(1)
-         + '" stroke="#F1F5F9" stroke-width="1"/>';
-      g += '<text x="' + (L - 8) + '" y="' + (Y + 4).toFixed(1) + '" text-anchor="end" font-size="11" fill="#94A3B8">'
+         + '" stroke="#EEF2F7" stroke-width="1"/>';
+      g += '<text x="' + (L - 8) + '" y="' + (Y + 4).toFixed(1) + '" text-anchor="end" font-size="11" fill="#475569">'
          + esc(fmt(v)) + '</text>';
     });
     // 零轴虚线：只有「盈亏」这种有正负的数才画。总资产永远是正的，
@@ -3552,16 +3565,15 @@ __HEAD_BLOCK__
         g += '<path d="' + area + '" fill="url(#gu)" clip-path="url(#pu)"/>';
         g += '<path d="' + area + '" fill="url(#gd)" clip-path="url(#pd)"/>';
       }
-      g += '<path d="' + d + '" fill="none" stroke="#1E40AF" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
+      g += '<path d="' + d + '" fill="none" stroke="#3B82F6" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
     }
-    // 窗口里只有十几天时给每个观测点补个小圆点：两点数据的折线是一条横贯全宽的直线，
-    // 下面再填一块粉色，看着像「一整块空面积」；有点才知道「这是有数的那几天」。
-    if (count <= 20) {
-      for (let i = start; i < start + count && i < n; i++) {
-        if (!Number.isFinite(V[i])) continue;
-        g += '<circle cx="' + xs(i).toFixed(1) + '" cy="' + ys(V[i]).toFixed(1)
-           + '" r="2.6" fill="#1E40AF" stroke="#fff" stroke-width="1.4"/>';
-      }
+    // 每个观测点都画圆点，半径随步长自适应 —— 与买卖点图同一套规则（CLAUDE.md「数据点标记」）。
+    // 原来只在 count<=20 时画、半径固定 2.6 带白描边，和买卖点图是两套，已统一。
+    const dotR = Math.min(3.5, Math.max(1, PW / Math.max(1, count) * .12));
+    for (let i = start; i < start + count && i < n; i++) {
+      if (!Number.isFinite(V[i])) continue;
+      g += '<circle cx="' + xs(i).toFixed(1) + '" cy="' + ys(V[i]).toFixed(1)
+         + '" r="' + dotR.toFixed(1) + '" fill="#3B82F6"/>';
     }
     // 买卖点：买画红上三角（线以上）、卖画绿下三角（线以下）
     // 三角放大到 8×13 并加 2px 白描边 —— 原来 6×10 无描边，压在蓝色曲线和粉色面积上几乎看不见
@@ -3583,12 +3595,12 @@ __HEAD_BLOCK__
       if (i < 0 || i >= n) return;
       const anchor = k === 0 ? 'start' : (k === xTicks.length - 1 ? 'end' : 'middle');
       const X = k === 0 ? L : (k === xTicks.length - 1 ? W - RT : xs(i));
-      g += '<text x="' + X.toFixed(1) + '" y="' + (H - 7) + '" text-anchor="' + anchor + '" font-size="11" fill="#94A3B8">' + esc(DATES[i]) + '</text>';
+      g += '<text x="' + X.toFixed(1) + '" y="' + (H - 7) + '" text-anchor="' + anchor + '" font-size="11" fill="#475569">' + esc(DATES[i]) + '</text>';
     });
     if (hover >= start && hover < start + count && Number.isFinite(V[hover])) {
       const X = xs(hover), Y = ys(V[hover]);
       g += '<line x1="' + X.toFixed(1) + '" x2="' + X.toFixed(1) + '" y1="' + top + '" y2="' + bot + '" stroke="#CBD5E1" stroke-dasharray="3 3"/>';
-      g += '<circle cx="' + X.toFixed(1) + '" cy="' + Y.toFixed(1) + '" r="3.5" fill="#1E40AF" stroke="#fff" stroke-width="1.5"/>';
+      g += '<circle cx="' + X.toFixed(1) + '" cy="' + Y.toFixed(1) + '" r="3.5" fill="#3B82F6" stroke="#fff" stroke-width="1.5"/>';
     }
     svg.innerHTML = g;
   }
@@ -4340,12 +4352,17 @@ __RANGE_BTNS__
   svg.addEventListener('pointerleave', () => { if (pinned === null && !dragging) showTip(null); });
   svg.addEventListener('wheel', e => {
     if (!PW || !count) return;
-    e.preventDefault(); pinned = null;
-    if (e.ctrlKey || e.metaKey) zoom(Math.exp(clamp(e.deltaY, -400, 400) * .003), localX(e));
-    else {
-      const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
-      update(start + delta * (e.deltaMode === 1 ? 16 : 1) * count / PW, count);
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault(); pinned = null;
+      zoom(Math.exp(clamp(e.deltaY, -400, 400) * .003), localX(e));
+      return;
     }
+    // 规则（CLAUDE.md「时间轴平移交互规范」）：只有水平滚动才平移时间轴；
+    // 上下滑动页面（deltaY 为主）原样交给页面滚动，图表不动、也不 preventDefault。
+    const dx = e.deltaX || 0, dy = e.deltaY || 0;
+    if (Math.abs(dx) <= Math.abs(dy) || Math.abs(dx) < 1) return;
+    e.preventDefault(); pinned = null;
+    update(start + dx * (e.deltaMode === 1 ? 16 : 1) * count / PW, count);
   }, {passive: false});
   svg.addEventListener('dblclick', () => useRange(lastRange));
   new ResizeObserver(requestDraw).observe(wrap);

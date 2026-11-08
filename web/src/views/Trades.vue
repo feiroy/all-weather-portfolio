@@ -11,7 +11,7 @@
         <div class="sum">
           <div><span>买入</span><b class="num up">¥{{ money(tot.buy, 0) }}</b><small>{{ tot.nb }} 笔</small></div>
           <div><span>卖出</span><b class="num down">¥{{ money(tot.sell, 0) }}</b><small>{{ tot.ns }} 笔</small></div>
-          <div><span>转入</span><b class="num">¥{{ money(tot.inn, 0) }}</b><small>{{ tot.ni }} 笔</small></div>
+          <div><span>净投入</span><b class="num">¥{{ money(tot.net, 0) }}</b><small>还在基金里</small></div>
         </div>
         <div class="card exec" v-if="plan.length">
           <div class="ch"><b>本轮执行进度</b><span class="num">{{ matched }} / {{ plan.length }} 笔</span></div>
@@ -20,8 +20,7 @@
         </div>
         <div class="filt">
           <span class="chip" :class="{ on: !code }" @click="code = ''">全部</span>
-          <span class="chip" :class="{ on: code === '$' }" @click="code = '$'">资金进出</span>
-          <button class="fsel" :class="{ on: code && code !== '$' }" @click="showFund = true">
+          <button class="fsel" :class="{ on: !!code }" @click="showFund = true">
             <span class="fs-txt">{{ fundLabel }}</span><van-icon name="arrow-down" />
           </button>
           <span class="fcount num">{{ rows.length }} 笔</span>
@@ -37,11 +36,10 @@
                 <template #title>
                   <div class="t1"><span class="tag" :class="cls(t.side)">{{ t.side }}</span>
                     <span v-if="t.close" class="tag liq">清仓</span>
-                    <span class="tn">{{ t.name || '资金' }}</span></div>
+                    <span class="tn">{{ t.name }}</span></div>
                   <div class="t2 num" v-if="t.code">{{ t.code }} · {{ money(t.shares, t.unit === '股' ? 0 : 2) }} {{ t.unit }} × {{ money(t.nav, 4) }}<template v-if="t.fee"> · 费 {{ money(t.fee) }}</template></div>
-                  <div class="t2" v-else>{{ t.side === '转入' ? '钱进账户（计入本金）' : '钱出账户' }}</div>
                 </template>
-                <template #value><b class="num ta" :class="{ 买入: 'up', 卖出: 'down' }[t.side] || ''">{{ sign(t.side) }}¥{{ money(t.amount) }}</b></template>
+                <template #value><b class="num ta" :class="{ 买入: 'up', 卖出: 'down' }[t.side] || ''">¥{{ money(t.amount) }}</b></template>
               </van-cell>
               <template #right><van-button square type="danger" text="删除" class="del" @click="remove(t)" /></template>
             </van-swipe-cell>
@@ -83,11 +81,11 @@ const code = ref('')
 const load = async (fresh = false) => { d.value = await get(url, { fresh }) }
 load(); onActivated(() => load()); watch(dataVer, () => load(true))
 
-const rows = computed(() => (d.value?.rows || []).filter(t => !code.value ? true : code.value === '$' ? !t.code : t.code === code.value))
-// 15 只基金不再各占一个按钮，收进一个下拉；「全部 / 资金进出」是高频项保留
+const rows = computed(() => (d.value?.rows || []).filter(t => !code.value || t.code === code.value))
+// 15 只基金不再各占一个按钮，收进一个下拉；「全部」是高频项保留
 const showFund = ref(false)
 const fundLabel = computed(() => {
-  if (!code.value || code.value === '$') return '按基金筛选'
+  if (!code.value) return '按基金筛选'
   const c = (d.value?.codes || []).find(x => x.code === code.value)
   return c ? short(c.name) : '按基金筛选'
 })
@@ -101,12 +99,13 @@ const groups = computed(() => {
 })
 const tot = computed(() => {
   const r = rows.value, s = side => r.filter(t => t.side === side)
-  return { buy: s('买入').reduce((a, t) => a + t.amount, 0), nb: s('买入').length,
-           sell: s('卖出').reduce((a, t) => a + t.amount, 0), ns: s('卖出').length,
-           inn: s('转入').reduce((a, t) => a + t.amount, 0) - s('转出').reduce((a, t) => a + t.amount, 0), ni: s('转入').length + s('转出').length }
+  const buy = s('买入').reduce((a, t) => a + t.amount, 0)
+  const sell = s('卖出').reduce((a, t) => a + t.amount, 0)
+  // 账户不留现金：净投入 = 买入 − 卖出 = 现在还押在基金里的本金
+  return { buy, nb: s('买入').length, sell, ns: s('卖出').length, net: buy - sell }
 })
 const cls = s => (s === '买入' ? 'buy' : s === '卖出' ? 'sell' : 'gray')
-const sign = s => (s === '买入' || s === '转出' ? '-' : '+')
+// 金额只显示绝对值：方向由「买入 / 卖出」标签 + 涨红跌绿表达，不再叠 +/- 号
 const short = n => (n.length > 9 ? n.slice(0, 9) + '…' : n)
 const wk = s => '周' + '日一二三四五六'[new Date(s).getDay()]
 const edit = t => router.push({ path: `/a/${aid}/record`, query: { edit: t.i } })
@@ -127,7 +126,9 @@ async function remove(t) {
 .ptitle b{ font-size:24px; font-weight:700; color:var(--ink); letter-spacing:-.3px; line-height:1.25; }
 .ptitle{ display:flex; align-items:center; gap:8px; padding:calc(26px + env(safe-area-inset-top)) 16px 14px; font-size:20px; }
 .add{ margin-left:auto; }
-.sum{ display:grid; grid-template-columns:repeat(3,1fr); margin:12px 12px 0; background:#fff; border-radius:14px; padding:12px 8px; text-align:center; }
+/* 三格汇总：等分列 + 每格居中（与首页资产卡同一套，见 CLAUDE.md「KPI 行对齐」） */
+.sum{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin:12px 12px 0; background:#fff; border-radius:14px; padding:12px 14px; }
+.sum > div{ min-width:0; text-align:center; }
 .sum span{ display:block; font-size:12px; color:var(--muted); } .sum b{ display:block; font-size:16px; margin-top:4px; }
 .sum small{ font-size:11px; color:var(--muted); }
 .filt{ margin-top:12px; padding:0 12px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }

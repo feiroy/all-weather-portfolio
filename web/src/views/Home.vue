@@ -26,15 +26,15 @@
                   <div><div class="k">持有收益</div>
                     <div class="v num" :class="toneD(d.summary.pnl)">{{ signed(d.summary.pnl) }}</div>
                     <div class="s num" :class="toneD(d.summary.pnl_pct)">{{ pct(d.summary.pnl_pct) }}</div></div>
-                  <div><div class="k">持有基金</div><div class="v num">{{ d.holdings.filter(h => h.held).length }} 只</div>
-                    <div class="s" v-if="d.summary.cash >= 1">现金 ¥{{ money(d.summary.cash, 0) }}</div></div>
+                  <!-- 账户不存钱，钱都在基金里，所以不显示现金 -->
+                  <div><div class="k">持有基金</div><div class="v num">{{ d.holdings.filter(h => h.held).length }} 只</div></div>
                 </div>
                 <div class="month" v-if="d.month.dates.length > 1">
                   <div class="mh"><span>近一个月</span>
                     <b class="num" :class="toneD(last(d.month.ret))">{{ pct(last(d.month.ret)) }}</b>
                     <span class="num">{{ signed(last(d.month.money), 0) }} 元</span></div>
                   <LineChart :dates="d.month.dates" :values="d.month.ret" :height="130" zero :zoom="false"
-                             :fmt-tip="i => `${d.month.dates[i]}<br/><b>${pct(d.month.ret[i])}</b>　${signed(d.month.money[i], 0)} 元`" />
+                             :fmt-tip="i => tipRows(dateText(d.month.dates[i]), [['收益率', pct(d.month.ret[i])], ['收益', signed(d.month.money[i], 0) + ' 元']])" />
                 </div>
               </div>
               <!-- 宏观季节：头卡下方一行小卡 -->
@@ -55,7 +55,7 @@
                 <van-icon name="arrow" class="hw-go" />
               </router-link>
               <!-- 这一轮要不要动手 -->
-              <van-cell-group inset class="status">
+              <van-cell-group inset class="status" :class="d.status.kind">
                 <van-cell is-link :to="`/a/${aid}/calc`" :title="statusTitle" :label="statusLabel">
                   <template #icon><van-icon :name="d.status.kind === 'orders' ? 'bell' : 'passed'" class="si" :class="d.status.kind" /></template>
                 </van-cell>
@@ -63,7 +63,7 @@
             </div>
             <div class="col">
               <!-- 持仓 -->
-              <div class="sec-t"><span>我的基金 · {{ d.holdings.length }} 只</span><span>金额 / 持有收益</span></div>
+              <div class="sec-t"><span>我的基金 · {{ d.holdings.length }} 只</span><span>市值 / 收益（收益率）</span></div>
               <van-cell-group inset>
                 <van-cell v-for="h in d.holdings" :key="h.code" is-link :to="`/a/${aid}/fund/${h.code}`" class="fund">
                   <template #title>
@@ -72,8 +72,16 @@
                       <span v-if="h.why" class="tag gray">{{ h.why }}</span></div>
                   </template>
                   <template #value>
-                    <div class="fv num">{{ money(h.mv, 0) }}</div>
-                    <div class="fp num" :class="tone(h.hold)">{{ h.held ? signed(h.hold, 0) + ' · ' + pct(h.hold_pct) : '未持有' }}</div>
+                    <!-- 两行各带小字标签（用户 2026-11-08：「收益和收益率没任何提示就放个数，纯靠猜含义」）。
+                         收益率用括号挂在金额后面，读作「收益 -72（-1.34%）」，不再是两个裸数字并排。
+                         用两列 grid 而不是两个 flex 行：标签左列对齐、数值右列右对齐。 -->
+                    <div class="fv2">
+                      <span class="fv2k">市值</span>
+                      <span class="fv2v num">{{ money(h.mv, 0) }}</span>
+                      <span class="fv2k">收益</span>
+                      <span v-if="h.held" class="fv2v num hold" :class="tone(h.hold)">{{ signed(h.hold, 0) }}<small>({{ pct(h.hold_pct) }})</small></span>
+                      <span v-else class="fv2v nil">未持有</span>
+                    </div>
                   </template>
                 </van-cell>
               </van-cell-group>
@@ -93,6 +101,8 @@ import { get, peek, dataVer } from '../api'
 import { money, signed, pct, tone } from '../fmt'
 import TabBar from '../components/TabBar.vue'
 import LineChart from '../components/LineChart.vue'
+import { tipRows } from '../utils/chartTheme'
+import { dateText } from '../utils/chartAxis'
 import MacroSeason from '../components/MacroSeason.vue'
 import UpdateBtn from '../components/UpdateBtn.vue'
 
@@ -137,7 +147,11 @@ const statusLabel = computed(() => {
 .hero .k{ font-size:12px; color:var(--muted); }
 .hero .asof{ float:right; color:var(--muted); }
 .total{ font-size:34px; font-weight:700; letter-spacing:-1px; margin:4px 0 12px; color:var(--ink); }
-.grid3{ display:grid; grid-template-columns:repeat(3,1fr); gap:6px; padding-top:12px; border-top:1px solid var(--line); }
+/* KPI 行统一：**等分列 + 每格居中**（用户 2026-11-08 两轮反馈后的结论）。
+   左对齐 → 最后一格右边空 240px；两端贴边 → 三块散在 0 / 45% / 88%，最后一块贴死右边缘也很怪。
+   等分列 + 居中：三块落在 1/6、1/2、5/6，左右留白对称。 */
+.grid3{ display:grid; grid-template-columns:repeat(3,1fr); gap:14px; padding-top:12px; border-top:1px solid var(--line); }
+.grid3 > div{ min-width:0; text-align:center; }
 .grid3 .v{ font-size:16px; font-weight:650; margin-top:3px; color:var(--ink); }
 .grid3 .s{ font-size:12px; color:var(--muted); margin-top:1px; }
 /* 白底上必须明确的涨红跌绿；提高特异性覆盖 .grid3 .v 的 --ink */
@@ -146,15 +160,26 @@ const statusLabel = computed(() => {
 .month{ margin-top:14px; padding-top:10px; border-top:1px solid var(--line); }
 .mh{ display:flex; gap:8px; align-items:baseline; font-size:12px; }
 .mh span{ color:var(--muted); } .mh b{ font-size:15px; }
+/* 提醒要显眼（用户 2026-11-07：白底弱化太多）：浅琥珀底 + 整圈描边 + 3px 左条，
+   标题用深琥珀上色和图标成一套；圆角/外边距仍与「该动手了」对齐，不显得外挂 */
 .health-warn{ display:flex; align-items:center; gap:10px; margin:12px 12px 0; padding:11px 14px;
-  background:#FFFBEB; border-left:3px solid #F59E0B; border-radius:10px; text-decoration:none; }
+  background:#FFF7E6; border:1px solid #FDE68A; border-left:3px solid #F59E0B;
+  border-radius:14px; text-decoration:none; }
+.health-warn .hw-t b{ color:#B45309; }   /* 比 .hw-t b 更具体，否则被后定义的 ink 色覆盖 */
 .hw-i{ font-size:19px; color:#D97706; flex:0 0 auto; }
 .hw-t{ min-width:0; flex:1; }
 .hw-t b{ display:block; font-size:13.5px; color:var(--ink); }
 .hw-t span{ display:block; font-size:11.5px; color:var(--sub); margin-top:2px;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .hw-go{ color:#D97706; flex:0 0 auto; }
-.status{ margin-top:12px !important; }
+/* 与体检卡同一套强度：浅底 + 整圈描边 + 3px 左条 + 标题上色。
+   要动手 = 品牌蓝（--brand-soft 浅蓝底）；不用动 = 白卡无色条（透明占位，避免高度跳动） */
+.status{ margin-top:12px !important; border-left:3px solid transparent; }
+.status.orders{ background:var(--brand-soft); border:1px solid #C7D2FE; border-left:3px solid var(--brand); }
+.status.orders :deep(.van-cell){ background:transparent; }
+.status.orders :deep(.van-cell__title){ color:#1E3A8A; font-weight:600; }
+.status.orders :deep(.van-cell__label){ color:#475569; }
+.status.orders :deep(.si){ color:var(--brand); }
 .upd{ margin-left:auto; }
 .strat{ font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .quick{ display:grid; grid-template-columns:repeat(4,1fr); margin:12px 12px 0; background:#fff; border-radius:14px; padding:14px 4px 10px; }
@@ -162,11 +187,26 @@ const statusLabel = computed(() => {
 .quick i{ width:38px; height:38px; border-radius:12px; display:grid; place-items:center; font-size:20px; }
 .si{ font-size:20px; margin-right:10px; align-self:center; color:var(--muted); }
 .si.orders{ color:var(--brand); }
-.fund :deep(.van-cell__title){ flex:1.6; min-width:0; }
+.fund :deep(.van-cell__title){ flex:1 1 auto; min-width:0; }
 .fn{ font-size:15px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .fs{ font-size:12px; color:var(--muted); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.fv{ font-size:15px; color:var(--ink); font-weight:600; }
-.fp{ font-size:12px; margin-top:2px; }
+/* 数值块：两列 grid（标签 / 数值），标签左列对齐、数值右列右对齐；
+   两行分别是「市值」「收益（收益率）」。原来只放「-72 -1.34%」两个裸数字，
+   用户 2026-11-08 反馈「纯靠猜含义」。 */
+.fv2{ display:grid; grid-template-columns:auto 1fr; align-items:baseline;
+  column-gap:8px; row-gap:1px; line-height:1.3; }
+/* 列宽写死给同一值：每行都至少 132px，跨行才会右对齐（由窄变宽时不会各自缩成一团） */
+.fund :deep(.van-cell__value){ flex:0 0 auto; min-width:132px; }
+.fv2 > *{ white-space:nowrap; }   /* 绝不让「市值」「收益」竖排成一字一行 */
+.fv2k{ font-size:11px; line-height:1.3; color:var(--muted); font-weight:400; letter-spacing:.02em; text-align:left; }
+.fv2v{ font-size:15px; line-height:1.3; font-weight:600; color:var(--ink); font-variant-numeric:tabular-nums;
+  letter-spacing:-.2px; text-align:right; }
+/* 收益比市值轻一档：字号降一级，但仍比小字标签重，视线先看市值再看收益 */
+.fv2v.hold{ font-size:13px; }
+.fv2v small{ font-size:11px; font-weight:400; margin-left:4px; opacity:.75; }
+.fv2v.nil{ font-size:12px; font-weight:400; color:var(--muted); letter-spacing:0; }
+/* 涨红跌绿写在同一条上，避免被全局 .up/.down 的先后顺序影响 */
+.fv2v.up{ color:var(--up); } .fv2v.down{ color:var(--down); }
 .cols{ display:block; }
 @media (min-width:900px){
   /* 顶部导航已经有账户名和切换入口，资产页这行在电脑上重复，隐藏 */

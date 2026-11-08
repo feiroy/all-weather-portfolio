@@ -33,15 +33,16 @@
                   <span class="oa num" :class="o.side === '买入' ? 'up' : 'down'">¥{{ money(o.amount, 0) }}</span>
                 </div>
                 <div class="o2">{{ o.code }} · {{ o.otc ? '场外' : '场内' }} · {{ o.slot }}</div>
+                <!-- 记一笔原来单独占一行且靠右，左边整片空白（用户 2026-11-08「下面太空了」）：
+                     现在并到「股数 × 价格 / 占比」这一行右侧，卡片少一行、不留空档。
+                     图标统一用 plus，和交易流水页、基金详情页的「记一笔」一致（原来这里是 edit）。 -->
                 <div class="o3">
                   <span class="num">≈ {{ money(o.qty, o.otc ? 2 : 0) }} {{ o.unit }} × {{ money(o.px, 4) }}</span>
                   <span class="num">占比 {{ o.w_now.toFixed(2) }}% → {{ o.w_tgt == null ? '—' : o.w_tgt.toFixed(2) + '%' }}</span>
-                </div>
-                <div class="note" v-if="o.note">{{ o.note }}</div>
-                <div class="o4">
-                  <van-button size="small" round plain type="primary" icon="edit"
+                  <van-button class="ogo" size="small" round plain type="primary" icon="plus"
                               :to="{ path: `/a/${aid}/record`, query: { code: o.code, side: o.side, amount: Math.round(o.amount * 100) / 100 } }">记一笔</van-button>
                 </div>
+                <div class="note" v-if="o.note">{{ o.note }}</div>
               </div>
             </div>
           </template>
@@ -161,9 +162,12 @@ const bw = v => `${Math.min(100, (v / maxW.value) * 100)}%`
 .oa{ font-size:17px; font-weight:700; }
 .tag.liq{ color:#fff; background:#16A34A; }
 .o2{ font-size:12px; color:var(--muted); margin-top:4px; }
-.o3{ display:flex; justify-content:space-between; font-size:12.5px; color:var(--sub); margin-top:6px; gap:8px; flex-wrap:wrap; }
+.o3{ display:flex; align-items:center; font-size:12.5px; color:var(--sub);
+  margin-top:6px; gap:6px 12px; flex-wrap:wrap; }
+/* 占比推到右边、紧挨「记一笔」，右边缘和上面的金额对齐；股数那半段占剩下的宽度 */
+.o3 .num:nth-child(2){ margin-left:auto; }
+.ogo{ flex:0 0 auto; min-width:82px; }
 .note{ font-size:12px; color:#B45309; margin-top:4px; }
-.o4{ display:flex; justify-content:flex-end; margin-top:8px; }
 .hn{ font-size:14.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .hs{ font-size:12px; color:var(--muted); margin-top:2px; }
 .hv{ color:var(--ink); font-weight:600; }

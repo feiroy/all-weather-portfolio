@@ -18,6 +18,7 @@ const routes = [
   { path: '/a/:aid/market', name: 'market', component: v('Market'), meta: { depth: 1, tab: 'market', keep: true } },
   { path: '/a/:aid/market/signals', name: 'signals', component: v('Signals'), meta: { depth: 2, tab: 'market' } },
   { path: '/a/:aid/market/backtest', name: 'backtest', component: v('Backtest'), meta: { depth: 2, tab: 'market' } },
+  { path: '/a/:aid/market/strategy-new', name: 'strategy-new', component: v('StrategyNew'), meta: { depth: 3, tab: 'market' } },
   { path: '/a/:aid/market/valuation', name: 'valuation', component: v('Valuation'), meta: { depth: 2, tab: 'market' } },
   { path: '/a/:aid/market/funds', name: 'funds', component: v('Funds'), meta: { depth: 2, tab: 'market' } },
   // 旧「基金详情」独立页已并入基金检索页（无二级菜单），保留路径兼容外部链接

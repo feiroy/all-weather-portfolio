@@ -55,9 +55,8 @@
           <van-cell v-if="f.from" title="连交易记录一起复制" center>
             <template #right-icon><van-switch v-model="f.copy_trades" size="20px" /></template>
           </van-cell>
+          <!-- 没有「起始资金」：账户不存钱，本金由买入/卖出自动算出来 -->
           <template v-if="!f.copy_trades || !f.from">
-            <van-field v-model="f.capital" label="起始资金" type="number" placeholder="0 = 之后用「转入」记" :label-width="76">
-              <template #extra><span class="ex">元</span></template></van-field>
             <van-field :model-value="f.created" label="建立日期" readonly is-link :label-width="76" @click="showDate = true" />
           </template>
         </van-cell-group>
@@ -102,17 +101,17 @@ load(); onActivated(() => load()); watch(dataVer, () => load(true))
 const STG = [{ text: 'V3-B 保守增强', value: 'B-Con' }, { text: 'V3-B 风险平价', value: 'B-RP' }, { text: 'V3c 多元', value: 'V3c' }]
 const stgCols = STG, stgName = k => STG.find(s => s.value === k)?.text
 const today = new Date().toISOString().slice(0, 10)
-const f = reactive({ name: '', kind: '模拟', strategy: 'B-Con', from: '', copy_trades: false, capital: '', created: today })
+const f = reactive({ name: '', kind: '模拟', strategy: 'B-Con', from: '', copy_trades: false, created: today })
 const dateParts = ref(today.split('-'))
 const showFrom = ref(false)
 const fromActs = computed(() => [{ name: '项目默认', subname: '每个位置一只默认 ETF', value: '' }, ...(list.value || []).map(a => ({ name: `抄「${a.name}」`, subname: '同样的基金和占比', value: a.id }))])
 const showNew = ref(false), showStg = ref(false), showDate = ref(false), saving = ref(false)
-function openNew() { Object.assign(f, { name: '', kind: '模拟', strategy: 'B-Con', from: '', copy_trades: false, capital: '', created: today }); showNew.value = true }
+function openNew() { Object.assign(f, { name: '', kind: '模拟', strategy: 'B-Con', from: '', copy_trades: false, created: today }); showNew.value = true }
 async function create() {
   if (!f.name.trim()) return showFailToast('起个名字')
   saving.value = true
   try {
-    const r = await post('/api/accounts', { ...f, name: f.name.trim(), capital: +f.capital || 0 })
+    const r = await post('/api/accounts', { ...f, name: f.name.trim(), capital: 0 })
     showNew.value = false
     router.push(`/a/${r.id}`)
   } catch (e) { showFailToast(e.message) } finally { saving.value = false }

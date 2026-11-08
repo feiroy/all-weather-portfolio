@@ -6,178 +6,383 @@
         <div class="row"><span class="lb">调仓节奏</span>
           <div class="chips"><span v-for="c in cads" :key="c.k" class="chip" :class="{ on: cad === c.k }" @click="cad = c.k">{{ c.t }}</span></div></div>
         <div class="row" v-if="cad !== 'mine'"><span class="lb">起点</span>
-          <div class="chips"><span v-for="s in starts" :key="s" class="chip" :class="{ on: start === s }" @click="start = s">{{ s.slice(0, 4) }} 年起</span></div></div>
+          <select v-model="start" class="yr">
+            <option v-for="y in years" :key="y" :value="`${y}-01-01`">{{ y }} 年起</option>
+          </select>
+          <span class="k">内置三策略与我的策略统一从这一天开始</span></div>
         <p class="k" v-if="cad === 'mine'">从账户建立那天起，只在你实际有买卖的日子调仓，和「每月末调仓」对照 —— 看你的操作节奏有没有拖后腿</p>
         <p class="k" v-else-if="cad !== 'monthly'">虚线是同策略「每月末调仓」做对照；差值看下表「比月末」</p>
       </div>
+
+      <!-- 我的策略：新增 / 编辑 / 删除，保存后与内置三策略统一对比 -->
+      <div class="card mine">
+        <div class="ct"><b>我的策略</b><button class="btn primary sm" @click="newStrategy">+ 新增策略</button></div>
+        <p class="k" v-if="!strategies.length">还没有自定义策略。点「新增策略」自己选基金、配权重，保存后和内置三策略一起对比。</p>
+        <div v-else class="slist">
+          <div v-for="s in strategies" :key="s.id" class="srow">
+            <i :style="{ background: customColor(s.id) }"></i>
+            <div class="sinf"><b>{{ s.name }}</b><small class="num">{{ s.funds.length }} 只基金 · {{ freqLabel(s.freq) }}</small></div>
+            <a @click="editStrategy(s)">编辑</a>
+            <a @click="delStrategy(s)">删除</a>
+          </div>
+        </div>
+        <p class="k" v-if="cpLoading">正在计算我的策略…</p>
+        <p class="warn" v-if="cpErr">{{ cpErr }}</p>
+        <p class="k" v-if="startNote">注：{{ startNote }}</p>
+      </div>
+
       <van-loading v-if="loading" class="ld" vertical>回测计算中…</van-loading>
       <p v-else-if="err" class="empty-tip">{{ err }}</p>
       <div v-else-if="d" class="cols2">
         <div class="metric-grid">
-          <div v-for="r in allRows" :key="r.name" class="card rcard" :class="{ base: isBase(r.name) }">
-            <div class="r1"><i :style="{ background: colorOf(r.name) }"></i><b>{{ r.name }}</b><span class="k num">调仓 {{ r.n }} 次</span></div>
-            <div class="r2">
-              <div><span>{{ r.short ? '区间收益' : '年化' }}</span><b class="num" :class="tone(r.short ? r.ret : r.cagr)">{{ pct(r.short ? r.ret : r.cagr) }}</b></div>
-              <div><span>最大回撤</span><b class="num down">{{ r.mdd.toFixed(2) }}%</b></div>
-              <div><span>{{ r.short ? '波动' : '夏普' }}</span><b class="num">{{ r.short ? r.vol.toFixed(2) + '%' : (r.sharpe ?? '—') }}</b></div>
-              <div v-if="r.vs != null"><span>比月末</span><b class="num" :class="tone(r.vs)">{{ signed(r.vs) }}pp</b></div>
+          <!-- 一个策略一张卡：里面按调仓节奏分行，同一策略的两种方式上下对齐，方便直接比 -->
+          <div v-for="g in groups" :key="g.name" class="card scard">
+            <div class="r1"><i :style="{ background: colorOf(g.name) }"></i><b>{{ g.name }}</b>
+              <span class="k num" v-if="g.rows.length < 2">调仓 {{ g.rows[0].n }} 次</span></div>
+            <table class="mtab">
+              <thead><tr>
+                <th v-if="g.rows.length > 1" class="vl"></th>
+                <th>年化</th><th>回撤</th><th>夏普</th><th>调仓</th>
+              </tr></thead>
+              <tbody>
+                <tr v-for="r in g.rows" :key="r.name">
+                  <td v-if="g.rows.length > 1" class="vl">{{ freqOf(r.name) }}</td>
+                  <td class="num" :class="tone(r.cagr)">{{ pct(r.cagr) }}<sup v-if="r.short" class="ast">*</sup></td>
+                  <td class="num down">{{ r.mdd.toFixed(2) }}%</td>
+                  <td class="num">{{ r.sharpe ?? '—' }}</td>
+                  <td class="num k">{{ r.n }}</td>
+                </tr>
+              </tbody>
+            </table>
+            <div class="diff" v-if="g.vs != null">
+              <span>年化比月末 <b :class="tone(g.vs)">{{ signed(g.vs) }}pp</b></span>
+              <span v-if="g.vsMdd != null">回撤 <b :class="tone(g.vsMdd)">{{ signed(g.vsMdd) }}pp</b></span>
             </div>
           </div>
-          <p class="k pad" v-if="allRows.some(r => r.short)">不满一年：只看区间收益和波动，年化和夏普没有意义</p>
+          <p class="k pad" v-if="anyShort">* 区间不足一年：年化按实际天数换算（仅供参考），夏普不显示</p>
         </div>
         <div class="card">
-          <div class="ct"><b>累计收益</b><span class="k">{{ cad === 'mine' ? '账户建立起' : start.slice(0, 4) + ' 年起' }}</span></div>
-          <MultiLine :series="allCurves" :height="320" :colors="colors" :dashed="Object.keys(allCurves).filter(isBase)" />
+          <div class="ct"><b>区间涨跌 / 回撤</b><span class="k">基准 {{ (axis[baseIdx] || '').replace(/-/g, '/') }} = 0%；下方面板为距历史最高点的回撤</span></div>
+          <!-- 与全站同一套区间控件（原来这页只有调仓节奏，没有时间区间） -->
+          <RangeBar :range="range" :period="period" :periods="periods"
+                    @update:range="setRange" @update:period="setPeriod" />
+          <!-- 双面板共用一条时间轴：上面区间涨跌、下面回撤，拖拽缩放天然同步，只剩一份控件和一条状态行 -->
+          <MultiLine :series="curvesChg" :second="ddCurves" second-label="回撤"
+                     :second-ratio="0.28" :height="400" :colors="colors"
+                     :dashed="Object.keys(curvesAgg).filter(isBase)"
+                     :window="win" :reset-key="resetKey" group="backtest" />
+          <!-- 曲线下面这张小表：一行一个策略，数值右对齐，别再挤成一条会换行的长句 -->
+          <!-- 表头写清口径：这些数都是「当前调仓节奏」的，月末只出现在最后两列的差里 -->
+          <p class="rsum-cap">
+            区间指标 · <b>{{ cadLabel }}</b>调仓口径<template v-if="rangeStats.some(t => t.cum != null)">（最后两列是与月末对照的差）</template>
+          </p>
+          <table class="rsum">
+            <thead><tr>
+              <th>策略</th><th>年化</th><th>最大回撤</th>
+              <th class="opt">累计超额</th><th class="opt">比月末回撤</th>
+            </tr></thead>
+            <tbody>
+              <tr v-for="t in rangeStats" :key="t.name">
+                <td class="nm"><i :style="{ background: colorOf(t.name) }"></i>{{ t.name }}</td>
+                <td class="num" :class="tone(t.ann)">{{ t.ann == null ? '—' : pct(t.ann) }}</td>
+                <td class="num down">{{ t.mdd ? t.mdd.toFixed(2) + '%' : '0.00%' }}</td>
+                <td class="num opt" :class="tone(t.cum)">{{ t.cum == null ? '—' : signed(t.cum) + 'pp' }}</td>
+                <td class="num opt" :class="tone(t.vsMdd)">{{ t.vsMdd == null ? '—' : signed(t.vsMdd) + 'pp' }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="rsum-note" v-if="rangeStats.some(t => t.cum != null)">累计超额 = 每期「{{ cadLabel }} − 月末」相加，和下面那行「区间累计」是同一个数；比月末回撤 = 区间最大回撤之差</p>
         </div>
-        <van-collapse v-model="showMore" class="more">
-          <van-collapse-item name="p" title="月 / 年收益（月末调仓基准）">
-            <span class="seg2 pt"><button v-for="p in [['monthly','月度'],['yearly','年度']]" :key="p[0]"
-              :class="{ on: pk === p[0] }" @click="pk = p[0]">{{ p[1] }}</button></span>
-            <div class="ptab" v-if="shownPeriods.length">
-              <div class="ph" :style="gridCols"><span>期间</span><span v-for="s in baseNames" :key="s">{{ s.replace(' · 月末', '') }}</span></div>
-              <div v-for="r in shownPeriods" :key="r.k" class="pr" :style="gridCols">
-                <span class="num">{{ r.k }}</span>
-                <span v-for="x in shownPeriodsRow(r)" :key="x.k" class="num" :class="tone(x.v)">{{ x.v == null ? '—' : pct(x.v) }}</span>
-              </div>
-            </div>
-            <p v-else class="empty-tip">切换一下调仓节奏就能看到对照数据</p>
-          </van-collapse-item>
-          <van-collapse-item name="g" title="调频影响（相对月末调仓）" v-if="d.gaps?.length">
-            <div v-for="g in d.gaps" :key="g.name" class="grow">
-              <b>{{ g.name }}</b>
-              <span>年化 {{ pct(g.cagr) }} <em :class="tone(g.vs)">{{ signed(g.vs) }}pp</em></span>
-              <span>回撤 {{ g.mdd.toFixed(2) }}% <em :class="tone(g.vs_mdd)">{{ signed(g.vs_mdd) }}pp</em></span>
-            </div>
-            <p class="empty-tip">差值 = 当前节奏 − 月末调仓；绝对值与差值并列，避免只看差多少却不知道原本多少</p>
-          </van-collapse-item>
-        </van-collapse>
-      </div>
-      <!-- 策略工厂 · 自定义权重：选基金、填百分比，与内置三策略同起点对比 -->
-      <div class="card cp">
-        <div class="ct"><b>策略工厂 · 自定义权重</b><span class="k">内置三策略 + 你的组合，同起点对比</span></div>
-        <div class="cp-row">
-          <span class="lb">策略名</span>
-          <input v-model="cpName" class="nm" placeholder="我的组合" maxlength="16" />
-          <span class="lb">起点</span>
-          <div class="chips"><span v-for="s in starts" :key="s" class="chip" :class="{ on: cpStart === s }" @click="cpStart = s">{{ s.slice(0, 4) }} 年起</span></div>
-          <span class="lb">再平衡</span>
-          <div class="chips"><span v-for="f in cpFreqs" :key="f.k" class="chip" :class="{ on: cpFreq === f.k }" @click="cpFreq = f.k">{{ f.t }}</span></div>
+        <div class="card">
+          <!-- 不再单独给这图配「日/月/年」控件：跟着上面那套 区间 + 日线/月线/年线 走，全页一套控件 -->
+          <div class="ct"><b>单期收益</b><span class="k">每期相对上一期 · 跟随上面的区间与粒度</span></div>
+          <p v-if="!barCount" class="empty-tip">这个区间不够划分出一期，换个更长的区间试试</p>
+          <Heatmap v-else :series="barCurves" />
         </div>
-        <div class="cp-w">
-          <div v-for="a in cpAssets" :key="a.asset" class="wi">
-            <div class="wn"><b>{{ a.name }}</b><small class="num">{{ a.code }}</small></div>
-            <div class="wbar"><i :style="{ width: wPct(a.asset) + '%' }"></i></div>
-            <div class="win"><input type="number" min="0" max="100" step="1" v-model.number="cpW[a.asset]" /><span>%</span></div>
-          </div>
+        <div class="card" v-if="Object.keys(excessCurves).length">
+          <!-- 「多调这几次值不值」：把每期（当前节奏 − 月末）累加起来画成线，在 0 上方就是赚的 -->
+          <div class="ct"><b>多调这几次，值不值</b><span class="k">累计（当前节奏 − 月末收益）· 线在 0 上方 = 多调划算</span></div>
+          <MultiLine :series="excessCurves" :height="220" :colors="excessColors"
+                     :note="period === '日线' ? '日线颗粒度噪声大，切月线看趋势更清楚' : ''" />
+          <p class="sum-excess">
+            区间累计：
+            <span v-for="t in excessTotals" :key="t.name" class="se">
+              <i :style="{ background: colorOf(t.name) }"></i>{{ t.name }}
+              <b class="num" :class="tone(t.v)">{{ t.v == null ? '—' : signed(t.v) + 'pp' }}</b>
+            </span>
+          </p>
         </div>
-        <div class="cp-foot">
-          <span :class="{ warn: cpTotal <= 0 }">合计 {{ cpTotal.toFixed(1) }}% · 按合计自动归一到 100%</span>
-          <button class="btn" @click="saveCp">保存为我的策略</button>
-          <button class="btn primary" :disabled="cpLoading || cpTotal <= 0" @click="runCp">运行对比</button>
-        </div>
-        <div v-if="cpSavedList.length" class="cp-saved">
-          <span class="k">已保存</span>
-          <span v-for="n in cpSavedList" :key="n" class="chip" @click="loadCp(n)">{{ n }}<i @click.stop="delCp(n)">×</i></span>
-        </div>
-        <van-loading v-if="cpLoading" class="ld" vertical>回测计算中…</van-loading>
-        <p v-else-if="cpErr" class="empty-tip">{{ cpErr }}</p>
-        <div v-else-if="cpRes" class="cp-added">
-          <van-icon name="passed" /> 已把「{{ cpRes.name }}」加入上方的指标卡和累计收益曲线，可回到上面看对比。
-          <a @click="clearCp">移除</a>
-        </div>
+
       </div>
     </div>
   </div>
 </template>
 <script setup>
-import { computed, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { showConfirmDialog } from 'vant'
 import { get, post } from '../api'
 import { signed, pct, tone } from '../fmt'
+import { loadStrategies, saveStrategies } from '../strategyStore'
+import { SERIES_COLORS } from '../utils/chartTheme'
 import SubBar from '../components/SubBar.vue'
 import MultiLine from '../components/MultiLine.vue'
+import Heatmap from '../components/Heatmap.vue'
+import RangeBar from '../components/RangeBar.vue'
+import { aggregate, aggregateSeries, unionDates, windowForRange, rangeStartIndex, rebaseSeries } from '../utils/series'
+
 const aid = useRoute().params.aid
+const router = useRouter()
 const cads = [{ k: 'monthly', t: '每月末' }, { k: 'biweekly', t: '每两周' }, { k: 'weekly', t: '每周' }, { k: 'mine', t: '我的操作日' }]
-const starts = ['2015-01-01', '2018-01-01', '2020-01-01', '2023-01-01']
+const years = Array.from({ length: new Date().getFullYear() - 2015 + 1 }, (_, i) => 2015 + i)
 const cad = ref(sessionStorage.getItem('aw-bt-cad') || 'monthly'), start = ref(sessionStorage.getItem('aw-bt-start') || '2015-01-01')
 const d = ref(null), loading = ref(false), err = ref('')
+// 连续切起点 / 调仓节奏时，只认最后一次请求的结果，避免旧响应回来覆盖新区间
+let btSeq = 0
 watch([cad, start], async () => {
+  const seq = ++btSeq
   sessionStorage.setItem('aw-bt-cad', cad.value); sessionStorage.setItem('aw-bt-start', start.value)
   loading.value = true; err.value = ''
-  try { d.value = await get(`/api/market/backtest?start=${start.value}&cadence=${cad.value}&acct=${aid}`) }
-  catch (e) { err.value = e.message; d.value = null }
-  finally { loading.value = false }
+  try {
+    const r = await get(`/api/market/backtest?start=${start.value}&cadence=${cad.value}&acct=${aid}`)
+    if (seq !== btSeq) return
+    d.value = r
+  } catch (e) {
+    if (seq !== btSeq) return
+    err.value = e.message; d.value = null
+  } finally {
+    if (seq === btSeq) loading.value = false
+  }
 }, { immediate: true })
-// 同一策略同色：对照组（月末）用虚线
-const PAL = { 保守增强: '#1E40AF', 风险平价: '#F59E0B', V3c: '#8B5CF6' }
-const colorOf = n => Object.entries(PAL).find(([k]) => n.includes(k))?.[1] || '#64748B'
-const isBase = n => cad.value !== 'monthly' && n.endsWith('· 月末')
-const custom = ref(null)   // 自定义策略：只把「多出来的那一条」并进主视图，不再另起一套图/卡
-const allRows = computed(() => [...(d.value?.rows || []), ...(custom.value ? [custom.value.row] : [])])
-const allCurves = computed(() => ({ ...(d.value?.curves || {}),
-  ...(custom.value ? { [custom.value.name]: custom.value.curve } : {}) }))
-const colors = computed(() => Object.keys(allCurves.value).map(n => n === custom.value?.name ? '#0EA5E9' : colorOf(n)))
-const showMore = ref([]), pk = ref('monthly')
-const baseNames = computed(() => {
-  const a = Object.keys(d.value?.periods?.monthly?.[0]?.v || {})
-  const names = a.length ? a : Object.keys(d.value?.periods?.yearly?.[0]?.v || {})
-  return custom.value ? [...names, custom.value.name] : names
-})
-const shownPeriods = computed(() => d.value?.periods?.[pk.value] || [])
-const gridCols = computed(() => ({ gridTemplateColumns: `1fr repeat(${baseNames.value.length}, minmax(0,1fr))` }))
-// 月/年表里补上自定义策略那一列（值来自 custom-backtest 的 periods）
-function shownPeriodsRow(r) {
-  return baseNames.value.map(k => ({
-    k, v: r.v[k] ?? custom.value?.periods?.[pk.value]?.find(x => x.k === r.k)?.v?.[custom.value.name] ?? null
-  }))
-}
 
-// ---- 策略工厂 · 自定义权重 ----
-const cpAssets = ref([]), cpW = ref({}), cpName = ref('我的组合')
-const cpStart = ref('2015-01-01'), cpFreq = ref('M')
-const cpFreqs = [{ k: 'M', t: '每月' }, { k: 'Q', t: '每季' }, { k: 'N', t: '不再平衡' }]
-const cpLoading = ref(false), cpErr = ref(''), cpRes = ref(null)
-const cpColors = ['#1E40AF', '#F59E0B', '#8B5CF6', '#0EA5E9']
-get(`/api/acct/${aid}/weights`).then(x => {
-  cpAssets.value = (x.rows || []).map(r => ({ asset: r.asset, name: r.name, code: r.code }))
-  const n = cpAssets.value.length, base = +(100 / n).toFixed(1)
-  cpW.value = Object.fromEntries(cpAssets.value.map((a, i) =>
-    [a.asset, i === n - 1 ? +(100 - base * (n - 1)).toFixed(1) : base]))
-})
-const cpTotal = computed(() => Object.values(cpW.value).reduce((s, v) => s + (Number(v) || 0), 0))
-const wPct = k => cpTotal.value > 0 ? Math.max(0, Math.min(100, (Number(cpW.value[k]) || 0) / cpTotal.value * 100)) : 0
-const CP_KEY = 'aw-cp-saved'
-const cpSaved = ref(JSON.parse(localStorage.getItem(CP_KEY) || '{}'))
-const cpSavedList = computed(() => Object.keys(cpSaved.value))
-function saveCp() {
-  const n = (cpName.value || '').trim()
-  if (!n) { cpErr.value = '先给策略起个名字'; return }
-  if (cpTotal.value <= 0) { cpErr.value = '权重合计必须大于 0'; return }
-  cpSaved.value = { ...cpSaved.value, [n]: { weights: { ...cpW.value }, start: cpStart.value, freq: cpFreq.value } }
-  localStorage.setItem(CP_KEY, JSON.stringify(cpSaved.value))
-  cpErr.value = ''
-}
-function loadCp(n) {
-  const c = cpSaved.value[n]; if (!c) return
-  cpW.value = { ...c.weights }; cpStart.value = c.start; cpFreq.value = c.freq; cpName.value = n
-}
-function delCp(n) {
-  const o = { ...cpSaved.value }; delete o[n]
-  cpSaved.value = o; localStorage.setItem(CP_KEY, JSON.stringify(o))
-}
-async function runCp() {
+// ---- 我的策略：多条自定义策略并入同一套指标卡 / 曲线 / 月年表 ----
+const strategies = ref(loadStrategies()), customs = ref([])
+const cpLoading = ref(false), cpErr = ref('')
+const freqLabel = f => ({ M: '每月再平衡', Q: '每季再平衡', N: '不再平衡' })[f] || '每月再平衡'
+const CUSTOM_PAL = ['#0EA5E9', '#DB2777', '#059669', '#D97706', '#7C3AED', '#0891B2']
+const customColor = id => CUSTOM_PAL[Math.max(0, strategies.value.findIndex(s => s.id === id)) % CUSTOM_PAL.length]
+
+let cpSeq = 0
+async function refreshCustoms() {
+  const seq = ++cpSeq
+  const list = loadStrategies()
+  strategies.value = list
+  if (!list.length) { customs.value = []; cpErr.value = ''; cpLoading.value = false; return }
   cpLoading.value = true; cpErr.value = ''
   try {
-    const r = await post('/api/market/custom-backtest', {
-      weights: cpW.value, start: cpStart.value, freq: cpFreq.value, name: cpName.value.trim() || '我的组合'
-    })
-    const name = r.rows[r.rows.length - 1].name
-    custom.value = { name, row: r.rows[r.rows.length - 1], curve: r.curves[name], periods: r.periods }
-    cpRes.value = { name }
-  } catch (e) { cpErr.value = e.message; cpRes.value = null }
-  finally { cpLoading.value = false }
+    const rs = await Promise.all(list.map(async s => {
+      try {
+        const r = await post('/api/market/custom-backtest', {
+          funds: s.funds.map(f => ({ key: f.key, weight: f.weight, name: f.name, code: f.code })),
+          start: start.value, freq: s.freq || 'M', name: s.name
+        })
+        return { id: s.id, name: s.name, r }
+      } catch (e) { return { id: s.id, name: s.name, err: e.message } }
+    }))
+    if (seq !== cpSeq) return
+    const out = [], errs = []
+    for (const x of rs) {
+      if (x.err) { errs.push(`${x.name}：${x.err}`); continue }
+      const r = x.r, row = r.rows[r.rows.length - 1]
+      out.push({ id: x.id, name: x.name, row, curve: r.curves[x.name],
+                 periods: r.periods, startActual: r.start_actual })
+    }
+    customs.value = out
+    cpErr.value = errs.join('；')
+  } finally {
+    if (seq === cpSeq) cpLoading.value = false
+  }
 }
-function clearCp() { custom.value = null; cpRes.value = null }
+onMounted(refreshCustoms)
+// 切起点时先撤掉旧区间的自定义曲线，否则旧日期会把 x 轴并集拉回旧年份，看着像没切
+watch(start, () => { customs.value = []; refreshCustoms() })
+
+function newStrategy() { router.push(`/a/${aid}/market/strategy-new`) }
+function editStrategy(s) { router.push({ path: `/a/${aid}/market/strategy-new`, query: { edit: s.id } }) }
+async function delStrategy(s) {
+  try { await showConfirmDialog({ title: '删除策略', message: `确定删除「${s.name}」吗？` }) }
+  catch { return }
+  saveStrategies(loadStrategies().filter(x => x.id !== s.id))
+  refreshCustoms()
+}
+const startNote = computed(() => {
+  const diff = customs.value.filter(c => c.startActual && c.startActual !== start.value)
+  if (!diff.length) return ''
+  return diff.map(c => `「${c.name}」因所选基金成立较晚，实际从 ${c.startActual} 开始`).join('；') +
+    '。内置三策略也按同一区间计算，保证可比。'
+})
+
+// 同一策略同色：对照组（月末）用虚线；自定义策略按保存顺序取色
+const PAL = { 保守增强: SERIES_COLORS[0], 风险平价: SERIES_COLORS[1], V3c: SERIES_COLORS[2] }
+const colorOf = n => {
+  const c = customs.value.find(x => x.name === n)
+  return c ? customColor(c.id) : (Object.entries(PAL).find(([k]) => n.includes(k))?.[1] || SERIES_COLORS[4])
+}
+const isBase = n => cad.value !== 'monthly' && n.endsWith('· 月末')
+const allRows = computed(() => [...(d.value?.rows || []), ...customs.value.map(c => c.row)])
+// 按策略分组：同一策略的「当前节奏 / 月末」放进同一张卡，上下两行直接比
+const groups = computed(() => {
+  const m = new Map()
+  for (const r of allRows.value) {
+    const base = r.name.replace(/ · [^·]+$/, '')
+    if (!m.has(base)) m.set(base, [])
+    m.get(base).push(r)
+  }
+  return [...m.entries()].map(([name, rows]) => ({
+    name,
+    rows: [...rows].sort((a, b) => (isBase(a.name) ? 1 : 0) - (isBase(b.name) ? 1 : 0)),
+    vs: rows.find(r => r.vs != null)?.vs ?? null,
+    vsMdd: rows.find(r => r.vs_mdd != null)?.vs_mdd ?? null,
+  }))
+})
+const freqOf = n => (n.includes(' · ') ? n.split(' · ').pop() : '')
+// 当前调仓节奏的中文名（表头要用它说清「这是哪种节奏的年化」）
+const cadLabel = computed(() => ({ monthly: '月末', biweekly: '双周', weekly: '每周', mine: '我的操作日' }[cad.value] || '当前节奏'))
+const anyShort = computed(() => allRows.value.some(r => r.short))
+const allCurves = computed(() => ({ ...(d.value?.curves || {}),
+  ...Object.fromEntries(customs.value.map(c => [c.name, c.curve])) }))
+const colors = computed(() => Object.keys(curvesAgg.value).map(n => colorOf(n)))
+// 时间区间：全站统一 8 档 + 日/月/年线；回测曲线从 2015 起，默认「近1年」
+const periods = ['日线', '月线', '年线']
+const range = ref('近1年'), period = ref('日线'), bump = ref(0)
+const curvesAgg = computed(() => aggregateSeries(allCurves.value, period.value))
+const axis = computed(() => unionDates(curvesAgg.value))
+const baseIdx = computed(() => rangeStartIndex(axis.value, range.value))
+// 曲线以「区间基准日」为 0%：选近1月/今年来才看得出这段时间各策略涨跌差别，
+// 否则 Y 轴还是 2019 年起的累计收益（79%~110%），几条线挤成平行线看不出谁猛
+const curvesChg = computed(() => rebaseSeries(curvesAgg.value, axis.value, baseIdx.value))
+// 回撤 = 相对「历史最高点」的跌幅（水下曲线，越跌越负）。
+// 不从区间基准日算：那样往左拖出区间后下方面板会整片空掉，而且最大值要跟卡片的最大回撤对得上。
+const ddCurves = computed(() => {
+  const ax = axis.value
+  const out = {}
+  for (const [n, s] of Object.entries(curvesAgg.value)) {
+    const m = new Map(s.dates.map((d, i) => [d, s.ret[i]]))
+    let peak = 0
+    out[n] = { dates: ax.slice(), ret: ax.map(d => {
+      const v = m.get(d)
+      if (v == null) return null
+      const g = 1 + v / 100
+      peak = Math.max(peak, g)
+      return Math.round((g / peak - 1) * 10000) / 100
+    }) }
+  }
+  return out
+})
+const win = computed(() => windowForRange(axis.value, range.value))
+// 单期收益柱：把区间内的曲线按 日/月/年 取期末值，再算「本期 / 上期 - 1」
+// 粒度直接跟页面的「日线/月线/年线」，不再单独一套开关
+const barUnit = computed(() => period.value.replace('线', ''))
+const barCurves = computed(() => {
+  const ax = axis.value, b = baseIdx.value
+  const out = {}
+  for (const [n, s] of Object.entries(curvesAgg.value)) {
+    const m = new Map(s.dates.map((d, i) => [d, s.ret[i]]))
+    const ds = [], vs = []
+    for (let i = b; i < ax.length; i++) { const v = m.get(ax[i]); if (v != null) { ds.push(ax[i]); vs.push(v) } }
+    const agg = aggregate(ds, vs, barUnit.value)
+    const baseVal = m.get(ax[b])              // 区间基准日 = 0%，和上面图表同一口径
+    const chg = agg.values.map((v, i) => {
+      const prev = i === 0 ? baseVal : agg.values[i - 1]
+      if (prev == null || v == null) return null
+      return Math.round(((1 + v / 100) / (1 + prev / 100) - 1) * 10000) / 100
+    })
+    // 真实日期给排序/窗口用，「2026年10月」这种标签只给横轴显示用
+    out[n] = { dates: agg.dates, labels: agg.labels, ret: chg }
+  }
+  return out
+})
+const barCount = computed(() => Object.values(barCurves.value)[0]?.dates.length || 0)
+
+// 相对月末的超额：同一策略「当前节奏」与「月末」两条曲线，按同一批期间算收益再相减（同策略同色）
+const pairs = computed(() => {
+  const names = Object.keys(curvesAgg.value)
+  const strip = n => n.replace(/ · [^·]+$/, '')
+  return names.filter(n => n.includes(' · ') && !isBase(n)).map(n => {
+    const base = names.find(x => isBase(x) && strip(x) === strip(n))
+    return base ? { name: n, base } : null
+  }).filter(Boolean)
+})
+const excessCurves = computed(() => {
+  const ax = axis.value, b = baseIdx.value, unit = barUnit.value
+  const periodRet = s => {
+    const m = new Map(s.dates.map((d, i) => [d, s.ret[i]]))
+    const ds = [], vs = []
+    for (let i = b; i < ax.length; i++) { const v = m.get(ax[i]); if (v != null) { ds.push(ax[i]); vs.push(v) } }
+    const agg = aggregate(ds, vs, unit)
+    const baseVal = m.get(ax[b])
+    return { dates: agg.dates, labels: agg.labels,
+      ret: agg.values.map((v, i) => {
+        const prev = i === 0 ? baseVal : agg.values[i - 1]
+        if (prev == null || v == null) return null
+        return ((1 + v / 100) / (1 + prev / 100) - 1) * 100
+      }) }
+  }
+  const skip = 0
+  const out = {}
+  for (const { name, base } of pairs.value) {
+    const a = periodRet(curvesAgg.value[name]), c = periodRet(curvesAgg.value[base])
+    // 逐期差值累加成「累计超额」：线在 0 上方 = 这段时间多调是赚的，一路往下 = 白折腾
+    let acc = 0
+    const ret = a.ret.map((v, i) => {
+      if (v == null || c.ret[i] == null) return null
+      acc += (v - c.ret[i])
+      return Math.round(acc * 100) / 100
+    })
+    out[name.replace(/ · [^·]+$/, '')] = { dates: a.dates.slice(skip), labels: a.labels.slice(skip), ret: ret.slice(skip) }
+  }
+  return out
+})
+const excessColors = computed(() => Object.keys(excessCurves.value).map(n => colorOf(n)))
+// 所选区间的年化（按区间内的交易日折算），给「区间涨跌」卡片下面直接读数用
+// 所选区间的两个数：年化（按真实交易日数折算）与区间最大回撤（区间内从高点的最深跌幅）
+const rangeStats = computed(() => {
+  const ax = axis.value, b = baseIdx.value
+  const raw = unionDates(allCurves.value)
+  const i0 = raw.indexOf(ax[b]), i1 = raw.indexOf(ax[ax.length - 1])
+  const days = i1 - i0
+  if (days < 1) return []
+  // 先把所有曲线的区间指标都算出来，再给「当前节奏」配上它自己的月末对照算差
+  const one = (n) => {
+    const s = curvesAgg.value[n]
+    const m = new Map(s.dates.map((d, i) => [d, s.ret[i]]))
+    const v0 = m.get(ax[b]), v1 = m.get(ax[ax.length - 1])
+    // 区间内最大回撤：只看 base..end 这段，峰值也从 base 起算
+    let peak = v0 == null ? null : 1 + v0 / 100
+    let mdd = 0
+    for (let i = b; i < ax.length; i++) {
+      const v = m.get(ax[i])
+      if (v == null) continue
+      const g = 1 + v / 100
+      if (peak == null || g > peak) peak = g
+      if (peak > 0) mdd = Math.min(mdd, g / peak - 1)
+    }
+    const ann = (v0 == null || v1 == null) ? null : (Math.pow((1 + v1 / 100) / (1 + v0 / 100), 252 / days) - 1) * 100
+    return { ann, mdd: mdd * 100 }
+  }
+  const all = {}
+  for (const n of Object.keys(curvesAgg.value)) all[n] = one(n)
+  const strip = n => n.replace(/ · [^·]+$/, '')
+  return Object.keys(curvesAgg.value)
+    .filter(n => !isBase(n))
+    .map(n => {
+      const base = Object.keys(all).find(x => isBase(x) && strip(x) === strip(n))
+      const b0 = base ? all[base] : null
+      return { name: strip(n), ...all[n],
+        // 累计超额直接复用下方「区间累计」那组数（excessTotals），两边永远同一个值
+        cum: excessTotals.value.find(x => x.name === strip(n))?.v ?? null,
+        vsMdd: b0 ? all[n].mdd - b0.mdd : null }
+    })
+})
+// 每条线的终点值（全区间累计超额），卡片底部直接给数字，不用去读坐标轴
+const excessTotals = computed(() => Object.keys(excessCurves.value).map(n => {
+  const arr = excessCurves.value[n].ret.filter(v => v != null)
+  return { name: n, v: arr.length ? arr[arr.length - 1] : null }
+}))
+const resetKey = computed(() => `${range.value}|${period.value}|${bump.value}`)
+const setRange = r => { if (range.value === r) bump.value++; else range.value = r }
+const setPeriod = p => { if (period.value === p) bump.value++; else period.value = p }
+const showMore = ref([])
 </script>
 <style scoped>
 .ctl .row{ display:flex; align-items:center; gap:8px; margin-bottom:8px; }
@@ -186,57 +391,80 @@ function clearCp() { custom.value = null; cpRes.value = null }
 .k{ font-size:12px; color:var(--muted); line-height:1.6; margin:0; }
 .pad{ margin:8px 18px; }
 .ld{ margin:40px 0; }
+.yr{ border:1px solid var(--line); border-radius:9px; padding:6px 10px; font-size:13px; color:var(--ink); background:#fff; }
+.warn{ font-size:12px; color:var(--up); line-height:1.6; margin:8px 0 0; }
 .rcard{ padding:12px 14px; }
 .rcard.base{ background:#FAFAFB; }
 .r1{ display:flex; align-items:center; gap:8px; font-size:14.5px; }
 .r1 i{ width:10px; height:10px; border-radius:5px; } .r1 .k{ margin-left:auto; }
-.r2{ display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin-top:10px; }
+/* 3~4 项：等分列 + 居中；用 auto-fit 而不是写死 4 列，只有 3 项时不会空出一整列 */
+.r2{ display:grid; grid-template-columns:repeat(auto-fit,minmax(0,1fr)); gap:8px 14px; margin-top:10px; }
+.r2 > div{ min-width:0; text-align:center; }
 .r2 span{ display:block; font-size:11.5px; color:var(--muted); } .r2 b{ display:block; font-size:15px; margin-top:2px; }
-.ct{ display:flex; justify-content:space-between; align-items:baseline; font-size:15px; margin-bottom:8px; }
+.ct{ display:flex; justify-content:space-between; align-items:baseline; font-size:15px; margin-bottom:8px; gap:2px 10px; }
+/* 窄屏右侧说明太长会把「区间涨跌」挤成两行，标题不许断行 */
+.ct > b{ white-space:nowrap; }
+.st-sub{ display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; margin:14px 0 6px; font-size:13px; font-weight:500; }
+.st-sub span{ font-size:11.5px; font-weight:400; color:var(--muted); }
 .more{ margin:16px 12px 0; border-radius:12px; overflow:hidden; }
 .more :deep(.van-collapse-item__content){ padding:10px 12px; }
 .pt{ margin-bottom:8px; }
-.ptab{ font-size:12.5px; }
-.ph, .pr{ display:grid; grid-template-columns:1fr repeat(3,minmax(0,1fr)); gap:4px; padding:6px 0; border-bottom:1px solid var(--line); }
+.ptab{ font-size:12.5px; overflow-x:auto; }
+.ph, .pr{ display:grid; grid-template-columns:1fr repeat(3,minmax(0,1fr)); gap:4px; padding:6px 0; border-bottom:1px solid var(--line); min-width:480px; }
 .ph{ color:var(--muted); font-size:11.5px; }
 .ph span:not(:first-child), .pr span:not(:first-child){ text-align:right; }
 .grow{ display:flex; flex-wrap:wrap; gap:6px 14px; padding:8px 0; border-bottom:1px solid var(--line); font-size:12.5px; }
 .grow b{ flex:0 0 100%; } .grow em{ font-style:normal; margin-left:4px; }
 
-@media (min-width:900px){
-  .metric-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; padding:0 12px; }
-  .metric-grid .card{ margin:0; }
-  .metric-grid + .k{ grid-column:1/-1; }
-}
+/* 我的策略 */
+.mine .ct{ align-items:center; }
+.btn.sm{ border:1px solid var(--brand); background:var(--brand); color:#fff; border-radius:9px;
+  padding:7px 12px; font-size:12.5px; font-weight:600; cursor:pointer; }
+.slist{ margin-top:6px; }
+.srow{ display:flex; align-items:center; gap:9px; padding:9px 0; border-bottom:1px solid var(--line); }
+.srow:last-child{ border-bottom:0; }
+.srow i{ flex:0 0 9px; width:9px; height:9px; border-radius:5px; }
+.sinf{ flex:1 1 auto; min-width:0; }
+.sinf b{ display:block; font-size:13.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sinf small{ display:block; font-size:11px; color:var(--muted); margin-top:2px; }
+.srow a{ flex:0 0 auto; font-size:12px; color:var(--brand); cursor:pointer; padding:4px 2px; }
 
-/* 策略工厂 */
-.cp{ margin-top:16px; padding:14px 16px; }
-.cp .ct{ display:flex; justify-content:space-between; align-items:baseline; gap:10px; flex-wrap:wrap; }
-.cp .ct.sub{ margin:16px 0 6px; font-size:13px; }
-.cp-row{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:10px; }
-.cp-row .lb{ flex:0 0 auto; }
-.cp-row .chips{ padding:0; }
-.cp-row .nm{ width:120px; border:1px solid var(--line); border-radius:8px; padding:5px 8px; font-size:13px; }
-.cp-w{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px 16px; margin-top:14px; }
-.wi{ display:flex; align-items:center; gap:8px; min-width:0; }
-.wn{ flex:1 1 auto; min-width:0; }
-.wn b{ display:block; font-size:12.5px; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.wn small{ font-size:11px; color:var(--muted); }
-.wbar{ flex:0 0 54px; height:6px; border-radius:3px; background:#EEF2F7; overflow:hidden; }
-.wbar i{ display:block; height:100%; background:var(--brand); border-radius:3px; }
-.win{ flex:0 0 62px; display:flex; align-items:center; gap:2px; }
-.win input{ width:46px; border:1px solid var(--line); border-radius:7px; padding:4px 5px; font-size:12.5px; text-align:right; }
-.cp-foot{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:14px; }
-.cp-foot span{ font-size:12px; color:var(--muted); margin-right:auto; }
-.cp-foot span.warn{ color:var(--up); }
-.btn{ border:1px solid var(--line); background:#fff; color:var(--sub); border-radius:9px; padding:7px 12px; font-size:12.5px; cursor:pointer; }
-.btn.primary{ background:var(--brand); border-color:var(--brand); color:#fff; }
-.btn:disabled{ opacity:.5; cursor:default; }
-.cp-saved{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:10px; }
-.cp-saved .chip i{ font-style:normal; margin-left:6px; color:var(--muted); }
-.cp-added{ display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-top:12px; padding:9px 11px;
-  background:var(--brand-soft); border-radius:9px; font-size:12.5px; color:var(--brand); }
-.cp-added a{ margin-left:auto; color:var(--brand); cursor:pointer; text-decoration:underline; }
-.cp-note{ margin-top:10px; }
-@media (max-width:620px){ .cp-w{ grid-template-columns:1fr; } }
+/* 策略卡：一个策略一张，内部用两行表格对齐两种节奏 */
+.mtab{ width:100%; border-collapse:collapse; font-size:12px; margin-top:10px; font-variant-numeric:tabular-nums; }
+.mtab th{ font-weight:400; font-size:11px; color:var(--muted); text-align:right; padding:0 5px 6px; }
+.mtab .ast{ color:var(--muted); font-size:9px; vertical-align:super; }
+.mtab th:first-child{ text-align:left; }
+.mtab td{ text-align:right; padding:7px 5px; border-top:1px solid var(--line); }
+.mtab td:first-child{ text-align:left; color:var(--sub); font-size:11.5px; white-space:nowrap; }
+.diff{ display:flex; gap:12px; margin-top:7px; font-size:11.5px; color:var(--muted); }
+.rsum{ width:100%; border-collapse:collapse; margin-top:10px; padding-top:9px; border-top:1px dashed var(--line); font-size:12px; font-variant-numeric:tabular-nums; }
+.rsum th{ font-weight:400; font-size:11px; color:var(--muted); text-align:right; padding:0 0 4px; }
+.rsum th:first-child{ text-align:left; }
+.rsum td{ padding:3px 0; text-align:right; }
+.rsum td.nm{ text-align:left; color:var(--sub); font-size:11.5px; display:flex; align-items:center; gap:6px; }
+.rsum td.nm i{ width:8px; height:8px; border-radius:50%; flex:0 0 auto; }
+.rsum-cap{ margin:10px 0 0; padding-top:9px; border-top:1px dashed var(--line); font-size:11.5px; color:var(--muted); }
+.rsum-cap b{ color:var(--sub); font-weight:600; }
+.rsum{ margin-top:4px; border-top:0; padding-top:0; }
+.rsum-note{ margin:6px 0 0; font-size:11px; color:var(--muted); }
+@media (max-width:560px){ .rsum .opt{ display:none; } }
+.sum-excess{ display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 14px; margin:8px 0 0; font-size:11.5px; color:var(--muted); }
+.sum-excess .se{ display:inline-flex; align-items:center; gap:5px; }
+.sum-excess .se i{ width:8px; height:8px; border-radius:50%; display:inline-block; }
+.sum-excess .se b{ font-size:12px; }
+.sum-excess .se{ display:inline-flex; align-items:center; gap:5px; }
+.sum-excess .se i{ width:8px; height:8px; border-radius:50%; display:inline-block; }
+.sum-excess .se b{ font-size:12px; }
+.diff b{ font-variant-numeric:tabular-nums; }
+/* 策略卡栅格：任何宽度都用同一套规则，每张卡至少 300px 宽——
+   卡内是 4~5 列表格，窄于 300 就会挤成一团（用户 2026-11-08：「怎么还粘着呢」）。
+   auto-fit 会自动从 3 列降到 2 列、1 列，不再靠断点猜。 */
+/* 注意 margin-top：卡片自己 margin:0 了，栅格再不给上边距，就会和上面「我的策略」卡片贴死 */
+.metric-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:12px; padding:0 12px; margin-top:12px; }
+.metric-grid .card{ margin:0; }
+.metric-grid > .k.pad{ grid-column:1/-1; }   /* 说明文字要横跨整行，别被挤成一列 */
+@media (max-width:620px){
+  .ctl .row{ flex-wrap:wrap; }
+  .ctl .row .k{ flex:0 0 100%; }
+}
 </style>

@@ -3,7 +3,7 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .venv/
-myenv/
+myenv
 uv.lock
 
 # 输出（保留目录但不追踪内容）

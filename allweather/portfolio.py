@@ -17,8 +17,12 @@ from .config import ETF_META
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "streamlit_app"))
 import fund_lookup as FL  # noqa: E402
 
+# 账户模型：只有「买入 / 卖出」，没有资金转入转出，账户本身不持有现金 ——
+# 钱全部在基金里。本金（净投入）= Σ买入金额 − Σ卖出净额，由买卖直接推导。
+# 下面两个常量仅用于「忽略」历史台账里遗留的资金流水，不再参与任何计算。
 MONEY_IN = ("转入", "入金")
 MONEY_OUT = ("转出", "出金")
+LEGACY_MONEY = MONEY_IN + MONEY_OUT
 
 
 def min_order(tgt_amt: float) -> float:
@@ -100,7 +104,9 @@ class Portfolio:
             except Exception:  # noqa: BLE001
                 continue
             buckets.setdefault(idx[min(int(idx.searchsorted(d)), len(idx) - 1)], []).append(t)
-        cash, units, last_nav = capital, capital, 1.0
+        # cash 恒为 0：账户不留钱，买入即投入、卖出即收回（见文件头账户模型说明）。
+        # units/last_nav 只用于备查的时间加权净值 nav_twr。
+        cash, units, last_nav = 0.0, max(1e-9, capital), 1.0
         pos: dict[str, float] = {}
         cost: dict[str, float] = {}
         rows = []
@@ -117,26 +123,25 @@ class Portfolio:
                 if side == "买入" and code and sh > 0:
                     if px <= 0:
                         px = self.nav_on(code, d) or 0
-                    cash -= sh * px + fee
-                    flow[code] = flow.get(code, 0.0) + sh * px + fee
+                    # 买入 = 往组合里投钱（账户不经手现金），本金随之增加
+                    amt = sh * px + fee
+                    units += amt / (last_nav if last_nav > 0 else 1.0)
+                    flow[code] = flow.get(code, 0.0) + amt
                     prev = pos.get(code, 0.0)
-                    cost[code] = ((prev * cost.get(code, 0.0) + sh * px + fee) / (prev + sh)) if (prev + sh) > 0 else px
+                    cost[code] = ((prev * cost.get(code, 0.0) + amt) / (prev + sh)) if (prev + sh) > 0 else px
                     pos[code] = prev + sh
                 elif side == "卖出" and code and sh > 0:
                     if px <= 0:
                         px = self.nav_on(code, d) or 0
-                    cash += sh * px - fee
-                    flow[code] = flow.get(code, 0.0) - (sh * px - fee)
+                    # 卖出 = 把钱拿回口袋（不留在账户里），本金随之收回
+                    net = sh * px - fee
+                    units = max(1e-9, units - net / (last_nav if last_nav > 0 else 1.0))
+                    flow[code] = flow.get(code, 0.0) - net
                     pos[code] = pos.get(code, 0.0) - sh
                     if pos[code] <= 1e-9:
                         pos.pop(code, None)
                         cost.pop(code, None)
-                elif side in MONEY_IN:
-                    units += sh / (last_nav if last_nav > 0 else 1.0)
-                    cash += sh
-                elif side in MONEY_OUT:
-                    units = max(1e-9, units - sh / (last_nav if last_nav > 0 else 1.0))
-                    cash -= sh
+                # 历史台账里遗留的「转入 / 转出」：本模型没有资金进出，直接忽略
             cur_mv = {c: sh * v for c, sh in pos.items() if (v := self.nav_on(c, d))}
             mv = sum(cur_mv.values())
             day = {}
@@ -151,13 +156,16 @@ class Portfolio:
                 day[code] = (pnl, (pnl / base * 100) if base > 0 else None, state, act)
             self.by_day[d] = day
             prev_mv = cur_mv
-            eq = cash + mv
+            eq = cash + mv          # cash 恒 0：账户不留钱，总资产就是持仓市值
             last_nav = eq / units if units > 0 else 1.0
-            # nav_twr：时间加权单位净值（转入按当时净值折份额），备查；页面上的 nav 是「收益 / 本金」口径
-            rows.append({"date": d, "equity": eq, "cash": cash, "market": mv, "nav_twr": last_nav})
+            # nav_twr：时间加权单位净值（买入按当时净值折份额），备查；页面上的 nav 是「收益 / 本金」口径
+            # net_in：当日净投入变化（买入 + / 卖出 −），直接取自上面已算好的 flow，
+            # 保证与重放逻辑（含 nav 缺失时的行情回退）完全一致，不另行重算。
+            rows.append({"date": d, "equity": eq, "cash": cash, "market": mv, "nav_twr": last_nav,
+                         "net_in": float(sum(flow.values()))})
         daily = pd.DataFrame(rows).set_index("date")
-        fl = self.flows(daily.index)
-        inv = capital + fl.cumsum()
+        # 本金 = 累计净投入（买入 − 卖出），完全由买卖推导，不依赖 capital / 资金流水
+        inv = daily.pop("net_in").cumsum()
         peak = float(inv.max()) if len(inv) else 0.0
         daily["invested"] = inv
         daily["pnl"] = daily["equity"] - inv
@@ -166,27 +174,42 @@ class Portfolio:
         return daily, pos, cost, cash, units
 
     def flows(self, idx) -> pd.Series:
+        """每日净投入变化：买入 +（金额含费）、卖出 −（净额扣费）。
+
+        账户没有资金转入转出，本金就是「还押在基金里的钱」，所以直接由买卖推导。
+        历史台账里遗留的「转入 / 转出」记录一律忽略。
+        """
         out = pd.Series(0.0, index=idx)
+        if not len(idx):
+            return out
         for t in self.trades:
             side = t.get("side")
-            if side not in MONEY_IN + MONEY_OUT:
+            if side not in ("买入", "卖出"):
                 continue
             try:
                 d = pd.Timestamp(t.get("date"))
             except Exception:  # noqa: BLE001
                 continue
             i = min(int(idx.searchsorted(d)), len(idx) - 1)
-            amt = float(t.get("shares", 0) or 0)
-            out.iloc[i] += -amt if side in MONEY_OUT else amt
+            sh, px = float(t.get("shares", 0) or 0), float(t.get("nav", 0) or 0)
+            fee = float(t.get("fee", 0) or 0)
+            if sh <= 0 or px <= 0:
+                continue
+            out.iloc[i] += (sh * px + fee) if side == "买入" else -(sh * px - fee)
         return out
 
     def invested_now(self) -> float:
-        v = float(self.acct.get("capital") or 0)
+        """当前净投入（= 还押在基金里的本金）。"""
+        v = 0.0
         for t in self.trades:
-            if t.get("side") in MONEY_IN:
-                v += float(t.get("shares") or 0)
-            elif t.get("side") in MONEY_OUT:
-                v -= float(t.get("shares") or 0)
+            side = t.get("side")
+            if side not in ("买入", "卖出"):
+                continue
+            sh, px = float(t.get("shares") or 0), float(t.get("nav") or 0)
+            fee = float(t.get("fee") or 0)
+            if sh <= 0 or px <= 0:
+                continue
+            v += (sh * px + fee) if side == "买入" else -(sh * px - fee)
         return v
 
     # ------------------------------------------------------------ 今日（app.py::_held_day）
@@ -458,7 +481,6 @@ class Portfolio:
         dev = max((r for r in rows if r.get("slot_first")), key=lambda r: abs(float(r["dev"])), default=None)
         nav = self.daily["nav"].astype(float) if len(self.daily) else pd.Series(dtype=float)
         mdd = float((nav / nav.cummax() - 1).min()) if len(nav) > 1 else None
-        cash_r = self.plan["cash"] / self.plan["total"] if self.plan["total"] else 0.0
         items = []
 
         def add(label, now, line, over, why, bad):
@@ -472,8 +494,7 @@ class Portfolio:
         else:
             add("最大仓位", f"{smax * 100:.1f}%（{nm(big)}）", "25%", "偏高",
                 "一只基金就占了账户这么多，它自己出问题等于账户出问题", smax > 0.25)
-        if cash_r >= 0.005:
-            add("现金占比", f"{cash_r * 100:.1f}%", "15%", "偏多", "钱还没买成基金，闲着拖低收益；到「调仓 · 新钱怎么分」买掉", cash_r > 0.15)
+        # 账户不存钱（cash 恒 0），没有「现金占比」这项体检
         add("最大回撤", f"{mdd * 100:.2f}%（账户 {len(self.daily)} 天）" if mdd is not None else "—", "12%", "超线",
             "从最高点回落的最大幅度，越深越考验能不能拿住", mdd is not None and mdd <= -0.12)
         if worst is not None:

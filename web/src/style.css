@@ -9,6 +9,9 @@ html,body{ margin:0; background:var(--bg); color:var(--ink);
   font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Noto Sans SC","Microsoft YaHei",sans-serif; }
 .num{ font-variant-numeric:tabular-nums; }
 .up{ color:var(--up) } .down{ color:var(--down) }
+/* 规则（CLAUDE.md「时间轴平移交互规范」）：曲线容器纵向滑动交给页面滚动，
+   横向手势留给 JS 平移时间轴，避免上下滑动页面时误触时间轴。 */
+.aw-chart{ touch-action:pan-y; }
 .page{ min-height:100vh; padding-bottom:calc(64px + env(safe-area-inset-bottom)); box-sizing:border-box; }
 .page.no-tab{ padding-bottom:calc(24px + env(safe-area-inset-bottom)); }
 .wrap{ max-width:720px; margin:0 auto; }
@@ -21,12 +24,24 @@ html,body{ margin:0; background:var(--bg); color:var(--ink);
 .tag.real{ color:var(--brand); background:var(--brand-soft); }
 .tag.buy{ color:var(--up); background:#FEECEC; } .tag.sell{ color:var(--down); background:#E8F7EE; }
 .tag.gray{ color:var(--sub); background:#F1F2F4; }
-/* 转场：往深处走右侧滑入，返回左侧滑回 */
-.push-enter-active,.push-leave-active,.pop-enter-active,.pop-leave-active{ transition:transform .28s cubic-bezier(.2,.8,.2,1), opacity .28s; }
-.push-enter-from{ transform:translateX(100%); } .push-leave-to{ transform:translateX(-25%); opacity:.6; }
-.pop-enter-from{ transform:translateX(-25%); opacity:.6; } .pop-leave-to{ transform:translateX(100%); }
-.fade-enter-active,.fade-leave-active{ transition:opacity .15s; } .fade-enter-from,.fade-leave-to{ opacity:0; }
-.view-stack{ display:grid; } .view-stack > *{ grid-area:1/1; min-width:0; }
+/* 转场：往深处走右侧滑入，返回左侧滑回。
+   两层同时存在，而页面根节点本身透明（背景在 body 上）：旧页若只移出一小截又保持半透明，
+   就会整片淡在视口里形成「残影」，动画结束才消失。所以让退场页不透明地完整移出视口，
+   并给每层补上不透明背景 + 明确层级，进入页始终盖住退场页。 */
+.push-enter-active,.push-leave-active,.pop-enter-active,.pop-leave-active{ transition:transform .28s cubic-bezier(.2,.8,.2,1); }
+.push-enter-from{ transform:translateX(100%); } .push-leave-to{ transform:translateX(-100%); }
+.pop-enter-from{ transform:translateX(-100%); } .pop-leave-to{ transform:translateX(100%); }
+/* 同级切换：旧页立即移除、新页单独淡入。
+   两层同时淡出淡入会叠出双影，先淡出再淡入又会露一帧空白/淡轮廓，所以这里不留退场动画。 */
+.fade-leave-active{ transition:none; }
+.fade-leave-to{ opacity:0; }
+.fade-enter-active{ transition:opacity .16s; }
+.fade-enter-from{ opacity:0; }
+.view-stack{ display:grid; }
+.view-stack > *{ grid-area:1/1; min-width:0; background:var(--bg); }
+/* grid item 的 z-index 无需 position 即生效：进入页在上，退场页在下 */
+.push-enter-active,.pop-enter-active,.fade-enter-active{ z-index:2; }
+.push-leave-active,.pop-leave-active,.fade-leave-active{ z-index:1; }
 .van-nav-bar{ background:var(--bg) !important; } .van-hairline--bottom:after{ border:0 !important; }
 .btn-row{ margin:18px 16px 0; display:flex; gap:10px; } .btn-row > *{ flex:1; }
 .empty-tip{ font-size:12.5px; color:var(--muted); text-align:center; margin:18px 16px; line-height:1.7; }
@@ -34,9 +49,17 @@ html,body{ margin:0; background:var(--bg); color:var(--ink);
 .chips::-webkit-scrollbar{ display:none; }
 .chip{ flex:0 0 auto; padding:5px 12px; border-radius:15px; font-size:13px; background:#fff; color:var(--sub); border:1px solid var(--line); cursor:pointer; white-space:nowrap; }
 .chip.on{ background:var(--brand-soft); color:var(--brand); border-color:#C7D2FE; font-weight:600; }
-.seg2{ display:inline-flex; background:#EEF0F3; border-radius:9px; padding:2px; }
+.seg2{ display:inline-flex; background:#EEF0F3; border-radius:9px; padding:2px; font-size:12.5px; color:var(--sub); }
 .seg2 button{ border:0; background:transparent; padding:4px 12px; border-radius:7px; font-size:12.5px; color:var(--sub); cursor:pointer; }
 .seg2 button.on{ background:#fff; color:var(--ink); font-weight:600; box-shadow:0 1px 2px rgba(0,0,0,.08); }
+/* 卡片内 / 页面顶部的视图切换（净值走势·累计盈亏、单只走势·多只对比）：
+   与 .seg2 同一套视觉。原来 Fund.vue 和 Funds.vue 各写一份（12px 圆角 + 描边 + 品牌蓝选中字），
+   和别处的 .seg2（9px 圆角 + 深墨选中字）不是一个样子 —— 用户 2026-11-08 指出同一控件两种形态。 */
+.mode-seg{ display:inline-flex; gap:2px; padding:2px; background:#EEF0F3; border-radius:9px; }
+.mode-seg button{ font:inherit; font-size:12.5px; border:0; background:transparent; padding:4px 12px; border-radius:7px;
+  color:var(--sub); cursor:pointer; white-space:nowrap; }
+.mode-seg button:hover{ color:var(--ink); }
+.mode-seg button.on{ background:#fff; color:var(--ink); font-weight:600; box-shadow:0 1px 2px rgba(0,0,0,.08); }
 .d-only{ display:none !important; }
 /* 电脑端：顶部导航 + 内容 1080 宽；手机底部导航隐藏；二级页面的「返回」栏留着当面包屑 */
 @media (min-width:900px){
@@ -46,7 +69,9 @@ html,body{ margin:0; background:var(--bg); color:var(--ink);
   .has-desk{ padding-top:92px; }
   .has-desk .page{ min-height:calc(100vh - 92px); }
   .page{ padding-bottom:32px; }
-  .van-nav-bar.subbar{ top:92px; max-width:960px; margin:0 auto; }
+  /* 二级页返回栏和正文同宽同左边界：不限宽的话返回箭头会贴到视口最左边，
+     与下面 960 居中卡片完全脱节（2026-11-07 基金详情页就这么错位的） */
+  .van-nav-bar.subbar{ position:sticky; top:92px; z-index:20; max-width:960px; margin:0 auto; }
   /* 桌面不再左右同级分屏：所有页面统一限宽单主列，靠纵向顺序建立主次 */
   .cols2{ max-width:960px; margin:0 auto; }
   .cols2 > div{ min-width:0; }

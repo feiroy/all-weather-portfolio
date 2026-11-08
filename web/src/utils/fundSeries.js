@@ -3,17 +3,20 @@
 
 const pad = n => String(n).padStart(2, '0')
 
-// 相对区间起点的累计收益率（%），区间首点为 0
-export function cumulativeReturn(values) {
-  const base = values?.[0]
+// 相对区间起点的累计收益率（%），区间首点为 0。
+// baseIdx：锚点下标。传全量序列 + 区间起点做锚点，曲线往左平移到更早历史时口径仍然一致。
+export function cumulativeReturn(values, baseIdx = 0) {
+  const base = values?.[baseIdx]
   if (!base) return []
   return values.map(v => (v / base - 1) * 100)
 }
 
-// 距历史最高点的回撤（%），恒 ≤ 0
-export function drawdown(values) {
+// 距历史最高点的回撤（%），恒 ≤ 0。
+// fromIdx：区间起点，到这里把峰值重新起算（否则拖到更早历史时算的是「距全历史最高」）。
+export function drawdown(values, fromIdx = 0) {
   let peak = -Infinity
-  return (values || []).map(v => {
+  return (values || []).map((v, i) => {
+    if (i === fromIdx) peak = -Infinity
     peak = Math.max(peak, v)
     return peak > 0 ? (v / peak - 1) * 100 : 0
   })

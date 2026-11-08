@@ -4,6 +4,7 @@
 """
 import time
 import math
+from datetime import date
 import requests
 import pandas as pd
 from .config import DATA_DIR, BACKTEST_END
@@ -12,7 +13,8 @@ RETRY_TIMES = 3
 RETRY_DELAY = 5  # 秒
 
 DEFAULT_START = "20050101"
-DEFAULT_END   = BACKTEST_END.replace("-", "")
+# 抓取默认拉到今天：写死 BACKTEST_END 会让数据停在旧日期（2026-11-08 实测停在 10-16）
+DEFAULT_END   = date.today().strftime("%Y%m%d")
 
 # 资产清单：name -> (kind, symbol)
 TARGETS = {

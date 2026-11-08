@@ -366,8 +366,11 @@ def load_panel(include_wti: bool = True, end: str | None = None) -> pd.DataFrame
         panel["wti"] = wti_cny
     panel.index = pd.to_datetime(panel.index)
     panel = panel.sort_index()
-    panel_end = end if end is not None else BACKTEST_END
-    panel = panel.loc[BACKTEST_START:panel_end].ffill()
+    # 默认不截断到 BACKTEST_END：那个常量是「上一次跑全量回测的截止日」，
+    # 行情每天在更新，页面/回测却停在旧日期（2026-11-08 用户问「都 11 月 8 号了为啥还停在 10 月 16」）。
+    # 现在默认用数据里最新的共同日期；要复现历史某次回测再显式传 end。
+    panel_end = end
+    panel = (panel.loc[BACKTEST_START:panel_end] if panel_end else panel.loc[BACKTEST_START:]).ffill()
 
     # 找到所有资产都开始有数据的起始日，而非一个资产缺失就整行删除
     # 避免早期部分资产无 proxy 时截断太狠
