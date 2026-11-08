@@ -88,6 +88,8 @@ function visValues(src = props.series) {
   const i1 = w ? Math.min(all.length - 1, Math.round(w[1] ?? all.length - 1)) : all.length - 1
   const out = []
   for (const n of Object.keys(src || {})) {
+    // 隐藏序列不参与精度/值域判断，否则隐掉一条极端曲线后刻度小数位仍按它算
+    if (hidden.value.has(n)) continue
     const m = new Map(src[n].dates.map((d, k) => [d, src[n].ret[k]]))
     for (let i = i0; i <= i1; i++) { const v = m.get(all[i]); if (v != null) out.push(v) }
   }
@@ -279,10 +281,19 @@ function panelsOption() {
 
 function option() {
   if (usePanels()) return panelsOption()
-  const names = Object.keys(props.series || {})
+  const allNames = Object.keys(props.series || {})
+  // 图例项必须始终有对应 series 才能再次点击恢复：ECharts 对「legend.data 里存在、series 里不存在」
+  // 的名字会渲染成不可选状态，隐藏后用户就再也点不回来了（2026-11-08 用户反馈）。
+  // 所以隐藏 = 保留 series + data 置空，而不是从 series 里删掉；顺带颜色按全量序号固定，
+  // 隐藏几条之后剩下的线也不会串色。
+  const names = allNames
+  const visibleNames = allNames.filter(n => !hidden.value.has(n))
+  const firstVisible = visibleNames[0] || allNames[0]
+  const colOf = n => props.colors[Math.max(0, allNames.indexOf(n)) % props.colors.length]
   const all = axisDates()
   // 横轴展示用标签：柱形图按「2026年10月」这种期间标签显示，但排序/窗口仍用真实日期，
-  // 否则字符串排序会把「2026年10月」排到「2026年7月」前面
+  // 否则字符串排序会把「2026年10月」排到「2026年7月」前面。用全量序列取标签，
+  // 隐藏策略不会让横轴日期忽然变一套写法。
   const labelOf = new Map()
   for (const n of names) {
     const s = props.series[n]
@@ -292,8 +303,10 @@ function option() {
   const series = names.map((n, i) => {
     const m = new Map(props.series[n].dates.map((d, k) => [d, props.series[n].ret[k]]))
     let last = null
-    const data = all.map(d => { if (m.has(d)) last = m.get(d); return d < props.series[n].dates[0] ? null : last })
-    const col = props.colors[i % props.colors.length]
+    const data = hidden.value.has(n)
+      ? all.map(() => null)
+      : all.map(d => { if (m.has(d)) last = m.get(d); return d < props.series[n].dates[0] ? null : last })
+    const col = colOf(n)
     const isBar = props.kind === 'bar'
     return {
       // smooth 显式 false：CLAUDE.md 硬约束，所有曲线只画折线，不允许平滑
@@ -302,22 +315,23 @@ function option() {
       showSymbol: !isBar, symbol: 'circle',
       symbolSize: () => curDot, connectNulls: true, smooth: false,
       ...(isBar ? { barMaxWidth: 14, barGap: '8%', barCategoryGap: '34%' } : {}),
-      lineStyle: isBar ? undefined : { width: i === 0 ? CHART.lineWidth : 1.6, color: col,
+      lineStyle: isBar ? undefined : { width: n === firstVisible ? CHART.lineWidth : 1.6, color: col,
                    type: props.dashed.includes(n) ? 'dashed' : 'solid', cap: 'round', join: 'round' },
       itemStyle: { color: col },
-      markLine: i === 0 ? { silent: true, symbol: 'none', label: { show: false },
+      // 零轴虚线挂在第一条「可见」线上，第一条被隐藏时基准线不能跟着消失
+      markLine: n === firstVisible ? { silent: true, symbol: 'none', label: { show: false },
         lineStyle: { color: CHART.zero, type: 'dashed', width: 1 }, data: [{ yAxis: 0 }] } : undefined,
     }
   })
   const twoPanel = hasSecond()
   const gc = gridConf()
-  const secNames = Object.keys(props.second || {})
+  const secNames = Object.keys(props.second || {}).filter(n => !hidden.value.has(n))
   const secSeries = secNames.map((n, i) => {
     const src = props.second[n]
     const m = new Map(src.dates.map((d, k) => [d, src.ret[k]]))
     let last = null
     const data = all.map(d => { if (m.has(d)) last = m.get(d); return d < src.dates[0] ? null : last })
-    const col = props.colors[i % props.colors.length]
+    const col = colOf(n)
     return {
       name: n + ' 回撤', type: 'line', data, xAxisIndex: 1, yAxisIndex: 1,
       showSymbol: true, symbol: 'circle', symbolSize: () => curDot, connectNulls: true, smooth: false,
@@ -326,14 +340,17 @@ function option() {
     }
   })
   // 双面板 tooltip：一次把所有面板的值都列出来（涨跌 + 该时点回撤），不用按面板分别悬停
-  const maps = names.map(n => new Map(props.series[n].dates.map((d, k) => [d, props.series[n].ret[k]])))
-  const secMaps = secNames.map(n => new Map(props.second[n].dates.map((d, k) => [d, props.second[n].ret[k]])))
+  // maps 按全量名单建（隐藏只是不显示，不能让下标/名字对不上导致悬浮卡死），
+  // formatter 里只按 visibleNames / secNames 输出行。
+  const maps = Object.fromEntries(allNames.map(n => [n, new Map(props.series[n].dates.map((d, k) => [d, props.series[n].ret[k]]))]))
+  const secMaps = Object.fromEntries(secNames.map(n => [n, new Map(props.second[n].dates.map((d, k) => [d, props.second[n].ret[k]]))]))
   const dot = c => `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:${c}"></span>`
   const fmt = (v, d, unit = props.unit) => v == null ? '—' : `${v > 0 && unit === '%' ? '+' : ''}${(+v).toFixed(d)}${unit}`
 
   return {
     animation: false,
-    legend: { top: 0, left: 0, itemWidth: 14, itemHeight: 3, icon: 'rect', data: names,
+    legend: { top: 0, left: 0, itemWidth: 14, itemHeight: 3, icon: 'rect', data: allNames,
+      selected: Object.fromEntries(allNames.map(n => [n, !hidden.value.has(n)])),
       textStyle: { fontSize: 11, color: CHART.axisText } },
     // right 要给足：横轴用完整日期 2026/09/30，居中对齐时最后一格会右溢出被裁
     grid: gc,
@@ -348,21 +365,25 @@ function option() {
       axisPointer: { type: 'line', lineStyle: { color: CHART.axisMuted, type: 'dashed' }, link: [{ xAxisIndex: 'all' }] },
       // 与单线图同一套内容结构：日期一行，下面每项「文字描述 + 数值」竖排（chartTheme.tipRows）
       formatter: ps => {
+        const label = ps[0]?.axisValue
+        if (label == null) return ''       // 全部策略都被隐藏时不画空壳提示框
         if (!twoPanel) {
+          // 隐藏序列仍留在 option.series 里（为了图例可恢复），tooltip 要按隐藏名单过滤，
+          // 否则会多出一行「—」占位置
           return tipRows(
-            axisLabel(ps[0].axisValue),
-            ps.map(p => {
+            axisLabel(label),
+            ps.filter(p => !hidden.value.has(p.seriesName)).map(p => {
               const v = p.value
               if (v == null) return [`${p.marker}${p.seriesName}`, '—']
               return [`${p.marker}${p.seriesName}`, fmt(v, decimalsOf(v, curDec))]
             }),
           )
         }
-        const label = ps[0].axisValue
         const i = all.findIndex(d => (labelOf.get(d) || d) === label)
+        const d = i >= 0 ? all[i] : null
         const rows = []
-        names.forEach((n, k) => rows.push([dot(props.colors[k % props.colors.length]) + n, fmt(maps[k].get(all[i]), decimalsOf(maps[k].get(all[i]), curDec))]))
-        secNames.forEach((n, k) => rows.push([dot(props.colors[k % props.colors.length]) + n + ' 回撤', fmt(maps && secMaps[k].get(all[i]), decimalsOf(secMaps[k].get(all[i]), curDec2))]))
+        visibleNames.forEach(n => { const v = d == null ? null : maps[n].get(d); rows.push([dot(colOf(n)) + n, fmt(v, decimalsOf(v, curDec))]) })
+        secNames.forEach(n => { const v = d == null ? null : secMaps[n].get(d); rows.push([dot(colOf(n)) + n + ' 回撤', fmt(v, decimalsOf(v, curDec2))]) })
         return tipRows(axisLabel(label), rows)
       },
     },
@@ -461,10 +482,24 @@ function onPanMove(e) {
 }
 const onPanUp = () => { panFrom = null }
 
+// 图例隐藏要联动到下方面板：主图线叫 N，回撤线叫 N 回撤，ECharts 图例只认主图名字，
+// 不处理的话「隐藏某个策略」后主图没了、回撤面板还留着那条线，tooltip 也还在报数。
+const hidden = ref(new Set())
 onMounted(() => {
   chart = echarts.init(el.value, null, { renderer: 'canvas' })
   calcDot(); calcDec()
   chart.setOption(option())
+  chart.on('legendselectchanged', e => {
+    let changed = false
+    for (const [n, on] of Object.entries(e.selected || {})) {
+      for (const key of new Set([n, `${n} 回撤`])) {
+        const was = hidden.value.has(key)
+        if (!on && !was) { hidden.value.add(key); changed = true }
+        else if (on && was) { hidden.value.delete(key); changed = true }
+      }
+    }
+    if (changed) { calcDot(); calcDec(); chart.setOption(option(), true); syncRange() }
+  })
   el.value.__awChart = chart
   detachWheel = attachWheel(chart, el.value)
   el.value.addEventListener('dblclick', onDbl)

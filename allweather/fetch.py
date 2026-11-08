@@ -42,7 +42,8 @@ TARGETS = {
     "shfe_copper":  ("sina_fut", "CU0"),   # 沪铜连续 (2005+)
     "usdcny":       ("fx_boc", "USDCNY"),  # 美元人民币汇率 (2008+)
     "sp500_idx":    ("sp500", None),       # S&P500 指数 USD (2008+)
-    "wti":          ("etf_nav", "501018"), # 南方原油 LOF (2016+), 普通账户可买
+    "ene":          ("etf_nav", "159981"), # 能源化工期货 ETF (2019-12+)
+    "divlow":       ("etf_nav", "512890"), # 红利低波 ETF (2018-12+)
     "wti_usd":      ("foreign_fut", "CL"), # WTI 原油连续 USD (1996+) — SC0前历史proxy
 }
 
@@ -550,7 +551,8 @@ _PRICE_SYMBOLS = {
     "bond_short_etf": "511360",
     "gold":      "518850",
     "nonferr":   "159980",
-    "wti":       "501018",
+    "ene":       "159981",
+    "divlow":    "512890",
 }
 
 

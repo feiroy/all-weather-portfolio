@@ -374,7 +374,7 @@ WEIGHT_HISTORY_FILES = {
 _WEIGHT_LABEL = {
     "hs300": "沪深300", "us_sp500": "标普500", "credit": "城投债",
     "bond_10y": "10Y国债", "bond_30y": "30Y国债", "gold": "黄金",
-    "nonferr": "有色", "wti": "原油",
+    "nonferr": "有色", "ene": "原油",
 }
 
 

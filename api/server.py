@@ -623,12 +623,12 @@ async def edit_holdings(request, aid, P, a):
 
 # ------------------------------------------------------------------ 市场（公共）
 _LIVE_FILES = {"hs300": "hs300", "us_sp500": "us_sp500", "credit": "bond_credit", "bond_short": "bond_short_etf",
-               "bond_10y": "bond_10y_etf", "bond_30y": "bond_30y_etf", "gold": "gold", "nonferr": "nonferr", "wti": "wti"}
+               "bond_10y": "bond_10y_etf", "bond_30y": "bond_30y_etf", "gold": "gold", "nonferr": "nonferr", "ene": "ene"}
 _SIGNALS = [
     ("nonferr_below_sma75", "nonferr", "跌破 SMA75", ["B-Con", "B-RP", "V3c"]),
     ("gold_below_sma75", "gold", "跌破 SMA75", ["B-RP", "V3c"]),
     ("sp500_below_sma75", "us_sp500", "跌破 SMA75", ["B-RP", "V3c"]),
-    ("wti_below_sma75", "wti", "跌破 SMA75", ["B-Con", "B-RP", "V3c"]),
+    ("wti_below_sma75", "ene", "跌破 SMA75", ["B-Con", "B-RP", "V3c"]),
     ("hs300_below_sma30", "hs300", "跌破 SMA30", ["B-RP"]),
 ]
 
@@ -653,6 +653,44 @@ async def signals(request: Request):
                                          "ret": [round((float(v) / float(s.iloc[0]) - 1) * 100, 4) for v in s]}
     return J({"rows": rows, "strategies": [{"key": k, "name": STRAT_NAME[k]} for k in KEYS], "curves": curves,
               "asof": f"{prices.index[-1]:%Y-%m-%d}", "macro": macro_season(prices, sg)})
+
+
+def _strategy_spec(name: str) -> dict:
+    """内置策略的持仓与设置，供回测页展示、并作为自定义策略的参照模板。
+
+    全部从 config / strategy_backtest_kwargs 现取，避免页面上的说明和真实回测跑偏。
+    """
+    from allweather.config import ETF_META, STRATEGY_PARAMS, RISK_PARITY_MAX_WEIGHT
+    from allweather.pipeline import strategy_backtest_kwargs, STRATEGY_ASSETS
+
+    kw = strategy_backtest_kwargs(name)
+    key = "rp" if name.endswith("风险平价") else ("con" if name.endswith("保守增强") else "v3c")
+    assets = [{"key": a, "code": ETF_META.get(a, {}).get("code") or a,
+               "name": ETF_META.get(a, {}).get("name") or a}
+              for a in STRATEGY_ASSETS[name] if a in ETF_META]
+    eq_w = kw.get("equity_trend_windows") or {}
+    eq_assets = kw.get("equity_trend_assets") or []
+    equity = [{"key": a, "window": int(eq_w.get(a, kw.get("equity_trend_window") or 0))} for a in eq_assets]
+    from allweather.config import V3B_RP_BUCKETS as _RPB
+    return {
+        "assets": assets,
+        # 分桶结构：风险平价是 4 桶分层，复刻时要一起带过去，否则会退化成「每资产一桶」
+        "rp_buckets": {k: [x for x in v if x in STRATEGY_ASSETS[name]] for k, v in _RPB.items()} if key == "rp" else None,
+        "method": "分层风险平价（4 桶等权）" if key == "rp" else "逆波动率",
+        "method_key": "risk_parity" if key == "rp" else "inverse_vol",
+        "window": int(STRATEGY_PARAMS[key]["window"]),
+        "max_w": float(kw.get("max_w", RISK_PARITY_MAX_WEIGHT)),
+        "min_w": float(kw.get("min_w", 0.02)),
+        "trend": {
+            "commodity": int(kw.get("nonferr_trend_window") or 0),
+            "ene": int(kw.get("wti_trend_window") or 0),
+            "gold": int(kw.get("gold_trend_window") or 0) if kw.get("gold_trend_filter") else 0,
+            "equity": equity,
+            "equity_max": max([e["window"] for e in equity], default=0),
+        },
+        "target_vol": float(kw["target_vol"]) if kw.get("target_vol") else None,
+        "freq": kw.get("rebal_freq") or "monthly",
+    }
 
 
 async def backtest(request: Request):
@@ -695,7 +733,7 @@ async def backtest(request: Request):
         short = len(nv) < 252
         row = {"name": k, "ret": _r((float(nv.iloc[-1]) / float(nv.iloc[0]) - 1) * 100), "cagr": _r(m["cagr"] * 100),
                "mdd": _r(m["mdd"] * 100), "sharpe": None if short else _r(m["sharpe"]), "vol": _r(m["vol"] * 100),
-               "n": n, "short": short}
+               "calmar": None if short else _r(m["calmar"]), "n": n, "short": short}
         if k in base:
             b, mb = out[base[k]][0], perf_metrics(out[base[k]][0], rets=out[base[k]][0].pct_change().dropna())
             row["vs"] = _r(((float(nv.iloc[-1] / nv.iloc[0]) - float(b.iloc[-1] / b.iloc[0])) if short
@@ -725,8 +763,9 @@ async def backtest(request: Request):
     # 调频影响：高频 / 我的操作日 相对月末的年化与回撤差（绝对值与差值并列）
     gaps = [{"name": r["name"], "cagr": r["cagr"], "mdd": r["mdd"], "vs": r.get("vs"), "vs_mdd": r.get("vs_mdd")}
             for r in rows if r.get("vs") is not None]
+    specs = {n: _strategy_spec(n) for n in names}
     return J({"rows": rows, "curves": curves, "cadence": cad, "start": start,
-              "periods": periods, "gaps": gaps})
+              "periods": periods, "gaps": gaps, "specs": specs})
 
 
 async def valuation(request: Request):
@@ -821,12 +860,22 @@ def _do_update():
 
 # ------------------------------------------------------------------ 自定义策略（策略工厂）
 async def strategy_funds(request: Request):
-    """设计策略页的候选基金池：9 个长历史策略资产 + 本地已缓存净值的基金，带各自数据起始日。"""
-    from allweather.config import ETF_META
+    """设计策略页的候选基金池：长历史策略资产 + 本地已缓存净值的基金，带各自数据起始日。
+
+    另外回传 4 个桶名与「资产 → 桶」默认映射：编辑器给每只基金配桶，保存时从当前持仓现生成
+    rp_buckets，不再沿用复刻时的静态快照（2026-11-09）。
+    """
+    from allweather.config import ETF_META, V3B_RP_BUCKETS
     from allweather.data import load_panel
     panel = load_panel()
+    bucket_of = {a: b for b, arr in V3B_RP_BUCKETS.items() for a in arr}
+    # 内部 key 与 6 位代码都能查到默认桶：用户用代码搜同一只 ETF 时也能自动归桶
+    bucket_lookup = dict(bucket_of)
+    bucket_lookup.update({ETF_META[a]["code"]: b for a, b in bucket_of.items()
+                          if a in ETF_META and ETF_META[a].get("code")})
     assets = [{"key": k, "code": ETF_META[k]["code"], "name": ETF_META[k]["name"],
-               "from": f"{panel[k].first_valid_index():%Y-%m-%d}", "src": "策略资产"}
+               "from": f"{panel[k].first_valid_index():%Y-%m-%d}", "src": "策略资产",
+               "bucket": bucket_of.get(k, "")}
               for k in ETF_META if k in panel.columns]
     codes = {a["code"] for a in assets}
     funds = []
@@ -837,12 +886,15 @@ async def strategy_funds(request: Request):
         if s is None or len(s) < 2:
             continue
         funds.append({"key": c, "code": c, "name": FL.fund_name(c) or c,
-                      "from": f"{s.index[0]:%Y-%m-%d}", "src": "基金净值"})
-    return J({"assets": assets, "funds": funds})
+                      "from": f"{s.index[0]:%Y-%m-%d}", "src": "基金净值",
+                      "bucket": bucket_lookup.get(c, "")})
+    return J({"assets": assets, "funds": funds,
+              "buckets": list(V3B_RP_BUCKETS), "asset_bucket": bucket_lookup,
+              "safe_asset": "credit"})
 
 
 async def custom_backtest(request: Request):
-    """POST {funds:[{key,weight}], start, freq, name}，返回内置三策略 + 自定义策略的对比。
+    """POST {funds:[{key,weight}], start, freq, name, method, window, ...}，返回内置三策略 + 自定义策略的对比。
     计算只在 allweather/custom_backtest.py，不在这重写；兼容旧 {weights} 写法。"""
     from allweather.custom_backtest import custom_compare
     try:
@@ -851,7 +903,21 @@ async def custom_backtest(request: Request):
                                 start=b.get("start") or "2015-01-01",
                                 freq=b.get("freq") or "M",
                                 name=b.get("name") or "我的组合",
-                                funds=b.get("funds")))
+                                funds=b.get("funds"),
+                                # 策略工厂参数：加权方式 / 窗口 / 上限 / 现金 / 三组趋势过滤窗口
+                                method=b.get("method") or "fixed",
+                                window=int(b.get("window") or 20),
+                                max_w=float(b.get("max_w") if b.get("max_w") is not None else 0.25),
+                                min_w=float(b.get("min_w") if b.get("min_w") is not None else 0.02),
+                                cash_ratio=float(b.get("cash_ratio") or 0.0),
+                                trend_commodity=int(b.get("trend_commodity") if b.get("trend_commodity") is not None else 75),
+                                trend_gold=int(b.get("trend_gold") or 0),
+                                trend_equity=int(b.get("trend_equity") or 0),
+                                trend_map=b.get("trend_map"),
+                                target_vol=b.get("target_vol"),
+                                rp_buckets=b.get("rp_buckets"),
+                                safe_asset=b.get("safe_asset") or "credit",   # 趋势避风港，默认城投债
+                                engine_kwargs=b.get("engine_kwargs")))
     except ValueError as e:
         return J({"error": str(e)}, 400)
     except Exception as e:  # noqa: BLE001 — 数据异常要显式报给前端，服务端同时留痕

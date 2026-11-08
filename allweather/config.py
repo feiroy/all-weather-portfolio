@@ -22,6 +22,7 @@ BOND_30Y_TENOR = 30.0
 # === 合成数据安全扣减（年化）===
 # 仅对合成段（ETF 上市前的替代数据）应用，ETF 真实数据段不扣减
 SAFETY_DEDUCT = {
+    "ene":      0.006,   # PTA 主力代理 vs 159981 的真实费率（管理+托管约 0.6%/年）
     "nonferr":  0.005,   # 申万有色指数不含管理费、跟踪误差
     "bond_30y": 0.0052,  # 收益率重建 vs 511130 重合期（2024-04~2026-11）年化高 0.52pp = 管理费 + 跟踪误差
 }
@@ -47,7 +48,7 @@ CASH_TIERS = [
 ASSETS = [
     "hs300", "us_sp500", "credit", "bond_short",
     "bond_10y", "bond_30y",
-    "gold", "nonferr", "wti",
+    "gold", "nonferr", "ene", "divlow",
 ]
 
 ETF_META = {
@@ -59,27 +60,28 @@ ETF_META = {
     "bond_30y":  {"code": "511130", "name": "30 年国债 ETF",       "bucket": "增长↓30Y", "role": "长久期利率债"},
     "gold":      {"code": "518850", "name": "黄金 ETF",            "bucket": "通胀↑", "role": "实物黄金"},
     "nonferr":   {"code": "159980", "name": "有色金属期货 ETF",        "bucket": "通胀↑", "role": "工业金属"},
-    "wti":       {"code": "501018", "name": "南方原油 LOF",         "bucket": "通胀↑", "role": "原油LOF"},
+    "ene":       {"code": "159981", "name": "能源化工期货 ETF",     "bucket": "通胀↑", "role": "能源化工"},
+    "divlow":    {"code": "512890", "name": "红利低波 ETF",         "bucket": "增长↑", "role": "A股低波红利"},
 }
 
 # === 桶定义（用于风险贡献分析）===
 BUCKETS = {
-    "增长↑权益(A股)":  ["hs300"],
+    "增长↑权益(A股)":  ["hs300", "divlow"],
     "增长↑权益(海外)": ["us_sp500"],
     "信用债":          ["credit", "bond_short"],
     "增长↓10Y":       ["bond_10y"],
     "增长↓30Y":       ["bond_30y"],
     "通胀↑黄金":      ["gold"],
     "通胀↑有色":      ["nonferr"],
-    "通胀↑能源":      ["wti"],
+    "通胀↑能源":      ["ene"],
 }
 
 BUCKET_GROUPS = {
-    "增长↑":   ["hs300", "us_sp500"],
+    "增长↑":   ["hs300", "us_sp500", "divlow"],
     "收益垫":  ["credit", "bond_short"],
     "增长↓10Y": ["bond_10y"],
     "增长↓30Y": ["bond_30y"],
-    "通胀↑":   ["gold", "nonferr", "wti"],
+    "通胀↑":   ["gold", "nonferr", "ene"],
 }
 
 # === 关键事件压力测试 ===
@@ -114,44 +116,45 @@ BOOTSTRAP_BLOCK_DAYS = 21
 BOOTSTRAP_SEED = 42
 
 # === V3c 精简资产 ===
-V3C_ASSETS = ["hs300", "us_sp500", "credit", "bond_30y", "gold", "nonferr", "wti"]
-V3C_ASSETS_NO_WTI = ["hs300", "us_sp500", "credit", "bond_30y", "gold", "nonferr"]
-# wti — 南方原油 LOF(501018)，目前申购暂停
+V3C_ASSETS = ["hs300", "us_sp500", "credit", "bond_30y", "gold", "nonferr", "ene", "divlow"]
+V3C_ASSETS_NO_ENE = ["hs300", "us_sp500", "credit", "bond_30y", "gold", "nonferr"]
+# ene — 能源化工期货 ETF(159981)，替代原南方原油 LOF(501018)：LOF 2027 底前须退市且已暂停申购
+# divlow — 红利低波 ETF(512890)，2026-11-08 新增（与 hs300 相关 0.47，A 股风格内的低波红利）
 
 # === V3-B 风险平价资产/桶 ===
 # 2026-11-08 撤掉短融（c7e0bc6 加入）：短融平均占 18.5%、几乎全从信用债挤出，等于多持一块现金。
 # 2015→ 同区间 A/B：年化 -0.42pp（7.91→7.49）、MDD 只浅 0.65pp、夏普 +0.03，过不了 80/20（+0.3pp 或 -1pp），
 # 还让风险平价只能从 2015 起回测。要更稳就用现有 85% / 70% 现金档。短融数据 / 基金检索保留，只是不进策略。
 V3B_RP_BUCKETS = {
-    "增长↑":   ["hs300", "us_sp500"],
+    "增长↑":   ["hs300", "us_sp500", "divlow"],
     "收益垫":  ["credit"],
     "增长↓":   ["bond_30y"],
-    "通胀↑":   ["gold", "nonferr", "wti"],
+    "通胀↑":   ["gold", "nonferr", "ene"],
 }
-V3B_RP_ASSETS = ["hs300", "us_sp500", "credit", "bond_30y", "gold", "nonferr", "wti"]
+V3B_RP_ASSETS = ["hs300", "us_sp500", "credit", "bond_30y", "gold", "nonferr", "ene", "divlow"]
 # 历史短的资产：不参与面板「共同起点」，起点之前保持 NaN，由用到它的策略自己从它的起点开始。
 # （短融已不进任何策略，仍留在面板里给基金检索 / 自定义策略用；以后再加短历史资产也要登记在这里。）
 # 2026-10-30 c7e0bc6 给风险平价加短融（中证短融指数 2015-01 起）后，load_panel 取所有资产最晚起点，
 # 把保守增强 / V3c（根本不用短融）也截到了 2015，丢掉近 10 年历史、提交说明却写「Con/V3c 不动」。
-LATE_START_ASSETS = ("bond_short",)
-V3B_RP_BUCKETS_NO_WTI = {
+LATE_START_ASSETS = ("bond_short", "divlow")
+V3B_RP_BUCKETS_NO_ENE = {
     "增长↑":   ["hs300", "us_sp500"],
     "收益垫":  ["credit"],
     "增长↓":   ["bond_30y"],
     "通胀↑":   ["gold", "nonferr"],
 }
-V3B_RP_ASSETS_NO_WTI = ["hs300", "us_sp500", "credit", "bond_30y", "gold", "nonferr"]
+V3B_RP_ASSETS_NO_ENE = ["hs300", "us_sp500", "credit", "bond_30y", "gold", "nonferr"]
 
 # === V3-B 保守增强资产/桶 ===
 V3B_CON_BUCKETS = {
-    "增长↑":   ["hs300", "us_sp500"],
+    "增长↑":   ["hs300", "us_sp500", "divlow"],
     "收益垫":  ["credit"],
     "增长↓10Y": ["bond_10y"],
     "增长↓30Y": ["bond_30y"],
-    "通胀↑":   ["gold", "nonferr", "wti"],
+    "通胀↑":   ["gold", "nonferr", "ene"],
 }
-V3B_CON_ASSETS = ["hs300", "us_sp500", "credit", "bond_10y", "bond_30y", "gold", "nonferr", "wti"]
-V3B_CON_ASSETS_NO_WTI = ["hs300", "us_sp500", "credit", "bond_10y", "bond_30y", "gold", "nonferr"]
+V3B_CON_ASSETS = ["hs300", "us_sp500", "credit", "bond_10y", "bond_30y", "gold", "nonferr", "ene", "divlow"]
+V3B_CON_ASSETS_NO_ENE = ["hs300", "us_sp500", "credit", "bond_10y", "bond_30y", "gold", "nonferr"]
 
 # === 方案 B 常量（分层风险平价）===
 RISK_PARITY_WINDOW = 20           # V3-B 波动率窗口（交易日）

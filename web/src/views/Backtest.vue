@@ -21,7 +21,7 @@
         <div v-else class="slist">
           <div v-for="s in strategies" :key="s.id" class="srow">
             <i :style="{ background: customColor(s.id) }"></i>
-            <div class="sinf"><b>{{ s.name }}</b><small class="num">{{ s.funds.length }} 只基金 · {{ freqLabel(s.freq) }}</small></div>
+            <div class="sinf"><b>{{ s.name }}</b><small class="num">{{ s.funds.length }} 只基金 · {{ methodLabel(s.method) || '固定权重' }} · {{ freqLabel(s.freq, s.method) }}</small></div>
             <a @click="editStrategy(s)">编辑</a>
             <a @click="delStrategy(s)">删除</a>
           </div>
@@ -38,22 +38,37 @@
           <!-- 一个策略一张卡：里面按调仓节奏分行，同一策略的两种方式上下对齐，方便直接比 -->
           <div v-for="g in groups" :key="g.name" class="card scard">
             <div class="r1"><i :style="{ background: colorOf(g.name) }"></i><b>{{ g.name }}</b>
-              <span class="k num" v-if="g.rows.length < 2">调仓 {{ g.rows[0].n }} 次</span></div>
-            <table class="mtab">
-              <thead><tr>
-                <th v-if="g.rows.length > 1" class="vl"></th>
-                <th>年化</th><th>回撤</th><th>夏普</th><th>调仓</th>
-              </tr></thead>
-              <tbody>
-                <tr v-for="r in g.rows" :key="r.name">
-                  <td v-if="g.rows.length > 1" class="vl">{{ freqOf(r.name) }}</td>
-                  <td class="num" :class="tone(r.cagr)">{{ pct(r.cagr) }}<sup v-if="r.short" class="ast">*</sup></td>
-                  <td class="num down">{{ r.mdd.toFixed(2) }}%</td>
-                  <td class="num">{{ r.sharpe ?? '—' }}</td>
-                  <td class="num k">{{ r.n }}</td>
-                </tr>
-              </tbody>
-            </table>
+              <span class="k num" v-if="g.rows.length > 1">{{ g.rows.length }} 种节奏</span></div>
+            <div class="mblock" v-for="r in g.rows" :key="r.name">
+              <div class="vl" v-if="g.rows.length > 1">{{ freqOf(r.name) }}</div>
+              <div class="mgrid">
+                <div class="m"><i>年化</i><b class="num" :class="tone(r.cagr)">{{ pct(r.cagr) }}<sup v-if="r.short" class="ast">*</sup></b></div>
+                <div class="m"><i>最大回撤</i><b class="num down">{{ r.mdd.toFixed(2) }}%</b></div>
+                <div class="m"><i>波动</i><b class="num">{{ r.vol != null ? r.vol.toFixed(2) + '%' : '—' }}</b></div>
+                <div class="m"><i>夏普</i><b class="num">{{ r.sharpe ?? '—' }}</b></div>
+                <div class="m"><i>Calmar</i><b class="num">{{ r.calmar ?? '—' }}</b></div>
+                <div class="m"><i>调仓</i><b class="num">{{ r.n }}<em> 次</em></b></div>
+              </div>
+            </div>
+            <div class="spec" v-if="cardSpec[g.name]">
+              <div class="sblock">
+                <div class="sh"><span class="sk">持仓</span><span class="sn num">{{ cardSpec[g.name].assets.length }} 只</span></div>
+                <div class="fchips">
+                  <span v-for="(a, i) in cardSpec[g.name].assets" :key="i" class="fchip">{{ a.name }}<i v-if="a.code">{{ a.code }}</i></span>
+                </div>
+                <div class="sline"><span class="sk">加权</span>
+                  <span class="sv"><span v-for="(seg, i) in cardSpec[g.name].logicSegs" :key="i" class="tseg">{{ seg }}</span></span>
+                </div>
+                <div class="sline" v-if="cardSpec[g.name].bucket">
+                  <span class="sk">分桶</span>
+                  <span class="sv" :class="{ bkwarn: cardSpec[g.name].bucket.warn }">{{ cardSpec[g.name].bucket.text }}</span>
+                </div>
+                <div class="sline"><span class="sk">趋势</span>
+                  <span class="sv"><span v-for="(seg, i) in cardSpec[g.name].trend" :key="i" class="tseg">{{ seg }}</span></span>
+                </div>
+              </div>
+              <button class="clone" v-if="cardSpec[g.name].builtin" @click="cloneSpec(g.name)">复刻为我的策略</button>
+            </div>
             <div class="diff" v-if="g.vs != null">
               <span>年化比月末 <b :class="tone(g.vs)">{{ signed(g.vs) }}pp</b></span>
               <span v-if="g.vsMdd != null">回撤 <b :class="tone(g.vsMdd)">{{ signed(g.vsMdd) }}pp</b></span>
@@ -159,7 +174,12 @@ watch([cad, start], async () => {
 // ---- 我的策略：多条自定义策略并入同一套指标卡 / 曲线 / 月年表 ----
 const strategies = ref(loadStrategies()), customs = ref([])
 const cpLoading = ref(false), cpErr = ref('')
-const freqLabel = f => ({ M: '每月再平衡', Q: '每季再平衡', N: '不再平衡' })[f] || '每月再平衡'
+const freqLabel = (f, method) => {
+  const fixed = { M: '每月再平衡', Q: '每季再平衡', N: '不再平衡' }
+  const dyn = { M: '每月', B: '每两周', W: '每周' }
+  return (method && method !== 'fixed' ? dyn[f] : fixed[f]) || '每月再平衡'
+}
+const methodLabel = m => ({ fixed: '固定权重', inverse_vol: '逆波动率', risk_parity: '风险平价' })[m] || ''
 const CUSTOM_PAL = ['#0EA5E9', '#DB2777', '#059669', '#D97706', '#7C3AED', '#0891B2']
 const customColor = id => CUSTOM_PAL[Math.max(0, strategies.value.findIndex(s => s.id === id)) % CUSTOM_PAL.length]
 
@@ -175,7 +195,14 @@ async function refreshCustoms() {
       try {
         const r = await post('/api/market/custom-backtest', {
           funds: s.funds.map(f => ({ key: f.key, weight: f.weight, name: f.name, code: f.code })),
-          start: start.value, freq: s.freq || 'M', name: s.name
+          start: start.value, freq: s.freq || 'M', name: s.name,
+          // 策略工厂参数：加权方式 / 窗口 / 上限 / 现金 / 三组趋势过滤窗口
+          method: s.method || 'fixed', window: s.window ?? 20,
+          max_w: s.max_w ?? 0.25, min_w: s.min_w ?? 0.02, cash_ratio: s.cash_ratio ?? 0,
+          target_vol: s.target_vol ?? null,
+          trend_map: s.trend_map || null,     // 逐资产窗口：{资产key: SMA 天数}
+          rp_buckets: s.rp_buckets || null,   // 仅风险平价复刻时带分桶结构
+          safe_asset: s.safe_asset || 'credit' // 趋势过滤的避风港（默认城投债）
         })
         return { id: s.id, name: s.name, r }
       } catch (e) { return { id: s.id, name: s.name, err: e.message } }
@@ -186,7 +213,8 @@ async function refreshCustoms() {
       if (x.err) { errs.push(`${x.name}：${x.err}`); continue }
       const r = x.r, row = r.rows[r.rows.length - 1]
       out.push({ id: x.id, name: x.name, row, curve: r.curves[x.name],
-                 periods: r.periods, startActual: r.start_actual })
+                 periods: r.periods, startActual: r.start_actual,
+                 bucketInfo: r.bucket_info || null })   // 实际生效的分桶，卡片按它显示，不再照抄配置
     }
     customs.value = out
     cpErr.value = errs.join('；')
@@ -199,6 +227,106 @@ onMounted(refreshCustoms)
 watch(start, () => { customs.value = []; refreshCustoms() })
 
 function newStrategy() { router.push(`/a/${aid}/market/strategy-new`) }
+// ---- 内置策略的持仓与设置：让用户照着抄参数 ----
+const specMap = computed(() => d.value?.specs || {})
+const baseName = n => String(n).replace(/ · (双周|每周|月末|我的操作日)$/, '')
+const specOf = n => specMap.value[baseName(n)]
+const shortName = n => String(n || '').replace(/（.*?）/g, '').replace(/\s*ETF\s*$/, '').trim()
+// 返回分段的数组：模板用 .tseg（inline-block + nowrap）渲染，
+// 折行时整段一起换，不会把「波动≤9%」从中间劈成两行（2026-11-09 截图验收发现）
+const logicLine = sp => {
+  const m = sp.method_key === 'risk_parity' ? '分层RP(4桶)' : '逆波动率'
+  const parts = [m, `${sp.window}日`, `≤${Math.round(sp.max_w * 100)}%`]
+  if (sp.target_vol) parts.push(`波动≤${Math.round(sp.target_vol * 100)}%`)
+  return parts
+}
+// 分段之间挂「·」，但把分隔符并进前一段（.tseg 是 nowrap），折行时不会单独落一个点
+const joinSegs = parts => parts.map((p, i) => (i < parts.length - 1 ? `${p} ·` : p))
+const trendSegs = sp => {
+  const t = sp.trend || {}
+  const out = []
+  if (t.commodity) out.push(`有色${t.commodity}`)
+  if (t.ene) out.push(`能化${t.ene}`)
+  if (t.gold) out.push(`黄金${t.gold}`)
+  if (t.equity?.length) {
+    const short = { hs300: '沪深300', us_sp500: '标普', divlow: '红利低波' }
+    const win = [...new Set(t.equity.map(e => e.window))]
+    if (win.length === 1) out.push(`权益${win[0]}`)
+    else t.equity.forEach(e => out.push(`${short[e.key] || assetName(e.key)}${e.window}`))
+  }
+  // 趋势过滤必然有个避风港承接权重（内置三策略都是城投债 ETF）
+  return out.length ? [...out, '避风港 城投债'] : ['不做趋势过滤']
+}
+const assetName = k => ({ hs300: '沪深300', us_sp500: '标普500', credit: '城投债', bond_10y: '10年国债',
+  bond_30y: '30年国债', gold: '黄金', nonferr: '有色', ene: '能化', divlow: '红利低波' }[k] || k)
+const bucketText = bks => bks ? `${Object.keys(bks).length} 桶 · ` +
+  Object.entries(bks).map(([b, ks]) => `${b}${ks.length}`).join(' / ') : ''
+// 卡片上的「持仓 + 参数」：内置策略来自接口 specs，自定义策略从策略对象 + 实际回测结果现拼（两边同一版式）
+const cardSpec = computed(() => {
+  const m = {}
+  for (const [n, sp] of Object.entries(specMap.value)) {
+    const segs = logicLine(sp)
+    m[n] = { assets: sp.assets.map(a => ({ name: shortName(a.name), code: a.code })),
+             logicSegs: joinSegs(segs), logic: segs.join(' · '), trend: trendSegs(sp),
+             bucket: sp.rp_buckets ? { text: bucketText(sp.rp_buckets), warn: false } : null,
+             builtin: true }
+  }
+  for (const s of strategies.value) {
+    const run = customs.value.find(c => c.name === s.name)
+    if (m[s.name] || !run) continue
+    const bi = run.bucketInfo || null
+    // 分桶以接口回传的「实际生效结构」为准：改过持仓后可能已经退化，不能再按 s.rp_buckets 显示
+    const method = s.method === 'risk_parity'
+      ? (bi?.mode === 'fallback' ? '风险平价(每资产一桶)'
+         : `分层风险平价(${bi ? bi.count : (s.rp_buckets ? Object.keys(s.rp_buckets).length : 1)}桶)`)
+      : s.method === 'fixed' ? '固定权重' : '逆波动率'
+    const parts = [method]
+    if (s.method !== 'fixed') parts.push(`${s.window ?? 20}日`)
+    parts.push(`≤${Math.round((s.max_w ?? 0.25) * 100)}%`)
+    if (s.cash_ratio) parts.push(`现金${Math.round(s.cash_ratio * 100)}%`)
+    if (s.target_vol) parts.push(`波动≤${Math.round(s.target_vol * 100)}%`)
+    const fname = k => s.funds.find(f => f.key === k)?.name || assetName(k)
+    const trend = Object.entries(s.trend_map || {}).map(([k, w]) => `${fname(k)}${w}`)
+    if (trend.length) trend.push(`避风港 ${shortName(fname(s.safe_asset || 'credit'))}`)
+    const bucket = bi ? { text: bi.mode === 'fallback'
+        ? `已退化为 ${bi.count} 桶（每资产一桶），与配置的分桶不一致`
+        : bucketText(bi.buckets), warn: bi.mode === 'fallback' } : null
+    m[s.name] = { assets: s.funds.map(f => ({ name: f.name || assetName(f.key), code: /^\d{6}$/.test(f.key) ? f.key : (f.code || '') })),
+                  logicSegs: joinSegs(parts), logic: parts.join(' · '), bucket,
+                  trend: trend.length ? trend : ['不做趋势过滤'], builtin: false }
+  }
+  return m
+})
+function cloneSpec(n) {
+  const sp = specOf(n)
+  if (!sp) return
+  const w = Math.round(1000 / sp.assets.length) / 10
+  // 逐资产窗口：能化/有色/黄金走各自字段，权益走 equity 列表，最终合成一个 {资产key: 窗口}
+  const tmap = {}
+  const t = sp.trend || {}
+  if (t.commodity) tmap.nonferr = t.commodity
+  if (t.ene) tmap.ene = t.ene
+  if (t.gold) tmap.gold = t.gold
+  ;(t.equity || []).forEach(e => { if (e.window) tmap[e.key] = e.window })
+  const bucketOf = {}
+  Object.entries(sp.rp_buckets || {}).forEach(([b, ks]) => (ks || []).forEach(k => { bucketOf[k] = b }))
+  const tpl = {
+    name: baseName(n) + ' 副本',
+    method: sp.method_key, window: sp.window,
+    max_w: sp.max_w, min_w: sp.min_w, cash_ratio: 0,
+    target_vol: sp.target_vol || null,
+    trend_map: tmap,
+    rp_buckets: sp.rp_buckets || null,
+    safe_asset: sp.safe_asset || 'credit',   // 内置策略的避风港是城投债
+    freq: 'M',
+    funds: sp.assets.map(a => ({ key: a.key, code: a.code, name: a.name, weight: w,
+                                 trend: tmap[a.key] || 0, bucket: bucketOf[a.key] || '' })),
+    note: '已按内置策略逐项填好：加权方式、窗口、上限、每只基金的均线窗口、波动上限' +
+      (sp.rp_buckets ? '、分桶结构' : '') + '。增 / 换 / 删基金后请确认每只基金的桶，保存时按当前持仓重新生成分桶。'
+  }
+  sessionStorage.setItem('aw-strategy-tpl', JSON.stringify(tpl))
+  router.push({ path: `/a/${aid}/market/strategy-new`, query: { tpl: '1' } })
+}
 function editStrategy(s) { router.push({ path: `/a/${aid}/market/strategy-new`, query: { edit: s.id } }) }
 async function delStrategy(s) {
   try { await showConfirmDialog({ title: '删除策略', message: `确定删除「${s.name}」吗？` }) }
@@ -417,6 +545,44 @@ const showMore = ref([])
 .grow{ display:flex; flex-wrap:wrap; gap:6px 14px; padding:8px 0; border-bottom:1px solid var(--line); font-size:12.5px; }
 .grow b{ flex:0 0 100%; } .grow em{ font-style:normal; margin-left:4px; }
 
+/* 指标：3×2 等宽网格 —— 跨卡片同一位置对齐 */
+.mblock{ margin-top:2px; }
+.mblock + .mblock{ margin-top:10px; padding-top:10px; border-top:1px dashed var(--line); }
+.mblock .vl{ font-size:10.5px; color:#94A3B8; margin-bottom:4px; }
+.mgrid{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:9px 6px;
+  padding:2px 0 10px; border-bottom:1px solid var(--line); }
+.mgrid .m{ min-width:0; }
+.mgrid .m i{ display:block; font-style:normal; font-size:10px; color:#94A3B8; margin-bottom:3px; white-space:nowrap; }
+.mgrid .m b{ display:block; font-size:15px; font-weight:600; line-height:1.25; letter-spacing:-.2px;
+  font-variant-numeric:tabular-nums; }
+.mgrid .m b em{ font-style:normal; font-size:10px; font-weight:400; color:#94A3B8; }
+/* 持仓 / 参数 */
+.scard{ display:flex; flex-direction:column; }
+.spec{ margin-top:10px; }
+.sblock{ background:#F8FAFC; border:1px solid #EEF2F7; border-radius:10px; padding:9px 10px 10px; }
+.sblock .sh{ display:flex; align-items:baseline; justify-content:space-between; margin-bottom:6px; }
+.sblock .sk{ font-size:10.5px; color:#94A3B8; letter-spacing:.2px; }
+.sblock .sn{ font-size:10.5px; color:#94A3B8; }
+.fchips{ display:flex; flex-wrap:wrap; gap:4px; margin-bottom:8px; }
+.fchip{ display:inline-flex; align-items:baseline; gap:3px; padding:2px 6px; border-radius:6px;
+  background:#fff; border:1px solid #E8EEF5; color:#475569; font-size:10.5px; line-height:1.5; white-space:nowrap; }
+.fchip i{ font-style:normal; font-size:9.5px; color:#94A3B8; }
+.sline{ display:flex; gap:7px; font-size:11px; line-height:1.55; color:#64748B; }
+.sline + .sline{ margin-top:3px; }
+.sline .sk{ flex:0 0 24px; color:#94A3B8; }
+.sline .sv{ flex:1 1 auto; min-width:0; }
+.sline .sv.bkwarn{ color:var(--up); }
+.sline .tseg{ display:inline-block; white-space:nowrap; margin-right:6px; font-variant-numeric:tabular-nums; }
+/* 按钮贴底：三张卡片内容长短不一时，按钮仍在同一水平线 */
+.scard .spec{ margin-top:auto; padding-top:10px; }
+.clone{ display:block; width:100%; margin-top:9px; padding:7px 0; border:1px solid #DBEAFE; border-radius:8px;
+  background:#EFF6FF; color:#2563EB; font-size:11.5px; font-weight:600; cursor:pointer; }
+.clone:active{ background:#DBEAFE; }
+@media (max-width:420px){
+  .mgrid{ gap:8px 4px; }
+  .mgrid .m b{ font-size:13.5px; }
+  .fchip{ font-size:10px; padding:1px 5px; }
+}
 /* 我的策略 */
 .mine .ct{ align-items:center; }
 .btn.sm{ border:1px solid var(--brand); background:var(--brand); color:#fff; border-radius:9px;

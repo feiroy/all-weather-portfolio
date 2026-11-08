@@ -47,32 +47,34 @@ def _apply_trend_dip(w: np.ndarray, price_arr: np.ndarray, i: int,
     """
     nf_idx = col_idx.get("nonferr", -1)
     gold_idx = col_idx.get("gold", -1)
-    wti_idx = col_idx.get("wti", -1)
+    wti_idx = col_idx.get("ene", -1)
     hs300_idx = col_idx.get("hs300", -1)
-    credit_idx = col_idx.get("credit", -1)
     s = sma_params
     d = dip_params
+    # 避风港：跌破均线的权重转给它。默认 credit（内置三策略行为不变）；
+    # 自定义策略可以指定持仓里的任意一只（如 161119 中债 LOF）——2026-11-09 用户要求。
+    safe_idx = col_idx.get(s.get("safe_asset", "credit"), -1)
 
     if s["nf_window"] > 0 and nf_idx >= 0 and w[nf_idx] > 0 and s["nf_sma"] is not None:
-        if price_arr[i, nf_idx] < s["nf_sma"] and credit_idx >= 0:
-            w[credit_idx] += w[nf_idx]
+        if price_arr[i, nf_idx] < s["nf_sma"] and safe_idx >= 0:
+            w[safe_idx] += w[nf_idx]
             w[nf_idx] = 0.0
 
-    if s["eq_smas"] and credit_idx >= 0:
+    if s["eq_smas"] and safe_idx >= 0:
         for eq, sma_val in s["eq_smas"].items():
             eq_idx = col_idx.get(eq)
             if eq_idx is not None and w[eq_idx] > 0 and price_arr[i, eq_idx] < sma_val:
-                w[credit_idx] += w[eq_idx]
+                w[safe_idx] += w[eq_idx]
                 w[eq_idx] = 0.0
 
     if d["gold_trend"] and gold_idx >= 0 and w[gold_idx] > 0 and s["au_sma"] is not None:
-        if price_arr[i, gold_idx] < s["au_sma"] and credit_idx >= 0:
-            w[credit_idx] += w[gold_idx]
+        if price_arr[i, gold_idx] < s["au_sma"] and safe_idx >= 0:
+            w[safe_idx] += w[gold_idx]
             w[gold_idx] = 0.0
 
     if s["wti_window"] > 0 and wti_idx >= 0 and w[wti_idx] > 0 and s["wti_sma"] is not None:
-        if price_arr[i, wti_idx] < s["wti_sma"] and credit_idx >= 0:
-            w[credit_idx] += w[wti_idx]
+        if price_arr[i, wti_idx] < s["wti_sma"] and safe_idx >= 0:
+            w[safe_idx] += w[wti_idx]
             w[wti_idx] = 0.0
 
     if d["gold_dip_threshold"] is not None and gold_idx >= 0 and w[gold_idx] > 0:
@@ -80,24 +82,24 @@ def _apply_trend_dip(w: np.ndarray, price_arr: np.ndarray, i: int,
         if gold_dd <= -d["gold_dip_threshold"]:
             if not d["gold_boosted"]:
                 boost = w[gold_idx] * d["gold_dip_boost"]
-                if credit_idx >= 0 and w[credit_idx] >= boost:
+                if safe_idx >= 0 and w[safe_idx] >= boost:
                     w[gold_idx] += boost
-                    w[credit_idx] -= boost
+                    w[safe_idx] -= boost
                     d["gold_boosted_flag"] = True
                     if d["gold_dip_cap"] is not None and w[gold_idx] > d["gold_dip_cap"]:
                         excess = w[gold_idx] - d["gold_dip_cap"]
                         w[gold_idx] = d["gold_dip_cap"]
-                        if credit_idx >= 0:
-                            w[credit_idx] += excess
+                        if safe_idx >= 0:
+                            w[safe_idx] += excess
         else:
             d["gold_boosted_flag"] = False
 
     if d["hs300_value_dip"] and hs300_idx >= 0 and w[hs300_idx] > 0:
         if d["hs300_boost"] is not None:
             boost = w[hs300_idx] * (d["hs300_boost"] - 1)
-            if credit_idx >= 0 and w[credit_idx] >= boost:
+            if safe_idx >= 0 and w[safe_idx] >= boost:
                 w[hs300_idx] += boost
-                w[credit_idx] -= boost
+                w[safe_idx] -= boost
 
     if post_process_max_w is not None:
         orig_sum = w.sum()
@@ -263,6 +265,7 @@ def backtest(
     equity_trend_assets: list | None = None,
     equity_trend_window: int = 120,
     equity_trend_windows: dict | None = None,
+    safe_asset: str = "credit",        # 趋势过滤的避风港：跌破均线的权重转给它
     target_vol: float | None = None,
     vol_target_window: int = 60,
     assets: list | None = None,
@@ -315,7 +318,7 @@ def backtest(
     n_rebal = 0
     nonferr_idx = col_idx.get("nonferr", -1)
     gold_idx = col_idx.get("gold", -1)
-    wti_idx = col_idx.get("wti", -1)
+    wti_idx = col_idx.get("ene", -1)
     hs300_idx = col_idx.get("hs300", -1)
     credit_idx = col_idx.get("credit", -1)
 
@@ -470,7 +473,7 @@ def backtest(
                     hs300_boost = hs300_dip_boost
             sma_params = {"nf_window": nonferr_trend_window, "nf_sma": nf_sma,
                           "au_sma": au_sma, "wti_window": wti_trend_window, "wti_sma": wti_sma,
-                          "eq_smas": eq_smas}
+                          "eq_smas": eq_smas, "safe_asset": safe_asset}
             _gb_before = gold_boosted
 
             # --- Apply trend filters + dip on base weights ---

@@ -255,6 +255,33 @@
   "size": 13896802897.31,
   "type": "指数型-股票"
  },
+ "008558": {
+  "buy_rate": 0.0008,
+  "buy_rate_raw": 0.008,
+  "code": "008558",
+  "company": "永赢基金",
+  "exchange": false,
+  "fetched_at": "2026-11-08",
+  "inception": "2020-04-13",
+  "manager": "吴玮,谢越",
+  "min_buy": 10.0,
+  "name": "永赢邦利债券A",
+  "redeem": [
+   {
+    "max_days": 7,
+    "min_days": 0,
+    "rate": 0.015
+   },
+   {
+    "max_days": null,
+    "min_days": 7,
+    "rate": 0.0
+   }
+  ],
+  "risk": "中低",
+  "size": 1207934982.19,
+  "type": "债券型-长债"
+ },
  "010365": {
   "buy_rate": 0.0,
   "buy_rate_raw": 0.0,
@@ -282,6 +309,33 @@
   "size": 3981360285.1,
   "type": "指数型-股票"
  },
+ "023411": {
+  "buy_rate": 0.0,
+  "buy_rate_raw": 0.0,
+  "code": "023411",
+  "company": "天弘基金",
+  "exchange": false,
+  "fetched_at": "2026-11-09",
+  "inception": "2025-02-24",
+  "manager": "沙川",
+  "min_buy": 10.0,
+  "name": "天弘恒生红利低波指数C",
+  "redeem": [
+   {
+    "max_days": 7,
+    "min_days": 0,
+    "rate": 0.015
+   },
+   {
+    "max_days": null,
+    "min_days": 7,
+    "rate": 0.0
+   }
+  ],
+  "risk": "中高",
+  "size": 39065670.07,
+  "type": "指数型-股票"
+ },
  "159337": {
   "buy_rate": null,
   "buy_rate_raw": null,
@@ -299,6 +353,23 @@
   "size": 481636553.63,
   "type": "指数型-股票"
  },
+ "159920": {
+  "buy_rate": null,
+  "buy_rate_raw": null,
+  "code": "159920",
+  "company": "华夏基金",
+  "exchange": true,
+  "fetched_at": "2026-11-09",
+  "inception": "2012-07-09",
+  "manager": "徐猛",
+  "min_buy": null,
+  "name": "恒生ETF华夏",
+  "note": "场内佣金",
+  "redeem": [],
+  "risk": "高",
+  "size": 8242901950.68,
+  "type": "指数型-海外股票"
+ },
  "159980": {
   "buy_rate": null,
   "buy_rate_raw": null,
@@ -315,6 +386,73 @@
   "risk": "高",
   "size": 6568102146.48,
   "type": "指数型-其他"
+ },
+ "159981": {
+  "buy_rate": null,
+  "buy_rate_raw": null,
+  "code": "159981",
+  "company": "建信基金",
+  "exchange": true,
+  "fetched_at": "2026-11-08",
+  "inception": "2019-11-11",
+  "manager": "朱金钰,亢豆",
+  "min_buy": null,
+  "name": "能源化工ETF建信",
+  "note": "场内佣金",
+  "redeem": [],
+  "risk": "高",
+  "size": 3416433329.66,
+  "type": "指数型-其他"
+ },
+ "159985": {
+  "buy_rate": null,
+  "buy_rate_raw": null,
+  "code": "159985",
+  "company": "华夏基金",
+  "exchange": true,
+  "fetched_at": "2026-11-08",
+  "inception": "2019-09-06",
+  "manager": "荣膺",
+  "min_buy": null,
+  "name": "豆粕ETF华夏",
+  "note": "场内佣金",
+  "redeem": [],
+  "risk": "高",
+  "size": 3518761739.66,
+  "type": "指数型-其他"
+ },
+ "161119": {
+  "buy_rate": 0.0008,
+  "buy_rate_raw": 0.008,
+  "code": "161119",
+  "company": "易方达基金",
+  "exchange": true,
+  "fetched_at": "2026-11-08",
+  "inception": "2012-09-28",
+  "manager": "杨真",
+  "min_buy": 10.0,
+  "name": "易方达中债新综指发起式(LOF)A",
+  "note": "场内佣金",
+  "redeem": [
+   {
+    "max_days": null,
+    "min_days": 7,
+    "rate": 0.001
+   },
+   {
+    "max_days": null,
+    "min_days": 365,
+    "rate": 0.0005
+   },
+   {
+    "max_days": null,
+    "min_days": 730,
+    "rate": 0.0
+   }
+  ],
+  "risk": "中低",
+  "size": 9378230347.98,
+  "type": "指数型-固收"
  },
  "501018": {
   "buy_rate": 0.0012,
@@ -456,6 +594,23 @@
   "size": 94092046518.34,
   "type": "指数型-固收"
  },
+ "512890": {
+  "buy_rate": null,
+  "buy_rate_raw": null,
+  "code": "512890",
+  "company": "华泰柏瑞基金",
+  "exchange": true,
+  "fetched_at": "2026-11-09",
+  "inception": "2018-11-21",
+  "manager": "柳军",
+  "min_buy": null,
+  "name": "红利低波ETF华泰柏瑞",
+  "note": "场内佣金",
+  "redeem": [],
+  "risk": "高",
+  "size": 31287395269.11,
+  "type": "指数型-股票"
+ },
  "513500": {
   "buy_rate": null,
   "buy_rate_raw": null,
@@ -473,6 +628,57 @@
   "size": 25181037712.79,
   "type": "指数型-海外股票"
  },
+ "513660": {
+  "buy_rate": null,
+  "buy_rate_raw": null,
+  "code": "513660",
+  "company": "华夏基金",
+  "exchange": true,
+  "fetched_at": "2026-11-09",
+  "inception": "2014-12-09",
+  "manager": "李俊",
+  "min_buy": null,
+  "name": "恒生ETF华夏",
+  "note": "场内佣金",
+  "redeem": [],
+  "risk": "高",
+  "size": 2584240035.58,
+  "type": "指数型-股票"
+ },
+ "513980": {
+  "buy_rate": null,
+  "buy_rate_raw": null,
+  "code": "513980",
+  "company": "景顺长城基金",
+  "exchange": true,
+  "fetched_at": "2026-11-09",
+  "inception": "2021-05-31",
+  "manager": "金璜",
+  "min_buy": null,
+  "name": "港股科技ETF景顺",
+  "note": "场内佣金",
+  "redeem": [],
+  "risk": "高",
+  "size": 9390625552.14,
+  "type": "指数型-股票"
+ },
+ "515000": {
+  "buy_rate": null,
+  "buy_rate_raw": null,
+  "code": "515000",
+  "company": "华宝基金",
+  "exchange": true,
+  "fetched_at": "2026-11-08",
+  "inception": "2019-07-04",
+  "manager": "胡一江",
+  "min_buy": null,
+  "name": "科技ETF华宝",
+  "note": "场内佣金",
+  "redeem": [],
+  "risk": "高",
+  "size": 3952345285.12,
+  "type": "指数型-股票"
+ },
  "518850": {
   "buy_rate": null,
   "buy_rate_raw": null,
@@ -489,5 +695,39 @@
   "risk": "高",
   "size": 17675420830.1,
   "type": "指数型-其他"
+ },
+ "563020": {
+  "buy_rate": null,
+  "buy_rate_raw": null,
+  "code": "563020",
+  "company": "易方达基金",
+  "exchange": true,
+  "fetched_at": "2026-11-09",
+  "inception": "2023-10-16",
+  "manager": "宋钊贤,杨正旺",
+  "min_buy": null,
+  "name": "红利低波ETF易方达",
+  "note": "场内佣金",
+  "redeem": [],
+  "risk": "高",
+  "size": 12448313967.46,
+  "type": "指数型-股票"
+ },
+ "563690": {
+  "buy_rate": null,
+  "buy_rate_raw": null,
+  "code": "563690",
+  "company": "永赢基金",
+  "exchange": true,
+  "fetched_at": "2026-11-09",
+  "inception": "2025-09-15",
+  "manager": "蔡路平",
+  "min_buy": null,
+  "name": "红利低波ETF永赢",
+  "note": "场内佣金",
+  "redeem": [],
+  "risk": "高",
+  "size": 64939431.69,
+  "type": "指数型-股票"
  }
 }

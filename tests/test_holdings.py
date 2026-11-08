@@ -40,13 +40,13 @@ class HoldingsConfig(unittest.TestCase):
         h = HG._default_holdings()
         self.assertEqual([HG.codes(h[s]) for s in HG.SLOTS],
                          [["510300"], ["513500"], ["511220"], ["511260"], ["511130"],
-                          ["518850"], ["159980"], ["501018"]])
+                          ["518850"], ["159980"], ["159981"], ["512890"]])
 
     def test_active_skips_disabled_and_empty(self):
         h = make_holdings()
-        h["wti"]["on"] = False
+        h["ene"]["on"] = False
         h["gold"] = {"on": True, "funds": []}        # 一只都不挂 = 不持有
-        self.assertNotIn("wti", HG.active(h))
+        self.assertNotIn("ene", HG.active(h))
         self.assertNotIn("gold", HG.active(h))
 
     def test_slot_of_reverse_lookup(self):
@@ -61,11 +61,11 @@ class HoldingsConfig(unittest.TestCase):
 
     def test_slot_weights_renormalizes_over_active(self):
         h = make_holdings()
-        h["wti"]["on"] = False                       # wti 权重不为 0 时关掉它
+        h["ene"]["on"] = False                       # ene 权重不为 0 时关掉它
         w = {"hs300": .2, "us_sp500": .2, "credit": .2, "bond_10y": .1,
-             "bond_30y": .1, "gold": .1, "nonferr": .1, "wti": .1}
+             "bond_30y": .1, "gold": .1, "nonferr": .1, "ene": .1}
         out = HG.slot_weights(w, h)
-        self.assertNotIn("wti", out)
+        self.assertNotIn("ene", out)
         self.assertAlmostEqual(sum(out.values()), 1.0)
 
     def test_slot_weights_accepts_pandas_series(self):
@@ -79,7 +79,7 @@ class HoldingsConfig(unittest.TestCase):
         """B-RP 的短融没有位置：20% 只能并进同桶的信用债，不能摊到股票、黄金上。"""
         h = make_holdings()
         w = {"hs300": .2, "us_sp500": .1, "credit": .2, "bond_short": .2,
-             "bond_30y": .2, "gold": .05, "nonferr": .0, "wti": .05}
+             "bond_30y": .2, "gold": .05, "nonferr": .0, "ene": .05}
         out = HG.slot_weights(w, h)
         self.assertAlmostEqual(out["credit"], .4)
         self.assertAlmostEqual(out["hs300"], .2)       # 别的位置一分不多
@@ -88,9 +88,9 @@ class HoldingsConfig(unittest.TestCase):
 
     def test_slot_weights_closed_slot_goes_to_same_bucket(self):
         h = make_holdings()
-        h["wti"]["on"] = False
+        h["ene"]["on"] = False
         w = {"hs300": .3, "us_sp500": .1, "credit": .3, "bond_10y": .1,
-             "bond_30y": .0, "gold": .1, "nonferr": .0, "wti": .1}
+             "bond_30y": .0, "gold": .1, "nonferr": .0, "ene": .1}
         out = HG.slot_weights(w, h)
         self.assertAlmostEqual(out["gold"], .2)        # 原油那 10% 给同桶的黄金
         self.assertAlmostEqual(out["nonferr"], 0.0)    # 有色被趋势过滤清成 0，不能借此复活
@@ -98,8 +98,8 @@ class HoldingsConfig(unittest.TestCase):
 
     def test_slot_weights_bucket_cannot_absorb_falls_back_global(self):
         h = make_holdings()
-        h["wti"]["on"] = False
-        w = {"hs300": .5, "credit": .4, "wti": .1}      # 通胀桶全是 0，接不住
+        h["ene"]["on"] = False
+        w = {"hs300": .5, "credit": .4, "ene": .1}      # 通胀桶全是 0，接不住
         out = HG.slot_weights(w, h)
         self.assertAlmostEqual(sum(out.values()), 1.0)
         self.assertAlmostEqual(out["hs300"] / out["credit"], .5 / .4)
@@ -136,10 +136,10 @@ class MultiFundPerSlot(unittest.TestCase):
 
     def test_remove_last_fund_makes_slot_inactive(self):
         h = make_holdings()
-        h["wti"] = HG.remove_fund(h["wti"], "501018")
-        self.assertEqual(HG.funds(h["wti"]), [])
-        self.assertNotIn("wti", HG.active(h))
-        self.assertIsNone(HG.slot_of("501018", h))
+        h["ene"] = HG.remove_fund(h["ene"], "159981")
+        self.assertEqual(HG.funds(h["ene"]), [])
+        self.assertNotIn("ene", HG.active(h))
+        self.assertIsNone(HG.slot_of("159981", h))
 
     def test_remove_one_keeps_other_shares(self):
         h = {"on": True, "funds": [_fund("110020", share=0.6), _fund("000961", share=0.4)]}

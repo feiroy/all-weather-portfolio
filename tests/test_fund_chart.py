@@ -499,7 +499,7 @@ def app_regression():
         at.query_params["acct"] = "main"          # 不带 ?acct= 会停在入口页
         at.run()
 
-        sources = {"hs300": "hs300", "gold": "gold", "wti": "wti", "bond_30y": "bond_30y_etf"}
+        sources = {"hs300": "hs300", "gold": "gold", "ene": "ene", "bond_30y": "bond_30y_etf"}
         observed = {}
 
         def check(asset):
@@ -518,7 +518,7 @@ def app_regression():
             observed[asset] = tuple(c["ret"] for c in expected)
 
         check("hs300")
-        for asset in ("gold", "wti", "bond_30y", "hs300"):
+        for asset in ("gold", "ene", "bond_30y", "hs300"):
             next(s for s in at.selectbox if s.label == "基金").set_value(asset).run()
             check(asset)
         assert len(set(observed.values())) > 1, "真实样本须能区分基金，避免陈旧概览漏检"

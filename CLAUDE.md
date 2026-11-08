@@ -94,6 +94,18 @@ This file provides guidance to Claude Code when working with code in this reposi
 - 折线端点统一 `stroke-linecap="round"` / `cap:'round'`。
 - 验收要同时断言 `showSymbol` / `symbol` 类型 / 直径范围 / 无描边 / 圆点数 == 数据点数，**只查颜色线宽是不够的**。
 
+### 图例显隐（统一 · 2026-11-08 用户连续三次指出后补充）
+用户原话：**「隐掉某个策略后，下面回撤还能看到曲线」/「鼠标放到曲线上会卡住」/「我没法再恢复展示隐掉的策略曲线了」**。
+
+| 项 | 要求 |
+|---|---|
+| 隐藏 | 主序列**必须保留在 `option.series`**，只把 `data` 置空；`legend.data` 永远是全量名单 + `selected` 显式同步。**禁止把隐藏序列从 `series` 删掉** —— ECharts 对「legend 有、series 无」的项渲染成不可选状态，用户再也点不回来 |
+| 联动 | 隐藏/恢复必须同时作用于：主图线、下方面板 `N 回撤` 线、tooltip 行、数值精度与坐标轴值域。颜色按**全量名单**原始序号取，隐藏几条之后剩下的线不许串色；零轴虚线挂第一条「可见」线 |
+| tooltip | `maps` / `secMaps` 一律按名字索引（`Object.fromEntries`），禁止用过滤后数组的下标；单面板分支按隐藏名单 `filter` 掉 params，全部隐藏时返回空串，不留空壳提示框 |
+| 验收 | 真实浏览器点图例：隐藏 1 条→恢复、连隐 2 条逐条恢复、单面板图、手机窄屏；断言 `legend.selected` / 主序列 data / 回撤线 / tooltip 文本，且 0 页面报错 |
+
+回归脚本：`tests/test_backtest_legend_browser.cjs`（连 8600 H5 服务，不自己起服务）。
+
 ### 买卖点标记（统一 · 2026-11-07 用户要求「不要用箭头，直接曲线上一个买入，卖出的图标」）
 净值走势图、累计盈亏图上的历史成交，一律画成挂在成交那一期旁边的**「买」/「卖」小徽标**：
 
@@ -350,9 +362,9 @@ CI：`.github/workflows/backtest.yml` 跑 `py main.py`，检查 Sharpe/MDD 边�
 ## 策略速查
 | 策略 | 一句话 |
 |------|--------|
-| V3-B 保守增强(20d) | 逆波动率20d + nonferr75d趋势 — Sharpe 1.38 |
-| V3c 多元 | 6资产逆波动率20d + nonferr/gold/sp500趋势75d — MDD -8.19% |
-| V3-B 风险平价(20d) | 4桶HRP + 四重趋势 + target_vol=9% — CAGR 7.67% |
+| V3-B 保守增强(20d) | 逆波动率20d + nonferr75d趋势 — Sharpe 1.75 |
+| V3c 多元 | 6资产逆波动率20d + nonferr/gold/sp500趋势75d — MDD -7.09% |
+| V3-B 风险平价(20d) | 4桶HRP + 四重趋势 + target_vol=9% — CAGR 8.63% |
 增长↑(hs300,sp500) | 收益垫(credit) | 增长↓10Y(bond_10y) | 增长↓30Y(bond_30y) | 通胀↑(gold,nonferr)
 ## 策略参考
 
@@ -380,7 +392,7 @@ V3-B RP 和 V3c 去掉了 bond_10y（CAGR +1.43pp，Sharpe 仅 -0.02）。
 
 | 常量 | 值 | 说明 |
 |------|-----|------|
-| `BACKTEST_START/END` | 2005-04-08 / 今天 | 只是上下界；实际面板从**核心资产共同起点 2006-03-01** 开始（中债 30Y 曲线起点），三个策略都约 20.7 年（风险平价 2026-11-08 撤掉短融后不再从 2015 起） |
+| `BACKTEST_START/END` | 2005-04-08 / 今天 | 只是上下界。面板从 **2006-12-19** 起（能化 PTA 代理起点）；三策略实际从 **2013-12-19** 起（红利低波代理起点），约 12.9 年。**这是加红利低波的代价：2008 与 2013 钱荒被排除在样本外**，只看 2006 年起的长历史请用「仅能化、不加红利低波」口径（5.95% / 7.02% / 7.02%）|
 | `RISK_FREE_ANNUAL` | 0.017 | 无风险利率（10Y 国债 2026.07 实际值） |
 | `GOLD_DIP_THRESHOLD` | 0.15 | 黄金抄底触发 |
 | `GOLD_DIP_BOOST` | 2.5 | 黄金抄底倍数 |
@@ -405,6 +417,27 @@ V3-B RP 和 V3c 去掉了 bond_10y（CAGR +1.43pp，Sharpe 仅 -0.02）。
 - **风险平价不含短融**（2026-11-08 撤掉）：短融平均占 18.5%、几乎全从信用债挤出，2015→ A/B 年化 -0.42pp、MDD 只浅 0.65pp、夏普 +0.03，过不了 80/20；还让风险平价只能从 2015 起、三个策略区间不一致。要更稳用 85% / 70% 现金档，不要再把类现金资产塞进收益垫。
 - 黄金 2004-11~2006-07 用 SPDR 持仓「总价值/总库存」推算美元金价，拼接点必须是伦敦金第一个真实日（`gold_cny.dropna().index.min()`）。上游用 `gold_cny.index.min()`（索引并进了汇率，落在 2005-01），中间一年半 ffill 成常数，接上伦敦金当天单日 +85.2%（V3c 年化被多算 0.28pp）。
 - 写 `docs/data.json` / `index.html` 内嵌数据前用 `_json_safe` 把 NaN 转 null：风险平价没有 2008 等压力事件数据，原样写 `NaN` 会让浏览器 `JSON.parse` 整页失败。
+
+### 策略工厂：页面调参验证，不改代码（2026-11-08）
+- 「策略回测 → 我的策略 → 新增策略」支持 **加权方式（固定 / 逆波动率 / 风险平价）+ 加权窗口 + 单只上限 + 现金比例 + 逐基金趋势过滤窗口 + 逐基金分桶 + 波动上限 + 调仓频率**，保存后在页面上与内置三策略同图对比，不需要改 config。
+- **硬约束：页面参数只做「名字翻译」，禁止复制回测逻辑**。所有计算走 `custom_backtest.build_engine_kwargs()` → `backtest()`，透传通道走 `run_engine()`（按 pipeline 同一规则调度 `backtest_b` / `backtest_iv`）。
+- 两个必须踩过的坑：① 不能直调 `backtest()` 做透传 —— 它默认 `weighting_method='inverse_vol'`，`backtest_b` 默认 `hierarchical_rp`，直调会让「风险平价」静默变成逆波动率（8.63% → 8.00%）；② 收益要先在**全历史**上 `pct_change` 再切片，起点取「所有选中资产都有日收益」的第一天（同 `pipeline.strategy_window`），否则比内置策略晚一天。
+- 验收（`tests/test_custom_strategy.py`）：把内置三策略的 `strategy_backtest_kwargs` 原样透传，自定义策略的 CAGR / MDD / 调仓次数必须与 `run_strategy_backtest` **逐位一致**；趋势过滤开关必须真的改变结果；固定权重模式行为不变；分桶随持仓变化、缺避风港必须报错。
+- 新增**资产**仍需改数据层（`data/*.csv` + `config.ETF_META/ASSETS` 注册），但策略实验（换池子、调权重方式/窗口/频率/现金）全部在页面上完成。
+
+### 自定义策略分桶一致性（硬约束 · 2026-11-09 用户「我新加一个基金，或者换了一个基金，删了一个基金，他咋知道还是按4个桶分配呢」）
+`rp_buckets` 是「桶名 → 资产 key」的静态表，但用户在页面上随时增删改持仓；直接沿用复刻内置策略时的 4 桶快照，会让新基金静默拿 0 权重、删掉一只基金后桶数悄悄变化、卡片还写「分层风险平价(4桶)」——展示与实算不一致。
+
+| 项 | 要求 |
+|---|---|
+| 唯一事实源 | `custom_backtest.bucket_plan(columns, rp_buckets)`：按**当前持仓**过滤桶内 key、删掉变空的桶；只要还有资产没被任何桶覆盖，整表退化成「每资产一桶」并返回 `fallback=True`。引擎（`build_engine_kwargs`）与页面展示（`bucket_info`）必须调**同一个函数**，禁止各算一套 |
+| 编辑器 | 每只基金一行一个桶下拉（选项来自 `/api/market/strategy-funds` 的 `buckets` / `asset_bucket`）；保存时**从当前 funds 现生成** `rp_buckets`，不许沿用旧快照；有基金没选桶直接拦住保存 |
+| 接口 | `custom_compare()` 必须回传 `bucket_info`（mode / count / buckets / requested）；卡片按 `mode` 显示真实桶结构，`fallback` 时显示**红色警告**「已退化为 N 桶（每资产一桶）」，并把加权方式改写成「风险平价(每资产一桶)」 |
+| 趋势避风港（可配置） | 跌破均线的权重转给 `safe_asset`（`backtest()` 参数，默认 `credit`，内置三策略逐位不变）。自定义策略在编辑器「避风港」下拉里选持仓中任意一只（用户把城投债换成 `161119` 中债 LOF，2026-11-09 起支持）。组合里找不到它时趋势过滤会静默失效：编辑器保存前拦、后端 `custom_compare` 再显式 `ValueError`，两层都不能省。**报错必须点名实际持仓代码**并区分「不在当前持仓里」「权重为 0 被过滤」——用户替换债基后只数不变、页面看着仍像内置 8 只，只说「缺避风港」根本定位不到。前端 `isSafeAsset` 按 key + code 双认（6 位代码加入的城投债也要算），`safe_asset` 必须随策略保存 / 复刻 / 接口透传 |
+| 代码别名 | 6 位代码 `511220` 与内部 key `credit` 取到的是同一条净值，但引擎按**列名**找避风港 / 配分桶 / 配逐资产趋势窗口。`custom_backtest.canonical_key()` 必须在进引擎前把「面板内资产的代码」统一归一化，`funds` / `trend_map` / `rp_buckets` **三处一起转**；前端 `isSafeAsset` 按 key 与 code 双重判断。否则同一只基金只因写法不同就被误报「缺避风港」且风控失效（2026-11-09 用户截图） |
+| 卡片分段 | 「加权 / 趋势」这类一行多段的文字用 `.tseg`（`inline-block` + `white-space:nowrap`）逐段渲染，分隔符并进前一段；禁止把 `波动≤9%` 从中间折成两行（2026-11-09 截图验收发现） |
+
+- 验收：`tests/test_custom_strategy.py` 的 `test_bucket_plan_follows_current_holdings` / `test_custom_compare_reports_effective_buckets` / `test_trend_filter_requires_safe_asset` / `test_safe_asset_accepts_code_alias`（代码写法与内部 key 写法 CAGR/MDD/曲线**逐位一致**）/ `test_safe_asset_configurable`（换避风港必须改变结果，指定持仓外的必须报错）；真实浏览器 7 场景（内置分桶行 → 复刻 8 行都有桶 → 未选桶被拦 → 新增基金后 4 桶·增长↓2 → 老快照红色退化警告 → 缺避风港 400 报错 → 代码别名不再误报），另验编辑器保存路径与每个 `.tseg` 单行渲染，页面 0 报错。
 
 ## 架构参考
 

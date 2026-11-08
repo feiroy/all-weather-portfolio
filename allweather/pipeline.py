@@ -33,7 +33,7 @@ from .types import Step3Metrics
 
 
 def step_1_load_data():
-    """Step 1: 加载历史数据（7 活跃资产 + wti 备选）。"""
+    """Step 1: 加载历史数据（7 活跃资产 + ene 备选）。"""
     print("\n" + "─" * 60)
     print("Step 1/6: 加载历史数据")
     print("─" * 60)

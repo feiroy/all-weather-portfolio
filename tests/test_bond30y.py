@@ -51,11 +51,13 @@ def test_late_start_asset_does_not_truncate_other_strategies():
     from allweather.pipeline import strategy_window
     r = panel_returns(load_panel())
     assert r["bond_short"].first_valid_index() >= pd.Timestamp("2015-01-01")
-    # 三个策略都不用短融（风险平价 2026-11-08 撤掉），全部从面板共同起点（2006）开始
+    # 三个策略都不用短融（风险平价 2026-11-08 撤掉）；但都用红利低波（代理自 2013-12），
+    # 所以策略区间从 2013-12 起，而不是面板的 2006-12。关键是不能被短融（2015）截断。
     for s in ("V3-B 保守增强", "V3-B 风险平价", "V3c 多元"):
         w = strategy_window(r, s)
-        assert w.index[0] < pd.Timestamp("2007-01-01"), s
+        assert w.index[0] < pd.Timestamp("2014-01-01"), s
         assert "bond_short" not in w.columns and not w.isna().any().any()
+    assert r["divlow"].first_valid_index() >= pd.Timestamp("2013-12-01")
 
 
 def test_gold_has_no_splice_jump():

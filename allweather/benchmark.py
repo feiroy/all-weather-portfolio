@@ -183,7 +183,7 @@ def load_default_prices() -> pd.DataFrame:
     files = {
         "hs300": "hs300", "us_sp500": "us_sp500", "credit": "bond_credit",
         "bond_10y": "bond_10y_etf", "bond_30y": "bond_30y_etf", "gold": "gold",
-        "nonferr": "nonferr", "wti": "wti",
+        "nonferr": "nonferr", "ene": "ene",
     }
     cols = {}
     for key, fn in files.items():

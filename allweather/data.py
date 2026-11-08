@@ -259,8 +259,8 @@ def _load_bond_short() -> pd.Series:
     return _load_with_index("bond_short_etf", "shortbond_idx", annual_deduct=0.0)
 
 
-def load_panel(include_wti: bool = True, end: str | None = None) -> pd.DataFrame:
-    """加载 8 资产收盘价面板（含缝合，对齐到回测期间，前向填充）。
+def load_panel(end: str | None = None) -> pd.DataFrame:
+    """加载资产面板（含缝合，对齐到回测期间，前向填充）：A股/美股/城投债/10Y/30Y/黄金/有色/能化/红利低波。
 
     2008+ 延长回测：ETF 上市前的期间用指数/国际价格拼接。
 
@@ -307,9 +307,10 @@ def load_panel(include_wti: bool = True, end: str | None = None) -> pd.DataFrame
             "nonferr 三级回退全部为空：需要 nonferr.csv（ETF）、"
             "nonferr_idx.csv（指数）或 shfe_copper.csv（沪铜）至少一个")
 
-    # 原油（501018 LOF 优先，WTI USD×USDCNY 拼接）
-    if include_wti:
-        wti_cny = _load_wti_cny()
+    # 能源化工（159981 ETF + PTA 主力代理）
+    ene = _load_ene()
+    # 红利低波（512890 ETF + 中证红利低波指数代理）
+    divlow = _load_divlow()
 
     panel = pd.DataFrame({
         "hs300":    hs300,
@@ -320,9 +321,9 @@ def load_panel(include_wti: bool = True, end: str | None = None) -> pd.DataFrame
         "bond_30y": bond_30y,
         "gold":     gold,
         "nonferr":  nonferr,
+        "ene":      ene,
+        "divlow":   divlow,
     })
-    if include_wti:
-        panel["wti"] = wti_cny
     panel.index = pd.to_datetime(panel.index)
     panel = panel.sort_index()
     # 默认不截断到 BACKTEST_END：那个常量是「上一次跑全量回测的截止日」，
@@ -354,41 +355,42 @@ def panel_returns(panel: pd.DataFrame) -> pd.DataFrame:
 
 
 
-def _load_wti_cny() -> pd.Series:
-    """南方原油 CNY（501018 LOF）：LOF 优先，2016年前用 WTI USD × USDCNY 拼接。
+def _load_ene() -> pd.Series:
+    """能源化工期货 ETF（159981，建信能化）：真实累计净值 + PTA 主力连续代理。
 
-    南方原油 LOF（501018）2019-04-26 上市，有 2016-06 起的历史 NAV 回算数据。
-    此前用 WTI CL × USDCNY 做历史代理。
+    替代原来的南方原油 LOF（501018）：QDII/商品期货 LOF 按沪深交易所 2026-08 新规须于 2027-12-31 前终止上市，
+    且该 LOF 自 2026-02-13 起暂停申购、场内溢价常年 7%+，实盘无法按净值买入。能化 ETF 是场内 ETF（非 LOF），
+    可正常申购、溢价≈0，宏观角色同为「通胀↑/能源」。
+
+    159981 于 2019-12 成立，之前的段用郑商所 PTA 主力连续（TA0，2006-12 起）代理，重合期日收益相关 0.60；
+    期货主力连续未做展期调整，代理段收益有偏，回测起点建议不早于 2006-12。
     """
-    sc = _load_optional("wti")       # 501018 LOF, ~2016+
-    wti_usd = _load_optional("wti_usd")  # WTI CL USD, 1996+
-    usdcny = _load_optional("usdcny")
+    etf = load_series("ene")
+    proxy = _load_optional("ene_proxy")     # data/ene_proxy.csv（PTA 主力连续）
+    if etf.empty and proxy is None:
+        raise FileNotFoundError("ene / ene_proxy 数据均不可用")
+    if proxy is None:
+        return etf
+    if etf.empty:
+        return proxy
+    return stitch_series(etf, proxy, annual_deduct=SAFETY_DEDUCT["ene"])
 
-    has_lof = sc is not None and not sc.empty
-    has_wti = wti_usd is not None and not wti_usd.empty and usdcny is not None and not usdcny.empty
 
-    # 只有 WTI 无 LOF → WTI×USDCNY（回退兼容）
-    if not has_lof and has_wti:
-        combined = wti_usd.index.union(usdcny.index).sort_values()
-        w = wti_usd.reindex(combined).ffill()
-        u = usdcny.reindex(combined).ffill()
-        wti_cny = (w * u).dropna()
-        return wti_cny
+def _load_divlow() -> pd.Series:
+    """红利低波 ETF（512890，华泰柏瑞）：真实累计净值 + 中证红利低波指数（H30269）代理。
 
-    # 只有 LOF 无 WTI → 直接用 LOF
-    if has_lof and not has_wti:
-        return sc
-
-    # 两者都有 → 拼接: WTI proxy pre-LOF, LOF 2016+
-    if not has_lof or not has_wti:
-        raise FileNotFoundError("wti / wti_usd 数据均不可用")
-
-    combined = wti_usd.index.union(usdcny.index).sort_values()
-    w = wti_usd.reindex(combined).ffill()
-    u = usdcny.reindex(combined).ffill()
-    wti_proxy = (w * u).dropna()
-
-    return stitch_series(sc, wti_proxy, annual_deduct=0.009)
+    512890 于 2018-12 成立，之前用 H30269 指数代理（2013-12 起，重合期日收益相关 0.996）。
+    与 hs300 相关 0.47（<0.7），是合格的 A 股低波红利风格补充；2026-11-08 起加入三策略。
+    """
+    etf = load_series("divlow")
+    proxy = _load_optional("divlow_proxy")  # data/divlow_proxy.csv（H30269 指数）
+    if etf.empty and proxy is None:
+        raise FileNotFoundError("divlow / divlow_proxy 数据均不可用")
+    if proxy is None:
+        return etf
+    if etf.empty:
+        return proxy
+    return stitch_series(etf, proxy, annual_deduct=0.0)
 
 
 def load_hs300_pe(col_index: int = 2) -> pd.Series:

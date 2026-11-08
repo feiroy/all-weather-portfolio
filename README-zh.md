@@ -5,7 +5,7 @@
 [![Pages](https://img.shields.io/badge/docs-online-blue)](https://idealauror.github.io/all-weather-portfolio/)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
-[![Backtest](https://img.shields.io/badge/backtest-2006--2026-green)]()
+[![Backtest](https://img.shields.io/badge/backtest-2013--2026-green)]()
 </div>
 
 <div align="center">
@@ -14,7 +14,7 @@
 
 </div>
 
-基于 A 股 / 债 / 商品 ETF 真实数据的全天候风险平价回测工程，覆盖 **2006-03 → 至今（~20.7 年，含 2008 金融危机、2013 钱荒）**，提供 **3 套可落地策略**，每套支持 3-4 档现金管理（100% / 85% / 70% / 动态），共 11 个回测。
+基于 A 股 / 债 / 商品 ETF 真实数据的全天候风险平价回测工程，覆盖 **2013-12 → 至今（12.9 年，含 2015 股灾、2016 债灾、2018 熊市、2020 疫情、2022 股债双杀）**，提供 **3 套可落地策略**，每套支持 3-4 档现金管理（100% / 85% / 70% / 动态），共 11 个回测。
 
 在线文档：[https://idealauror.github.io/all-weather-portfolio/](https://idealauror.github.io/all-weather-portfolio/)
 
@@ -23,17 +23,17 @@
 
 | 方案 | 风格 | CAGR | 波动率 | 最大回撤 | Sharpe | 一句话 |
 |------|:----:|:----:|:------:|:--------:|:-----:|--------|
-| **V3-B 保守增强(20d)** | 保守增强 | **6.39%** | 3.40% | **-5.74%** | **1.38** | 逆波动率 20d + nonferr(75d) |
-| **V3-B 风险平价(20d)** | 学院派 | 7.67% | 4.81% | -6.86% | 1.24 | 4 桶等权 HRP + nonferr/gold/sp500/hs300 趋势 + 波动率控制 |
-| **V3c 多元** | 多元全天候 | **7.93%** | 4.97% | -8.19% | 1.25 | 6 资产逆波动率 20d + nonferr/gold/sp500 趋势(75d) |
+| **V3-B 保守增强(20d)** | 保守增强 | **7.53%** | 3.34% | **-4.43%** | **1.75** | 逆波动率 20d + nonferr(75d) |
+| **V3-B 风险平价(20d)** | 学院派 | 8.63% | 4.46% | -6.51% | 1.55 | 4 桶等权 HRP + nonferr/gold/sp500/hs300 趋势 + 波动率控制 |
+| **V3c 多元** | 多元全天候 | **8.40%** | 4.76% | -7.09% | 1.41 | 6 资产逆波动率 20d + nonferr/gold/sp500 趋势(75d) |
 
 > V3-B RP 四重趋势过滤：nonferr(75d) + gold(75d) + sp500(75d) + hs300(30d)；V3c 三重趋势过滤：nonferr(75d) + gold(75d) + sp500(75d)。不含 bond_10y（CAGR +1.43pp, Sharpe -0.02）。V3c 多元 6 资产逆波动率 20d，同样不含 bond_10y。三策略均含原油（WTI 75d 趋势过滤，默认集成）。
 
 | | 定位 | CAGR | MDD | 核心约束 | 趋势过滤 | 负收益年 |
 |--|:--:|:---:|:---:|:--------:|:--------:|:--------:|
-| **V3-B 保守增强** | 保守防御 | ≥ 7% | ≤ -7% | Sharpe ≥ 1.2 | 1 个 | 1 |
+| **V3-B 保守增强** | 保守防御 | ≥ 7% | ≤ -7% | Sharpe ≥ 1.2 | 1 个 | 0 |
 | **V3-B 风险平价** | 进取高回报 | ≥ 8.5% | ≤ -9% | CAGR 优先 | 4 个 | 1 |
-| **V3c 多元** | 中位中枢 | ≥ 8.5% | ≤ -8.5% | 回撤优先 | 3 个 | 1 |
+| **V3c 多元** | 中位中枢 | ≥ 8.5% | ≤ -8.5% | 回撤优先 | 3 个 | 0 |
 
 > 三策略均含原油（WTI 75d 趋势过滤），指标为含原油口径。
 

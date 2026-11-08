@@ -70,7 +70,7 @@ def compute_signal_states(prices):
     signals["gold_below_sma75"] = _sma_filter(prices, "gold", 75)
     signals["sp500_below_sma75"] = _sma_filter(prices, "us_sp500", SP500_TREND_WINDOW)
     # 下面两条回测引擎一直有，实盘原来漏了：原油 75 日（三个策略）、沪深300 30 日（仅风险平价）
-    signals["wti_below_sma75"] = _sma_filter(prices, "wti", 75)
+    signals["wti_below_sma75"] = _sma_filter(prices, "ene", 75)
     signals["hs300_below_sma30"] = _sma_filter(prices, "hs300", HS300_TREND_WINDOW)
 
     # HS300 是否站上 SMA120（「宏观季节」判断增长方向用，shift(1) 与回测一致）

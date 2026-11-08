@@ -4,12 +4,12 @@ import pandas as pd
 import pytest
 
 ASSETS_8 = ["hs300", "us_sp500", "credit", "bond_10y", "bond_30y",
-            "gold", "nonferr", "wti"]
+            "gold", "nonferr", "ene"]
 
 
 @pytest.fixture(scope="session")
 def synthetic_prices():
-    """生成 500 × 8 合成价格数据。
+    """生成 500 × 9 合成价格数据（含 ene 能化、divlow 红利低波）。
 
     结构：
     - 多数资产以温和漂移 + 噪声向上
@@ -29,7 +29,9 @@ def synthetic_prices():
         "bond_30y":  {"drift": 0.0003, "vol": 0.007},
         "gold":      {"drift": 0.0003, "vol": 0.008},
         "nonferr":   {"drift": 0.0003, "vol": 0.010},
-        "wti":       {"drift": 0.0002, "vol": 0.015},
+        "ene":       {"drift": 0.0002, "vol": 0.015},
+    # divlow 用独立 drift/vol；真实数据里它与 hs300 相关 0.47，合成数据独立生成即可
+        "divlow":    {"drift": 0.0004, "vol": 0.011},
     }
 
     data = {}

@@ -38,14 +38,14 @@ HOLDINGS_FILE = DATA_DIR / "holdings.json"
 # 位置 → 所属桶（用于把策略权重按桶汇总，再跟我自己的持仓比）
 SLOT_BUCKET = {a: b for b, members in BUCKET_GROUPS.items() for a in members}
 # 老配置里 bond_10y / bond_30y 的桶名就是自身，BUCKET_GROUPS 已覆盖，兜底防缺失
-for _a in ("hs300", "us_sp500", "credit", "bond_10y", "bond_30y", "gold", "nonferr", "wti"):
+for _a in ("hs300", "us_sp500", "credit", "bond_10y", "bond_30y", "gold", "nonferr", "ene", "divlow"):
     SLOT_BUCKET.setdefault(_a, _a)
 
-SLOTS = ["hs300", "us_sp500", "credit", "bond_10y", "bond_30y", "gold", "nonferr", "wti"]
+SLOTS = ["hs300", "us_sp500", "credit", "bond_10y", "bond_30y", "gold", "nonferr", "ene", "divlow"]
 SLOT_LABEL = {
     "hs300": "增长↑权益(A股)", "us_sp500": "增长↑权益(海外)", "credit": "收益垫(信用债)",
     "bond_10y": "增长↓10Y国债", "bond_30y": "增长↓30Y国债", "gold": "通胀↑黄金",
-    "nonferr": "通胀↑有色", "wti": "通胀↑能源",
+    "nonferr": "通胀↑有色", "ene": "通胀↑能源", "divlow": "增长↑红利低波",
 }
 
 # 桶名（不同策略下桶的粒度不同，统一成这 8 个位置级别的桶来比）
@@ -226,7 +226,7 @@ def nav_detail_series(code: str, detail_dir: Path | None = None) -> pd.Series | 
     detail_files = {
         "hs300": "hs300", "us_sp500": "us_sp500", "credit": "bond_credit",
         "bond_10y": "bond_10y_etf", "bond_30y": "bond_30y_etf", "gold": "gold",
-        "nonferr": "nonferr", "wti": "wti",
+        "nonferr": "nonferr", "ene": "ene",
     }
     fname = next((f for s, f in detail_files.items() if ETF_META.get(s, {}).get("code") == code), None)
     if not fname:
