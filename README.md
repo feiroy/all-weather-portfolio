@@ -61,7 +61,7 @@ Based on Bridgewater's **four-quadrant macro exposure** framework, selecting fro
 
 > V3c and V3-B RP exclude bond_10y (same growth↓ bucket as bond_30y, shorter duration, redundant contribution).
 >
-> 30Y Treasury ETF (511130) listed Mar 2024. Pre-listing data synthesized in 3 phases: **2005–2020** 10Y index × duration multiplier (×3.0), **2020–2024** spread method (10Y + term spread), **2024+** real data. Synthetic periods deduct 0.3% annualized.
+> 30Y Treasury ETF (511130) listed Mar 2024. Before that, the series is a constant-maturity total return rebuilt from the ChinaBond 30Y yield (coupon + duration × Δy + convexity), minus 0.52%/yr calibrated against 511130; real NAV from 2024-03. The former "10Y index × 3.0 + spread method" amplified coupon income 3× (≈+4.9pp/yr overstatement in 2015–2020) and was retired on 2026-11-08.
 >
 > **Crude oil (Southern Crude Oil LOF 501018)**: default in all three strategies with a 75d trend filter — improves MDD by 1-2pp at a CAGR cost of 0.2-0.3pp, diversifying within the inflation bucket alongside gold and non-ferrous metals. Tradeable on-exchange as a LOF.
 

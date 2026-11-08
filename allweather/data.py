@@ -2,7 +2,7 @@
 import functools
 import pandas as pd
 import numpy as np
-from .config import DATA_DIR, BACKTEST_START, BACKTEST_END, BOND_30Y_AMP, BOND_30Y_SPREAD_CUTOFF, BOND_30Y_DURATION, SAFETY_DEDUCT
+from .config import DATA_DIR, BACKTEST_START, BACKTEST_END, BOND_30Y_TENOR, SAFETY_DEDUCT
 
 
 @functools.lru_cache(maxsize=32)
@@ -65,110 +65,68 @@ def stitch_series(etf: pd.Series, proxy: pd.Series,
     return pd.concat([proxy_part, etf]).sort_index()
 
 
-def _load_cgb_yields_spread() -> pd.Series:
-    """从 cgb_yields.csv 读取 10Y-30Y 利差日序列。
+def _load_cgb_yield(tenor_col: str = "30年") -> pd.Series:
+    """中债国债收益率曲线某个期限的日序列（小数，如 0.0203）。文件没有返回空序列。
 
-    优先使用位置索引（列8=10Y, 列9=30Y），避免中文编码依赖。
-    回退到 substring 匹配。
+    cgb_yields.csv 是 akshare bond_china_yield 原样落盘：列 1 = 日期，列名「30年」「10年」…；
+    取不到中文列名时按位置回退（列 9 = 30 年）。
     """
     path = DATA_DIR / "cgb_yields.csv"
     if not path.exists():
         return pd.Series(dtype=float)
-
     df = pd.read_csv(path)
     if df.empty or len(df.columns) < 10:
         return pd.Series(dtype=float)
-
-    try:
-        date_col = df.columns[1]
-        y10_col = df.columns[8]
-        y30_col = df.columns[9]
-        spread = pd.to_numeric(df[y30_col], errors="coerce") - pd.to_numeric(df[y10_col], errors="coerce")
-        dates = pd.to_datetime(df[date_col], errors="coerce")
-        spread.index = dates
-        spread = spread.dropna().sort_index()
-        return spread / 100.0
-    except Exception as e:
-        print(f"  [WARN] 收益率曲线列索引解析失败，尝试 substring 回退: {e}")
-
-    # 回退：substring 匹配
-    date_col = df.columns[1]
-    cols = df.columns.tolist()
-    y10_col = next((c for c in cols if "10" in str(c)), None)
-    y30_col = next((c for c in cols if "30" in str(c)), None)
-    if y10_col is None or y30_col is None:
-        return pd.Series(dtype=float)
-    spread = pd.to_numeric(df[y30_col], errors="coerce") - pd.to_numeric(df[y10_col], errors="coerce")
-    dates = pd.to_datetime(df[date_col], errors="coerce")
-    spread.index = dates
-    return spread.dropna().sort_index() / 100.0
+    col = tenor_col if tenor_col in df.columns else df.columns[9]
+    y = pd.to_numeric(df[col], errors="coerce")
+    y.index = pd.to_datetime(df[df.columns[1]], errors="coerce")
+    y = y[~y.index.duplicated(keep="last")].dropna().sort_index()
+    return y / 100.0
 
 
-def synthesize_bond_30y(s_10y: pd.Series, s_30y_etf: pd.Series) -> pd.Series:
-    """合成 30Y 国债序列，三阶段拼接：
+def bond_total_return_from_yield(y: pd.Series, tenor: float) -> pd.Series:
+    """恒定期限票面国债的总回报指数（起点 1.0），只用收益率曲线、不依赖任何 ETF。
 
-    1. 2015-01 ~ 2020-02：×3.0 久期放大（扣减 0.3%/年）
-    2. 2020-02 ~ 2024-03：利差法（10Y-30Y spread × duration 18.0）
-    3. 2024-03 ~ now：ETF 511130 真实 NAV
+    每个交易日：按昨日收益率 y0 买入票面利率 = y0 的面值债，持有 dt 年后按今日收益率 y1、
+    剩余期限 tenor-dt 重新定价（年付息票面债精确定价），再加持有期票息 y0·dt。
+    即 票息 + 久期×Δy + 凸性，全部来自真实收益率，不会像「10Y 日收益 × 3」那样把票息也放大 3 倍。
     """
-    cb10_ret = s_10y.pct_change().dropna()
-    etf_start = s_30y_etf.index.min()
+    y = y.dropna()
+    dt = y.index.to_series().diff().dt.days.fillna(0) / 365.0
+    y0, n = y.shift(1), tenor - dt
+    price = y0 / y * (1 - (1 + y) ** -n) + (1 + y) ** -n
+    r = (price - 1) + y0 * dt
+    return (1 + r.fillna(0.0)).cumprod()
 
-    # 阶段 1: ×3.0 久期放大（全段先算）
-    amp_ret = cb10_ret * BOND_30Y_AMP
-    amp_nv = (1 + amp_ret).cumprod()
-    amp_nv = amp_nv / amp_nv.iloc[0]
 
-    # 阶段 2: 利差法
-    spread = _load_cgb_yields_spread()
-    spread_cutoff = pd.Timestamp(BOND_30Y_SPREAD_CUTOFF)
+def synthesize_bond_30y(s_10y: pd.Series | None, s_30y_etf: pd.Series) -> pd.Series:
+    """30Y 国债序列：511130 上市前用中债 30 年收益率重建总回报，上市后用 ETF 真实累计净值。
 
-    if not spread.empty and spread.index.min() <= spread_cutoff:
-        cb10_aligned = cb10_ret[cb10_ret.index >= spread.index.min()]
-        spread_aligned = spread.reindex(cb10_aligned.index).ffill()
-        spread_daily = spread_aligned.diff().fillna(0.0)
-        dur = BOND_30Y_DURATION
-        spread_ret = cb10_aligned * BOND_30Y_AMP - dur * spread_daily
-        spread_nv = (1 + spread_ret).cumprod()
-        spread_nv = spread_nv[spread_nv.index >= spread_cutoff]
-    else:
-        spread_nv = pd.Series(dtype=float)
+    2026-11-08 审计后重写。旧做法「2015-02~2020-02 用 10Y 指数日收益 ×3、2020-02~2024-03 利差法」
+    有两个问题：① 10Y 指数日收益里含票息，×3 把票息也放大了 3 倍 —— 实测该段年化 11.36%，
+    而用中债 30Y 收益率重建的上限只有 6.45%（高估 4.91pp/年，2018 年 +24.0% vs +16.7%）；
+    ② 利差数据只拉到了 2020 年（见 fetch_cgb_yields），2021 后实际又退化成 ×3。
+    修正后三策略全区间年化下降 0.53~0.78pp，见 CLAUDE.md「数据口径：30 年国债」。
 
-    synth = amp_nv.copy()
-
-    # 阶段2 覆盖
-    if not spread_nv.empty:
-        stitch_pt = spread_nv.index.min()
-        if stitch_pt in synth.index:
-            spread_nv = spread_nv * (synth.loc[stitch_pt] / spread_nv.iloc[0])
-            synth = pd.concat([synth[synth.index < stitch_pt], spread_nv])
-
-    # 阶段3: ETF 真实数据覆盖
-    if etf_start in synth.index:
-        etf_norm = s_30y_etf / s_30y_etf.iloc[0] * synth.loc[etf_start]
-        synth = pd.concat([synth[synth.index < etf_start],
-                           etf_norm[etf_norm.index >= etf_start]])
-
-    # 阶段1 段安全扣减
-    if not spread_nv.empty:
-        phase1_end = min(spread_cutoff, spread_nv.index.min())
-    else:
-        phase1_end = etf_start
-    daily_deduct = SAFETY_DEDUCT["bond_30y"] / 252.0
-    phase1_mask = synth.index < phase1_end
-    if phase1_mask.any():
-        phase1_ret = synth[phase1_mask].pct_change().dropna() - daily_deduct
-        phase1_corrected = (1 + phase1_ret).cumprod()
-        phase1_corrected = phase1_corrected / phase1_corrected.iloc[0]
-        if len(phase1_corrected) > 0:
-            anchor_idx = phase1_corrected.index[-1]
-            if anchor_idx in synth.index:
-                phase1_corrected = phase1_corrected * (
-                    synth.loc[anchor_idx] / phase1_corrected.iloc[-1])
-            post_phase1 = synth[synth.index > phase1_corrected.index[-1]]
-            synth = pd.concat([phase1_corrected, post_phase1])
-
-    return synth.sort_index()
+    重建段扣 SAFETY_DEDUCT["bond_30y"]：用 511130 上市后的重合期校准（重建比 ETF 高约 0.5pp/年，
+    即管理费 + 跟踪误差）。s_10y 只用来提供交易所交易日历。
+    """
+    y30 = _load_cgb_yield("30年")
+    if y30.empty or s_30y_etf.empty:
+        raise FileNotFoundError(
+            "合成 30Y 需要 data/cgb_yields.csv（中债国债收益率曲线，2014 起）和 bond_30y_etf.csv；"
+            "运行 py main.py 或 python -c 'from allweather.fetch import fetch_all; fetch_all()' 拉取")
+    # 面板共同起点是 2015-01（中证短融指数起点），收益率必须覆盖到它之前，否则 30Y 会把整个面板截短
+    if y30.index.min() > pd.Timestamp("2015-01-05"):
+        raise ValueError(f"cgb_yields.csv 只从 {y30.index.min().date()} 开始，覆盖不到回测起点 2015-01；"
+                         "删掉该文件后重新拉取（fetch_all 会按年补全到 2014）")
+    recon = bond_total_return_from_yield(y30, BOND_30Y_TENOR)
+    # 对齐到交易所日历：银行间在调休周六也有收益率（2015~2026 多 46 天），不对齐会把这些日子
+    # 塞进面板 —— 其它资产当天收益为 0、月末判断也会落到周六。用 10Y ETF/指数的交易日历。
+    if s_10y is not None and len(s_10y):
+        cal = s_10y.index.union(s_30y_etf.index)
+        recon = recon.reindex(recon.index.union(cal)).ffill().reindex(cal).dropna()
+    return stitch_series(s_30y_etf, recon, annual_deduct=SAFETY_DEDUCT["bond_30y"])
 
 
 def _load_bond_10y() -> pd.Series:

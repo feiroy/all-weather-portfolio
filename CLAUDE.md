@@ -20,7 +20,7 @@ This file provides guidance to Claude Code when working with code in this reposi
 ## 前置原则
 ### 第 0 层：哲学基座
 方法论的底层。所有 Sperandeo 原则之所以成立，是因为它们符合以下更根本的认知规律：
-**实事求是。** 每个参数回答"为什么在中国数据上成立"。桥水原版是起点不是终点。30Y 三阶段合成、nonferr 75d — 全是实事求是的结果。
+**实事求是。** 每个参数回答"为什么在中国数据上成立"。桥水原版是起点不是终点。30Y 收益率重建、nonferr 75d — 全是实事求是的结果。
 **矛盾论。** 80/20 是主要矛盾的量化。桶结构是主要方面，内部加权是次要方面。牛市收益是主要矛盾，熊市回撤是主要矛盾。不同质的矛盾用不同方法解决。
 **实践论。** 7 步闭环 = 认识→实践→再认识。memory 是实践记录，否决≠删除。具体分析见 `docs/framework/马克思主义.md`。
 ### Sperandeo 三层结构
@@ -350,9 +350,9 @@ CI：`.github/workflows/backtest.yml` 跑 `py main.py`，检查 Sharpe/MDD 边�
 ## 策略速查
 | 策略 | 一句话 |
 |------|--------|
-| V3-B 保守增强(20d) | 逆波动率20d + nonferr75d趋势 — Sharpe 1.80 |
-| V3c 多元 | 6资产逆波动率20d + nonferr/gold/sp500趋势75d — MDD -6.05% |
-| V3-B 风险平价(20d) | 4桶HRP + 四重趋势 + target_vol=9% — CAGR 8.08% |
+| V3-B 保守增强(20d) | 逆波动率20d + nonferr75d趋势 — Sharpe 1.65 |
+| V3c 多元 | 6资产逆波动率20d + nonferr/gold/sp500趋势75d — MDD -6.56% |
+| V3-B 风险平价(20d) | 4桶HRP + 四重趋势 + target_vol=9% — CAGR 7.49% |
 增长↑(hs300,sp500) | 收益垫(credit) | 增长↓10Y(bond_10y) | 增长↓30Y(bond_30y) | 通胀↑(gold,nonferr)
 ## 策略参考
 
@@ -392,6 +392,12 @@ V3-B RP 和 V3c 去掉了 bond_10y（CAGR +1.43pp，Sharpe 仅 -0.02）。
 | `REBAL_MODE` | month_end | 调仓日：月末最后交易日（远离期货换月窗口，三策略受益） |
 
 > 代码中的权威定义在 `config.py`。
+
+### 数据口径：30 年国债（2026-11-08 审计后重写）
+- 511130 上市（2024-03）前，`bond_30y` = 中债 30 年国债收益率重建的恒定期限总回报（`data.bond_total_return_from_yield`），对齐交易所日历后与 ETF 缝合，扣 `SAFETY_DEDUCT["bond_30y"] = 0.52%/年`（重建 vs 511130 重合期校准）。
+- **禁止退回「10Y 日收益 × 3」或任何「收益率序列 × 久期倍数」的做法**：日收益里含票息，乘倍数会把票息一起放大（旧法 2015–2020 年化 11.36% vs 重建 6.45%，高估 4.9pp/年；修正后三策略年化 -0.53~-0.78pp）。
+- `data/cgb_yields.csv` 必须覆盖 2014 起：`ak.bond_china_yield()` 不传日期只给 2020 一年（旧文件就是这样，利差法 2021 后静默退化成 ×3）。`fetch_cgb_yields` 按年分段拉，覆盖不到 2015-01 时 `synthesize_bond_30y` 直接报错，不静默回退。
+- 银行间收益率在调休周六也有数据，重建序列必须对齐到 10Y ETF 的交易日历，否则面板会多出非交易所交易日（实测 2901 → 2947 行）。
 
 ## 架构参考
 

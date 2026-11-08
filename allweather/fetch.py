@@ -305,20 +305,38 @@ def _fetch_sp500_idx(start, end):
     return df[["date", "close"]].sort_values("date")
 
 
-def fetch_cgb_yields():
-    """拉取中债国债收益率曲线。失败返回 None。
+CGB_YIELDS_START = 2014   # 30Y 合成要覆盖回测起点 2015-01 之前的预热
 
-    返回的 DataFrame 通过位置匹配列名，避免中文编码问题。
+
+def fetch_cgb_yields(existing: pd.DataFrame | None = None):
+    """拉取中债国债收益率曲线（全历史，按年分段）。失败返回 None。
+
+    `ak.bond_china_yield()` 不传日期时默认只给 2020-01-01~2021-01-01 这一年（akshare 的默认参数），
+    之前这里不传日期，文件里一直只有 2020 年 246 行 —— 30Y 利差法在 2021-01 之后利差被 ffill 成常数，
+    实际退化成 10Y×3（2026-11-08 审计发现）。现在按自然年逐段拉，已有文件只重拉最后一年（增量）。
     """
     try:
         import akshare as ak
-        df = ak.bond_china_yield()
-        if df is None or df.empty:
+        first = CGB_YIELDS_START
+        if existing is not None and len(existing):
+            first = int(str(pd.to_datetime(existing.iloc[:, 1]).max().year))
+        frames = [] if existing is None else [existing]
+        today = pd.Timestamp.today()
+        for y in range(first, today.year + 1):
+            d = ak.bond_china_yield(start_date=f"{y}0101", end_date=min(f"{y}1231", today.strftime("%Y%m%d")))
+            if d is None or d.empty:
+                continue
+            if "曲线名称" in d.columns:
+                d = d[d["曲线名称"].str.contains("国债", na=False)]
+            frames.append(d)
+        if not frames:
             return None
-        if "曲线名称" in df.columns:
-            df = df[df["曲线名称"].str.contains("国债", na=False)]
-        return df
-    except Exception:
+        df = pd.concat(frames, ignore_index=True)
+        date_col = df.columns[1]
+        df[date_col] = pd.to_datetime(df[date_col]).dt.strftime("%Y-%m-%d")
+        return df.drop_duplicates(subset=[df.columns[0], date_col], keep="last").sort_values(date_col)
+    except Exception as e:
+        print(f"    WARN  bond_china_yield 失败: {str(e)[:120]}")
         return None
 
 
@@ -430,13 +448,19 @@ def fetch_all(force: bool = False, start: str = DEFAULT_START, end: str = DEFAUL
     if _skip_yield:
         print(f"  >> cgb_yields 今日已更新，跳过（全量接口）", flush=True)
     else:
-        print(f"  >> cgb_yields (bond_china_yield)", flush=True)
-        yield_df = fetch_cgb_yields()
+        print(f"  >> cgb_yields (bond_china_yield，按年增量)", flush=True)
+        old = None
+        if yield_path.exists() and not force:
+            old = pd.read_csv(yield_path)
+            # 旧文件不覆盖 2014 年（以前只有 2020 一年）→ 当作没有，全量重拉
+            if pd.to_datetime(old.iloc[:, 1]).min().year > CGB_YIELDS_START:
+                old = None
+        yield_df = fetch_cgb_yields(old)
         if yield_df is not None and not yield_df.empty:
             yield_df.to_csv(yield_path, index=False, encoding="utf-8")
-            print(f"    ok  n={len(yield_df)}")
+            print(f"    ok  n={len(yield_df)}  {yield_df.iloc[0, 1]} → {yield_df.iloc[-1, 1]}")
         else:
-            print(f"    WARN  中债收益率曲线拉取失败，将使用久期放大回退方案合成 30Y")
+            print(f"    WARN  中债收益率曲线拉取失败，沿用本地 cgb_yields.csv")
 
     print(f"\n=== 拉取摘要 ===")
     print(f"  成功: {len(ok)}    已最新: {len(up_to_date)}    失败: {len(errors)}")
