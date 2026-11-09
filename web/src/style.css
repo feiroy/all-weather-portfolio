@@ -6,7 +6,11 @@
 }
 *{ -webkit-tap-highlight-color:transparent; }
 html,body{ margin:0; background:var(--bg); color:var(--ink);
-  font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Noto Sans SC","Microsoft YaHei",sans-serif; }
+  font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Noto Sans SC","Microsoft YaHei",sans-serif;
+  /* 触控板两指左右滑 = 平移曲线，不能被浏览器当成「前进/后退」手势：
+     页面本身不横向滚动，横向 overscroll 就会触发 macOS 的返回上一页（用户 2026-11-09 报：
+     在图上左右拖动，整页被退回上一页）。这里禁掉根容器的横向 overscroll 链。 */
+  overscroll-behavior-x:none; }
 .num{ font-variant-numeric:tabular-nums; }
 .up{ color:var(--up) } .down{ color:var(--down) }
 /* 规则（CLAUDE.md「时间轴平移交互规范」）：曲线容器纵向滑动交给页面滚动，

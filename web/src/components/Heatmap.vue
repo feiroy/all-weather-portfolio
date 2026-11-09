@@ -54,11 +54,12 @@ const maxAbs = computed(() => {
 // （26px 时实测标签首尾相接，看起来像「09/1809/21」）。日线近1年 = 243 列，
 // 硬塞进 760px 只有 3px/格，肉眼只能看到一条彩色条纹（2026-11-09 验收发现）。
 // 这里沿用全站时间轴那套：给全量数据，窗口只决定初始可见列，左右拖动能看到更早的期间。
-// 手机窄屏放不下日期标签，格子收到 22px、靠 tooltip 读值。
+// 手机也按 34px 给：22px 时「10/28」和邻格首尾相接（实测糊成一串 10/2810/27），
+// 宁可一屏少两列，靠左右拖动看更早。
 const win = ref({ start: 0, end: 100 })
 
-function winOf(plotW, n, wide) {
-  const cell = wide ? 34 : 22
+function winOf(plotW, n) {
+  const cell = 34
   const vis = Math.max(6, Math.min(n, Math.floor(plotW / cell)))
   return { vis, start: n > vis ? +((1 - vis / n) * 100).toFixed(2) : 0, more: n > vis }
 }
@@ -83,7 +84,7 @@ function build() {
   const boxW = el.value?.clientWidth || 320
   const nameW = boxW >= 560 ? 104 : 78
   const plotW = boxW - (nameW + 10) - 30
-  const { vis, start, more } = winOf(plotW, xs.length, boxW >= 560)
+  const { vis, start, more } = winOf(plotW, xs.length)
   // 格子窄到放不下「+1.4」时不要写字，否则文字会压到隔壁格子（手机 14 列时约 14px）
   const cellW = plotW / Math.max(1, vis)
   const labelsOff = vis > 40 || cellW < 26     // 放不下「+1.4」就不写字
@@ -141,7 +142,9 @@ function build() {
       show: false, min: -maxAbs.value, max: maxAbs.value, calculable: false,
       inRange: { color: ['#16703B', '#F7F9F8', '#C52828'] },   // 跌绿 → 近白 → 涨红
     },
-    // 与全站时间轴同一套：只留 inside（禁止 slider 滑块条），拖动平移 + 双击复位由 attachWheel 接管
+    // 与全站时间轴同一套：只留 inside（禁止 slider 滑块条）。
+    // 水平拖动自己接管（见 onPanDown）：热力图的格子上按下时 ECharts 自带的 moveOnMouseMove
+    // 实测拖不动（dataZoom 不变），和 MultiLine 双面板是同一个毛病。
     dataZoom: [{
       type: 'inside', xAxisIndex: 0, start, end: 100,
       zoomOnMouseWheel: false, moveOnMouseWheel: false, moveOnMouseMove: false,
@@ -169,6 +172,35 @@ function syncSpan() {
 // 双击复位：回到当前区间算出来的初始窗口（不是全量 —— 全量是一堵条纹墙）
 function reset() { if (chart) chart.dispatchAction({ type: 'dataZoom', ...win.value }) }
 const onDbl = () => reset()
+
+// 鼠标按住左右拖动 = 平移时间轴（与所有曲线一致）。
+// 必须自己算：热力图上按下时 ECharts 的 moveOnMouseMove 实测不生效（dataZoom 一点不动）；
+// 并且要在捕获阶段拦住 zrender 的 mousedown，否则它会按自己的拖拽态把窗口拉回去。
+let panFrom = null
+const plotW = () => {
+  try { return chart.getModel().getComponent('grid', 0).coordinateSystem.getRect().width } catch { return 600 }
+}
+const dzState = () => {
+  const x = ((chart && chart.getOption()) || {}).dataZoom?.[0] || {}
+  return { start: x.start ?? 0, end: x.end ?? 100 }
+}
+function onPanDown(e) {
+  if (!chart || e.button !== 0) return
+  const r = el.value.getBoundingClientRect()
+  if (e.clientY - r.top < 4) return              // 顶部留给 tooltip 触发，不抢
+  e.stopPropagation()
+  panFrom = { x: e.clientX, dz: dzState() }
+}
+function onPanMove(e) {
+  if (!panFrom || !chart) return
+  const dx = e.clientX - panFrom.x
+  if (!dx) return
+  const span = panFrom.dz.end - panFrom.dz.start
+  const shift = -(dx / plotW()) * 100
+  const start = Math.max(0, Math.min(100 - span, panFrom.dz.start + shift))
+  chart.dispatchAction({ type: 'dataZoom', start, end: start + span })
+}
+const onPanUp = () => { panFrom = null }
 // 行名被省略号截断：用容器上的 DOM mousemove 判断指针是否落在最左那条行名带里
 // （zr 的 mousemove 在真实鼠标下收不到、axisLabel.triggerEvent 也被 tooltip 吃掉，DOM 事件最稳）
 function onHover(e) {
@@ -192,6 +224,9 @@ onMounted(() => {
   el.value.addEventListener('mousemove', onHover)
   el.value.addEventListener('mouseleave', onLeave)
   el.value.addEventListener('dblclick', onDbl)
+  el.value.addEventListener('mousedown', onPanDown, true)   // 捕获阶段：zrender 会吃掉 canvas 上的 mousedown
+  window.addEventListener('mousemove', onPanMove)
+  window.addEventListener('mouseup', onPanUp)
   chart.on('dataZoom', syncSpan)
   detachWheel = attachWheel(chart, el.value)
   syncSpan()
@@ -203,6 +238,9 @@ onBeforeUnmount(() => {
   el.value?.removeEventListener('mousemove', onHover)
   el.value?.removeEventListener('mouseleave', onLeave)
   el.value?.removeEventListener('dblclick', onDbl)
+  el.value?.removeEventListener('mousedown', onPanDown, true)
+  window.removeEventListener('mousemove', onPanMove)
+  window.removeEventListener('mouseup', onPanUp)
   detachWheel && detachWheel()
   window.removeEventListener('resize', resize)
   chart && chart.dispose()

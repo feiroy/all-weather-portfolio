@@ -309,6 +309,38 @@
   "size": 3981360285.1,
   "type": "指数型-股票"
  },
+ "015279": {
+  "buy_rate": 0.0,
+  "buy_rate_raw": 0.0,
+  "code": "015279",
+  "company": "东财基金",
+  "exchange": false,
+  "fetched_at": "2026-11-09",
+  "inception": "2022-03-02",
+  "manager": "姚楠燕",
+  "min_buy": 10.0,
+  "name": "东财沪深300C",
+  "redeem": [
+   {
+    "max_days": 7,
+    "min_days": 0,
+    "rate": 0.015
+   },
+   {
+    "max_days": null,
+    "min_days": 7,
+    "rate": 0.001
+   },
+   {
+    "max_days": null,
+    "min_days": 30,
+    "rate": 0.0
+   }
+  ],
+  "risk": "中高",
+  "size": 65347597.44,
+  "type": "指数型-股票"
+ },
  "023411": {
   "buy_rate": 0.0,
   "buy_rate_raw": 0.0,
