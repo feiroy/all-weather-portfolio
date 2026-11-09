@@ -47,6 +47,12 @@ def fixed_weight_backtest(rets: pd.DataFrame, weights: pd.Series, freq: str = "M
     return nv
 
 
+# 老策略兼容：V7 基金池把「原油 LOF」换成了能源化工 ETF，ETF_META 里已经没有 wti。
+# 用户浏览器里存着的旧策略仍带 'wti'（当年是资产 key、不是 6 位代码），不兜底就会报
+# 「基金 wti 拉不到净值」——拿着内部 key 当代码去查，用户完全看不懂（2026-11-09 验收发现）。
+_LEGACY_KEY_CODE = {"wti": "501018"}
+
+
 def _resolve(key: str, panel: pd.DataFrame):
     """一个 key → (净值序列, 名称, 来源, 展示代码)。"""
     import fund_lookup as FL
@@ -58,6 +64,7 @@ def _resolve(key: str, panel: pd.DataFrame):
         m = ETF_META.get(asset, {})
         return panel[asset], m.get("name") or asset, "策略资产", m.get("code") or key
 
+    key = _LEGACY_KEY_CODE.get(key, key)   # 已下线的老资产 key → 真实基金代码
     nav = FL.build_nav(key)
     if nav is None or len(nav) < 2:
         try:

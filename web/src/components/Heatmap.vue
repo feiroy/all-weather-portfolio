@@ -2,7 +2,7 @@
   <div class="aw-chart-box">
     <div ref="el" class="aw-chart" :style="{ height: h + 'px' }"></div>
     <div v-if="tip" class="row-tip" :style="{ top: tip.y + 'px' }">{{ tip.text }}</div>
-    <ChartState :note="dense ? '日线粒度格子太密，切月线更好读' : ''" :range="span" />
+    <ChartState :note="note" :range="span" />
   </div>
 </template>
 <script setup>
@@ -11,13 +11,14 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts/core'
 import { HeatmapChart } from 'echarts/charts'
-import { GridComponent, TooltipComponent, VisualMapComponent } from 'echarts/components'
+import { GridComponent, TooltipComponent, VisualMapComponent, DataZoomComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import ChartState from './ChartState.vue'
 import { axisLabel, rangeText } from '../utils/chartAxis'
 import { CHART, TIP_BASE, tipRows } from '../utils/chartTheme'
+import { attachWheel } from '../utils/chartWheel'
 
-echarts.use([HeatmapChart, GridComponent, TooltipComponent, VisualMapComponent, CanvasRenderer])
+echarts.use([HeatmapChart, GridComponent, TooltipComponent, VisualMapComponent, DataZoomComponent, CanvasRenderer])
 
 const props = defineProps({
   series: Object,                       // { 策略名: { dates:[], labels:[], ret:[] } }
@@ -40,16 +41,27 @@ const names = computed(() => Object.keys(props.series || {}))
 const labels = computed(() => props.series[names.value[0]]?.labels || [])
 const dates = computed(() => props.series[names.value[0]]?.dates || [])
 const h = computed(() => Math.max(90, names.value.length * props.rowHeight + 52))
+const note = ref('')
 
 // 颜色：以绝对值最大值为对称端点，0 落在近白的中点，涨红跌绿（中国习惯）
-// 列太多（日线长区间）时格子只剩几像素，提示换粒度
-const dense = computed(() => labels.value.length > 120)
-
 const maxAbs = computed(() => {
   let m = 0
   for (const n of names.value) for (const v of props.series[n].ret || []) if (v != null) m = Math.max(m, Math.abs(v))
   return m || 1
 })
+
+// 目标格子宽度：「09/18」在 9px 下约 22px 宽，两侧各留 6px 才不会和邻格粘成一串
+// （26px 时实测标签首尾相接，看起来像「09/1809/21」）。日线近1年 = 243 列，
+// 硬塞进 760px 只有 3px/格，肉眼只能看到一条彩色条纹（2026-11-09 验收发现）。
+// 这里沿用全站时间轴那套：给全量数据，窗口只决定初始可见列，左右拖动能看到更早的期间。
+// 手机窄屏放不下日期标签，格子收到 22px、靠 tooltip 读值。
+const win = ref({ start: 0, end: 100 })
+
+function winOf(plotW, n, wide) {
+  const cell = wide ? 34 : 22
+  const vis = Math.max(6, Math.min(n, Math.floor(plotW / cell)))
+  return { vis, start: n > vis ? +((1 - vis / n) * 100).toFixed(2) : 0, more: n > vis }
+}
 
 function build() {
   const ns = names.value
@@ -68,19 +80,18 @@ function build() {
       })
     }
   }
-  // 格子窄到放不下「+1.4」时不要写字，否则文字会压到隔壁格子（手机 14 列时约 14px）
-  // 行名只占窄窄一条（右侧格子才是重点）：桌面 104、手机 78，放不下就省略号，鼠标悬停看全名
   const boxW = el.value?.clientWidth || 320
   const nameW = boxW >= 560 ? 104 : 78
   const plotW = boxW - (nameW + 10) - 30
-  const cellW = plotW / Math.max(1, xs.length)
-  const labelsOff = xs.length > 40 || cellW < 26     // 放不下「+1.4」就不写字
-  const cellsTight = xs.length > 120 || cellW < 9     // 格子只剩几像素时连描边也去掉
-  // **不抽稀**：每列都标日期。放不下横向就竖排（比斜排好读、也不会被左边缘裁掉），
-  // 竖排都放不下说明格子只有几像素，这时整行不画，看 tooltip 更靠谱
-  // 每列都标，从不跳列。放不下完整日期时退成「09/30」（年份由上方状态行给），再放不下就整行不画
-  const plainFits = xs.length * 40 <= plotW
-  const shortFits = xs.length * 24 <= plotW
+  const { vis, start, more } = winOf(plotW, xs.length, boxW >= 560)
+  // 格子窄到放不下「+1.4」时不要写字，否则文字会压到隔壁格子（手机 14 列时约 14px）
+  const cellW = plotW / Math.max(1, vis)
+  const labelsOff = vis > 40 || cellW < 26     // 放不下「+1.4」就不写字
+  const cellsTight = cellW < 9                 // 格子只剩几像素时连描边也去掉
+  // **不抽稀**：可见的每一列都标日期。放不下完整日期时退成「09/30」（年份由下方状态行给），
+  // 再放不下就整行不画（此时靠 tooltip 读值）
+  const plainFits = vis * 40 <= plotW
+  const shortFits = vis * 24 <= plotW
   const shortLabel = v => {
     const t = axisLabel(v)
     return /^\d{4}\//.test(t) ? t.slice(5) : t      // 2026/09/30 → 09/30；「2026年10月」保持原样
@@ -97,6 +108,8 @@ function build() {
     color: CHART.axisText, fontSize: 11, align: 'left', margin: nameW + 6,
     width: nameW, overflow: 'truncate', formatter: wrapName,
   }
+  note.value = more ? `每列 ${vis} 期 · 左右拖动看更早` : ''
+  win.value = { start, end: 100 }
   return {
     animation: false,
     grid: { left: nameW + 10, right: 30, top: 6, bottom: 26 },
@@ -128,6 +141,11 @@ function build() {
       show: false, min: -maxAbs.value, max: maxAbs.value, calculable: false,
       inRange: { color: ['#16703B', '#F7F9F8', '#C52828'] },   // 跌绿 → 近白 → 涨红
     },
+    // 与全站时间轴同一套：只留 inside（禁止 slider 滑块条），拖动平移 + 双击复位由 attachWheel 接管
+    dataZoom: [{
+      type: 'inside', xAxisIndex: 0, start, end: 100,
+      zoomOnMouseWheel: false, moveOnMouseWheel: false, moveOnMouseMove: false,
+    }],
     series: [{
       type: 'heatmap', data: cells,
       itemStyle: { borderWidth: cellsTight ? 0 : 1, borderColor: '#fff', borderRadius: cellsTight ? 0 : 3 },
@@ -138,10 +156,19 @@ function build() {
 }
 const dot = i => `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:${['#1E40AF', '#F59E0B', '#8B5CF6', '#0EA5E9'][i % 4]}"></span>`
 
+// 可见窗口 → 状态行文本：把 dataZoom 百分比换算回真实日期（与 LineChart / iframe 同一口径）
 function syncSpan() {
+  if (!chart) return
   const d = dates.value
-  span.value = d.length ? rangeText(d[0], d[d.length - 1]) : ''
+  if (!d.length) { span.value = ''; return }
+  const dz = (chart.getOption().dataZoom || [])[0] || {}
+  const i = Math.max(0, Math.round((dz.start ?? 0) / 100 * (d.length - 1)))
+  const j = Math.min(d.length - 1, Math.round((dz.end ?? 100) / 100 * (d.length - 1)))
+  span.value = rangeText(d[i], d[j])
 }
+// 双击复位：回到当前区间算出来的初始窗口（不是全量 —— 全量是一堵条纹墙）
+function reset() { if (chart) chart.dispatchAction({ type: 'dataZoom', ...win.value }) }
+const onDbl = () => reset()
 // 行名被省略号截断：用容器上的 DOM mousemove 判断指针是否落在最左那条行名带里
 // （zr 的 mousemove 在真实鼠标下收不到、axisLabel.triggerEvent 也被 tooltip 吃掉，DOM 事件最稳）
 function onHover(e) {
@@ -157,12 +184,16 @@ function onHover(e) {
 }
 const onLeave = () => { tip.value = null }
 
+let detachWheel = null
 onMounted(() => {
   chart = echarts.init(el.value, null, { renderer: 'canvas' })
-  chart.setOption(build())
+  chart.setOption(build(), true)
   el.value.__awChart = chart      // 与 MultiLine 一致，便于调试/自动化断言
   el.value.addEventListener('mousemove', onHover)
   el.value.addEventListener('mouseleave', onLeave)
+  el.value.addEventListener('dblclick', onDbl)
+  chart.on('dataZoom', syncSpan)
+  detachWheel = attachWheel(chart, el.value)
   syncSpan()
   window.addEventListener('resize', resize)
 })
@@ -171,6 +202,8 @@ watch(() => props.series, () => { if (chart) { chart.setOption(build(), true); s
 onBeforeUnmount(() => {
   el.value?.removeEventListener('mousemove', onHover)
   el.value?.removeEventListener('mouseleave', onLeave)
+  el.value?.removeEventListener('dblclick', onDbl)
+  detachWheel && detachWheel()
   window.removeEventListener('resize', resize)
   chart && chart.dispose()
 })

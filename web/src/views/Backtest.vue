@@ -7,9 +7,9 @@
           <div class="chips"><span v-for="c in cads" :key="c.k" class="chip" :class="{ on: cad === c.k }" @click="cad = c.k">{{ c.t }}</span></div></div>
         <div class="row" v-if="cad !== 'mine'"><span class="lb">起点</span>
           <select v-model="start" class="yr">
-            <option v-for="y in years" :key="y" :value="`${y}-01-01`">{{ y }} 年起</option>
+            <option v-for="o in startOpts" :key="o.y" :value="o.v">{{ o.y }} 年起</option>
           </select>
-          <span class="k">内置三策略与我的策略统一从这一天开始</span></div>
+          <span class="k">内置三策略与我的策略统一从这一天开始<template v-if="availYear > 2006">（数据实际从 {{ availText }} 起，再往前没有红利低波 ETF）</template></span></div>
         <p class="k" v-if="cad === 'mine'">从账户建立那天起，只在你实际有买卖的日子调仓，和「每月末调仓」对照 —— 看你的操作节奏有没有拖后腿</p>
         <p class="k" v-else-if="cad !== 'monthly'">虚线是同策略「每月末调仓」做对照；差值看下表「比月末」</p>
       </div>
@@ -91,7 +91,9 @@
           <p class="rsum-cap">
             区间指标 · <b>{{ cadLabel }}</b>调仓口径<template v-if="rangeStats.some(t => t.cum != null)">（最后两列是与月末对照的差）</template>
           </p>
-          <table class="rsum">
+          <!-- 单节奏（月末）时「与月末的差」恒无值：整列都是「—」就整列去掉，
+               别留两列破折号（CLAUDE.md 回测指标卡同一条规矩：单节奏不显示节奏列） -->
+          <table class="rsum" :class="{ 'no-opt': !rangeStats.some(t => t.cum != null) }">
             <thead><tr>
               <th>策略</th><th>年化</th><th>最大回撤</th>
               <th class="opt">累计超额</th><th class="opt">比月末回撤</th>
@@ -149,10 +151,36 @@ import { aggregate, aggregateSeries, unionDates, windowForRange, rangeStartIndex
 const aid = useRoute().params.aid
 const router = useRouter()
 const cads = [{ k: 'monthly', t: '每月末' }, { k: 'biweekly', t: '每两周' }, { k: 'weekly', t: '每周' }, { k: 'mine', t: '我的操作日' }]
-// 2006 起：面板共同起点 2006-03（中债 30Y 曲线起点），三个策略都能回到 2006（风险平价 2026-11-08 撤掉短融后不再受 2015 限制）
-const years = Array.from({ length: new Date().getFullYear() - 2006 + 1 }, (_, i) => 2006 + i)
+// 起点选项按「数据真实可用起点」生成：V7 把红利低波 ETF（512890，2013-12 成立）加进三个
+// 内置策略后，策略窗口（pipeline.strategy_window = 它用到的资产全部有收益那天）就落到 2013-12，
+// 再摆一串 2006~2012 的选项等于骗人 —— 选了后端照样从 2013 出数（2026-11-09 验收实测三种起点
+// 年化/回撤完全相同、n 都是 155 期）。这里等接口回来用曲线首日裁剪，并把实际起点写在旁边。
 const cad = ref(sessionStorage.getItem('aw-bt-cad') || 'monthly'), start = ref(sessionStorage.getItem('aw-bt-start2') || '2006-01-01')
 const d = ref(null), loading = ref(false), err = ref('')
+const availStart = computed(() => {
+  let s = ''
+  for (const c of Object.values(d.value?.curves || {})) {
+    const f = c?.dates?.[0]
+    if (f && (!s || f < s)) s = f
+  }
+  return s
+})
+const availYear = computed(() => (availStart.value ? +availStart.value.slice(0, 4) : 2006))
+const availText = computed(() => (availStart.value ? availStart.value.replace(/-/g, '/') : ''))
+const startOpts = computed(() => {
+  const y0 = availYear.value
+  const n = new Date().getFullYear() - y0 + 1
+  return Array.from({ length: n }, (_, i) => ({ y: y0 + i, v: `${y0 + i}-01-01` }))
+})
+// 只在第一次拿到真实起点时把「早于数据的起点」对齐一次。
+// 不能写成「start < 曲线首日就改」：曲线首日本来就等于请求起点 + 1 个交易日（首行收益被丢），
+// 逐日比较会一天一天往后追，直接打成无限请求（2026-11-09 实测 start 从 2013-12 一路跳到 2014-03）。
+// 对齐到「年首」而不是曲线首日，否则 select 的值和选项对不上（选项是 y-01-01），下拉会显示空白。
+let snapped = false
+watch(availStart, v => {
+  if (snapped || !v) return
+  if (v.slice(0, 4) > start.value.slice(0, 4)) { start.value = `${v.slice(0, 4)}-01-01`; snapped = true }
+})
 // 连续切起点 / 调仓节奏时，只认最后一次请求的结果，避免旧响应回来覆盖新区间
 let btSeq = 0
 watch([cad, start], async () => {
@@ -615,6 +643,7 @@ const showMore = ref([])
 .rsum{ margin-top:4px; border-top:0; padding-top:0; }
 .rsum-note{ margin:6px 0 0; font-size:11px; color:var(--muted); }
 @media (max-width:560px){ .rsum .opt{ display:none; } }
+.rsum.no-opt .opt{ display:none; }
 .sum-excess{ display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 14px; margin:8px 0 0; font-size:11.5px; color:var(--muted); }
 .sum-excess .se{ display:inline-flex; align-items:center; gap:5px; }
 .sum-excess .se i{ width:8px; height:8px; border-radius:50%; display:inline-block; }

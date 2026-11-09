@@ -128,6 +128,12 @@
               <button type="button" class="x" :aria-label="`移除 ${p.name}`" @click="drop(p.code)">×</button>
             </span>
           </div>
+          <p class="cmp-empty" v-if="picked.length === 0">
+            搜索基金名称或 6 位代码，点结果加入（最多 4 只）。
+            <button type="button" class="cmp-add" @click="pick({ code, name: d?.name || code })">
+              加入当前这只
+            </button>
+          </p>
           <p class="cmp-empty" v-if="picked.length === 1">再选 1 只就能同图对比</p>
         </div>
 
@@ -450,7 +456,9 @@ const cmpStageRows = computed(() => picked.value.map(p => {
 .kv dd.wide{ grid-column:2 / -1; }
 
 /* 多只对比 */
-.cmp-empty{ font-size:12px; color:var(--muted); margin:2px 0 0; }
+.cmp-empty{ font-size:12px; color:var(--muted); margin:2px 0 0; line-height:1.7; }
+.cmp-add{ margin-left:2px; padding:0; border:0; background:none; color:var(--brand); font-size:12px;
+  font-weight:600; text-decoration:underline; text-underline-offset:2px; cursor:pointer; }
 .picked{ display:flex; flex-wrap:wrap; gap:8px; padding:6px 0 0; }
 .picked .chip{ display:inline-flex; align-items:center; gap:5px; max-width:210px; cursor:default; }
 .picked .chip .cn{ min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

@@ -634,6 +634,7 @@ _SIGNALS = [
 
 
 async def signals(request: Request):
+    from allweather import benchmark as BM
     from allweather.rebalance import compute_signal_states, macro_season
     prices = pd.DataFrame({c: pd.read_csv(DATA_DIR / f"{f}.csv", parse_dates=["date"], index_col="date")["close"]
                            for c, f in _LIVE_FILES.items() if (DATA_DIR / f"{f}.csv").exists()}).sort_index().ffill().dropna()
@@ -641,16 +642,19 @@ async def signals(request: Request):
     rows = [{"name": f'{ETF_META[a]["name"]} ({ETF_META[a]["code"]})', "desc": d, "on": bool(sg.get(k)),
              "applies": {s: (s in st) for s in KEYS}} for k, a, d, st in _SIGNALS]
     curves = {}
-    fp = ROOT / "output" / "nv_curves.csv"
-    if fp.exists():
-        df = pd.read_csv(fp, index_col=0, parse_dates=True)
-        for k in KEYS:
-            if BENCH_COL[k] in df.columns:
-                # 给全历史，前端用统一区间控件切（原来写死 tail(125) = 近半年，
-                # 于是这页压根没有时间区间可选，被用户 2026-11-08 抓出来）
-                s = df[BENCH_COL[k]].dropna()
-                curves[STRAT_NAME[k]] = {"dates": [f"{d:%Y-%m-%d}" for d in s.index],
-                                         "ret": [round((float(v) / float(s.iloc[0]) - 1) * 100, 4) for v in s]}
+    # 必须走 benchmark.strategy_curve：它会把 nv_curves.csv 按「回测最后一期目标权重」延长到
+    # 行情最新日（_extend_to_latest）。直接读 CSV 时曲线停在 main.py 上次跑完那天，
+    # 而 asof 取的是行情最新日，页面就出现「截至 2026/11/06」配一条 10/16 收尾的曲线
+    # （2026-11-09 验收发现：CSV 停在 10/16、asof 已是 11/06，近6月窗口整体错位）。
+    for k in KEYS:
+        s = BM.strategy_curve(BENCH_COL[k])
+        if s is None or len(s) < 2:
+            continue
+        # 给全历史，前端用统一区间控件切（原来写死 tail(125) = 近半年，
+        # 于是这页压根没有时间区间可选，被用户 2026-11-08 抓出来）
+        s = s.dropna()
+        curves[STRAT_NAME[k]] = {"dates": [f"{d:%Y-%m-%d}" for d in s.index],
+                                 "ret": [round((float(v) / float(s.iloc[0]) - 1) * 100, 4) for v in s]}
     return J({"rows": rows, "strategies": [{"key": k, "name": STRAT_NAME[k]} for k in KEYS], "curves": curves,
               "asof": f"{prices.index[-1]:%Y-%m-%d}", "macro": macro_season(prices, sg)})
 
