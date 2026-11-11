@@ -67,12 +67,22 @@
               </div>
             </div>
 
-            <!-- ③ 阶段涨幅：固定区间，与图表视窗无关 -->
+            <!-- ③ 阶段涨幅：一个区间一行，涨幅与最大回撤并排。
+                 不做「格里塞两行小字」——那样第二行是什么只能靠猜，字号还得压小去迁就格子宽度。
+                 现在两者同字号同字重、都按涨跌着色，靠表头区分含义（2026-11-11 用户：「字体大小都不一样，
+                 一个深一个浅，不明确」）。 -->
             <div class="card">
               <div class="st">阶段涨幅</div>
-              <div class="stage-grid">
-                <div v-for="s in stageRows" :key="s.k"><span>{{ s.k }}</span><b class="num" :class="tone(s.ret)">{{ pctS(s.ret) }}</b></div>
-              </div>
+              <table class="stage-list">
+                <thead><tr><th>区间</th><th>涨幅</th><th>最大回撤</th></tr></thead>
+                <tbody>
+                  <tr v-for="s in stageRows" :key="s.k">
+                    <td>{{ s.k }}</td>
+                    <td class="num" :class="tone(s.ret)">{{ pctS(s.ret) }}</td>
+                    <td class="num" :class="tone(s.dd)">{{ pctS(s.dd) }}</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
 
             <!-- ④ 收益日历：标题和控件同一行 -->
@@ -145,16 +155,30 @@
             <MultiLine :panels="cmpPanels" :height="360" :window="cmpWin" :reset-key="cmpReset" group="funds-cmp" />
           </div>
           <div class="card">
+            <!-- 涨幅和回撤分两张表，各自一套表头。塞进同一张表就得让「回撤」去占首列或者让格子装两行小字，
+                 两种都被用户当场否掉（2026-11-11：「上面是名字，下面写回撤，这就不对」「字体大小都不一样」）。
+                 两张表成本只是多一行表头，换来每张表内部字号、字重、配色完全一致 -->
             <div class="st">阶段涨幅</div>
             <div class="stage-tbl-wrap">
               <table class="stage-tbl">
                 <thead><tr><th>基金</th><th v-for="k in cmpStageKeys" :key="k">{{ k }}</th></tr></thead>
                 <tbody><tr v-for="row in cmpStageRows" :key="row.code">
                   <td><span class="nm" :title="row.name">{{ shortName(row.name) }}</span></td>
-                  <td v-for="(v, k) in row.vals" :key="k" class="num" :class="tone(v)">{{ pctS(v) }}</td>
+                  <td v-for="k in cmpStageKeys" :key="k" class="num" :class="tone(row.vals[k])">{{ pctS(row.vals[k]) }}</td>
                 </tr></tbody>
               </table>
             </div>
+            <div class="st s2">阶段回撤</div>
+            <div class="stage-tbl-wrap">
+              <table class="stage-tbl">
+                <thead><tr><th>基金</th><th v-for="k in cmpStageKeys" :key="k">{{ k }}</th></tr></thead>
+                <tbody><tr v-for="row in cmpStageRows" :key="row.code">
+                  <td><span class="nm" :title="row.name">{{ shortName(row.name) }}</span></td>
+                  <td v-for="k in cmpStageKeys" :key="k" class="num down">{{ pctS(row.dds[k]) }}</td>
+                </tr></tbody>
+              </table>
+            </div>
+            <p class="stage-cap">回撤 = 该区间内从段内高点的最深跌幅，与同一列的涨幅是同一段、同一锚点</p>
           </div>
         </template>
       </template>
@@ -170,7 +194,7 @@ import { tone } from '../fmt'
 import SubBar from '../components/SubBar.vue'
 import RangeBar from '../components/RangeBar.vue'
 import MultiLine from '../components/MultiLine.vue'
-import { aggregate, sliceRange, rangeStartIndex, rangeReturn, RANGE_KEYS } from '../utils/series'
+import { aggregate, sliceRange, rangeStartIndex, rangeReturn, rangeMaxDrawdown, RANGE_KEYS } from '../utils/series'
 import { cumulativeReturn, drawdown, stats, calendarCells } from '../utils/fundSeries'
 import { CHART, SERIES_COLORS } from '../utils/chartTheme'
 
@@ -278,8 +302,9 @@ const profileRows = computed(() => {
   ].filter(r => r[1])
 })
 const stageRows = computed(() => RANGE_KEYS.map(k => {
-  const s = d.value ? sliceRange(d.value.dates, d.value.values, k) : { values: [] }
-  return { k, ret: rangeReturn(s.values) }
+  const dates = d.value?.dates, values = d.value?.values
+  const s = values ? sliceRange(dates, values, k) : { values: [] }
+  return { k, ret: rangeReturn(s.values), dd: rangeMaxDrawdown(dates, values, k) }
 }))
 
 // 收益日历
@@ -373,12 +398,14 @@ const cmpWin = computed(() => {
 const cmpStageKeys = RANGE_KEYS
 const cmpStageRows = computed(() => picked.value.map(p => {
   const n = navs.value[p.code]
-  const vals = {}
+  const vals = {}, dds = {}
   for (const k of cmpStageKeys) {
-    const s = n?.dates?.length ? sliceRange(n.dates, n.values, k) : { values: [] }
+    const dates = n?.dates, values = n?.values
+    const s = dates?.length ? sliceRange(dates, values, k) : { values: [] }
     vals[k] = rangeReturn(s.values)
+    dds[k] = rangeMaxDrawdown(dates, values, k)
   }
-  return { code: p.code, name: p.name, vals }
+  return { code: p.code, name: p.name, vals, dds }
 }))
 </script>
 <style scoped>
@@ -422,11 +449,16 @@ const cmpStageRows = computed(() => picked.value.map(p => {
 .kpi4 b{ display:block; font-size:15px; margin-top:3px; }
 .sparse{ font-size:12px; color:#92400E; background:#FFFBEB; border-radius:8px; padding:7px 10px; margin:8px 0; line-height:1.6; }
 
-/* ③ 阶段涨幅 */
-.stage-grid{ display:grid; grid-template-columns:repeat(8,1fr); column-gap:8px; row-gap:12px; }
-.stage-grid > div{ min-width:0; text-align:center; }
-.stage-grid span{ display:block; font-size:11.5px; color:var(--muted); }
-.stage-grid b{ display:block; font-size:14px; margin-top:3px; }
+/* ③ 阶段涨幅：一行一个区间、一列一个口径，两个数值列同字号同字重，只靠表头区分含义。
+   行高按 8 行排下来约 220px —— 比原来的 8 列小格高，但换掉了「格里两行小字」那种要靠猜的写法 */
+.stage-list{ width:100%; border-collapse:collapse; font-size:12.5px; }
+.stage-list th{ padding:0 0 7px; font-size:11px; font-weight:500; color:var(--muted); }
+.stage-list th:first-child, .stage-list td:first-child{ text-align:left; }
+.stage-list th:nth-child(n+2), .stage-list td:nth-child(n+2){ text-align:right; }
+.stage-list td{ padding:6px 0; border-bottom:1px solid var(--line); }
+.stage-list tr:last-child td{ border-bottom:none; }
+.stage-list td:first-child{ color:var(--muted); }
+.stage-list td.num{ font-weight:600; font-variant-numeric:tabular-nums; }
 
 /* ④ 收益日历：标题 + 月份翻页 + 日/月/年 同一行 */
 .ch{ display:flex; align-items:center; gap:10px; margin-bottom:10px; }
@@ -467,7 +499,7 @@ const cmpStageRows = computed(() => picked.value.map(p => {
   background:transparent; color:var(--muted); font:inherit; font-size:14px; line-height:1; cursor:pointer; }
 .picked .chip .x:hover{ background:rgba(15,23,42,.08); color:var(--ink); }
 .picked .chip .x:focus-visible{ outline:2px solid var(--brand); outline-offset:1px; }
-.stage-tbl td:first-child .nm{ display:inline-block; max-width:150px; vertical-align:bottom;
+.stage-tbl td:first-child .nm{ display:inline-block; max-width:150px; vertical-align:middle;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .stage-tbl-wrap{ overflow-x:auto; }
 .stage-tbl{ width:100%; min-width:720px; border-collapse:collapse; font-size:12px; }
@@ -475,10 +507,12 @@ const cmpStageRows = computed(() => picked.value.map(p => {
 .stage-tbl th:first-child, .stage-tbl td:first-child{ text-align:left; padding-left:2px; }
 .stage-tbl th{ font-size:11px; color:var(--muted); font-weight:500; }
 .stage-tbl td:first-child{ color:var(--ink); }
+/* 第二块（阶段回撤）的小标题：只加间距，字号与第一块完全一致 */
+.st.s2{ margin-top:18px; }
+.stage-cap{ margin:9px 0 0; font-size:11px; color:var(--muted); line-height:1.5; }
 
 @media (max-width:700px){
   .navv{ font-size:28px; }
-  .stage-grid{ grid-template-columns:repeat(4,1fr); }
   .kv{ grid-template-columns:64px 1fr; }
   .kv dd.wide{ grid-column:2; }
   .cell{ min-height:42px; } .dv{ font-size:10px; }

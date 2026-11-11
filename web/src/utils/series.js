@@ -72,6 +72,21 @@ export function rangeReturn(values) {
   return v.length > 1 && +v[0] ? (+v[v.length - 1] / +v[0] - 1) * 100 : null
 }
 
+// 区间内最大回撤（%，恒 ≤ 0）：峰值**从区间起点重新起算**，只在这段里找最深的那一跌。
+// 与 rangeReturn 同一段、同一锚点，所以「阶段涨幅 +x% / 阶段回撤 -y%」是自洽的一对；
+// 不能拿「距全历史最高点」的回撤来配它 —— 那样「近1月涨 0.6%」旁边会挂一个 -8%，看着像自相矛盾。
+export function rangeMaxDrawdown(dates, values, rangeKey) {
+  const s = sliceRange(dates, values, rangeKey)
+  const v = (s.values || []).filter(x => x != null && Number.isFinite(+x))
+  if (v.length < 2 || !+v[0]) return null
+  let peak = v[0], mdd = 0
+  for (const x of v) {
+    if (x > peak) peak = x
+    if (peak > 0) mdd = Math.min(mdd, x / peak - 1)
+  }
+  return mdd * 100
+}
+
 // ---------------------------------------------------------------- 多序列（对比 / 回测）
 // 日期并集升序：多折线图的横轴口径，窗口下标也必须按这条轴算，否则 dataZoom 百分比会错位。
 export function unionDates(series) {
