@@ -699,7 +699,7 @@ def _strategy_spec(name: str) -> dict:
 
 async def backtest(request: Request):
     from allweather.data import load_panel, panel_returns
-    from allweather.pipeline import run_strategy_backtest
+    from allweather.pipeline import run_strategy_backtest, strategy_window
     from allweather.stats import perf_metrics
     start = request.query_params.get("start") or "2015-01-01"
     cad = request.query_params.get("cadence") or "monthly"
@@ -722,7 +722,8 @@ async def backtest(request: Request):
                 out[f"{n} · {tag}"] = (nv / float(nv.iloc[0]), int((r.weight_df.index >= c0).sum()))
             base[f"{n} · 我的操作日"] = f"{n} · 月末"
     else:
-        rets = panel_returns(load_panel().loc[start:])   # 每个策略在 run_strategy_backtest 里按自己的资产定起点
+        panel = load_panel()
+        rets = panel_returns(panel.loc[start:])   # 每个策略在 run_strategy_backtest 里按自己的资产定起点
         for n in names:
             r = run_strategy_backtest(rets, n, cad)
             lbl = n if cad == "monthly" else f"{n} · {dict(biweekly='双周', weekly='每周')[cad]}"
@@ -731,6 +732,14 @@ async def backtest(request: Request):
                 r0 = run_strategy_backtest(rets, n)
                 out[f"{n} · 月末"] = (r0.nv, int(r0.n_rebal))
                 base[lbl] = f"{n} · 月末"
+    # 真实可用的最早起点，与本次请求的 start 无关。
+    # 前端原来拿「本次返回曲线的首日」反推起点选项，一旦选了 2015，返回曲线就从 2015 起，
+    # 选项只剩 2015+，再也回不到 2013（2026-11-11 用户实测「只能从 15 年回放」）。
+    # 这里由后端给出固定下限，前端直接用它生成选项。
+    if cad == "mine":
+        panel = load_panel()
+    min_start = min(strategy_window(panel_returns(panel), n).index[0] for n in names)
+
     rows, curves = [], {}
     for k, (nv, n) in out.items():
         m = perf_metrics(nv, rets=nv.pct_change().dropna())
@@ -769,6 +778,7 @@ async def backtest(request: Request):
             for r in rows if r.get("vs") is not None]
     specs = {n: _strategy_spec(n) for n in names}
     return J({"rows": rows, "curves": curves, "cadence": cad, "start": start,
+              "min_start": f"{min_start:%Y-%m-%d}",
               "periods": periods, "gaps": gaps, "specs": specs})
 
 

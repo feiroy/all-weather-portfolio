@@ -169,19 +169,23 @@ const availStart = computed(() => {
   }
   return s
 })
-const availYear = computed(() => (availStart.value ? +availStart.value.slice(0, 4) : 2006))
-const availText = computed(() => (availStart.value ? availStart.value.replace(/-/g, '/') : ''))
+// 起点下限必须用后端返回的 min_start，不能用「本次曲线首日」。
+// 本次曲线首日 = 你选的起点，拿它当选项下限等于单向阀：选了 2015 就只剩 2015+，
+// 再也回不到 2013（2026-11-11 用户实测「现在只能从 15 年回放了」）。
+const floorStart = computed(() => d.value?.min_start || availStart.value)
+const availYear = computed(() => (floorStart.value ? +floorStart.value.slice(0, 4) : 2006))
+const availText = computed(() => (floorStart.value ? floorStart.value.replace(/-/g, '/') : ''))
 const startOpts = computed(() => {
   const y0 = availYear.value
   const n = new Date().getFullYear() - y0 + 1
   return Array.from({ length: n }, (_, i) => ({ y: y0 + i, v: `${y0 + i}-01-01` }))
 })
-// 只在第一次拿到真实起点时把「早于数据的起点」对齐一次。
+// 只在第一次拿到真实下限时把「早于数据的起点」对齐一次。
 // 不能写成「start < 曲线首日就改」：曲线首日本来就等于请求起点 + 1 个交易日（首行收益被丢），
 // 逐日比较会一天一天往后追，直接打成无限请求（2026-11-09 实测 start 从 2013-12 一路跳到 2014-03）。
 // 对齐到「年首」而不是曲线首日，否则 select 的值和选项对不上（选项是 y-01-01），下拉会显示空白。
 let snapped = false
-watch(availStart, v => {
+watch(floorStart, v => {
   if (snapped || !v) return
   if (v.slice(0, 4) > start.value.slice(0, 4)) { start.value = `${v.slice(0, 4)}-01-01`; snapped = true }
 })
