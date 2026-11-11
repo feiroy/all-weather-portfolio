@@ -470,7 +470,7 @@ V3-B RP 和 V3c 去掉了 bond_10y（CAGR +1.43pp，Sharpe 仅 -0.02）。
 | 迁移 | 老的浏览器 localStorage（`aw-strategies`）只作一次性迁移来源：本地有、服务端没有的自动上传，成功的从本地删、失败的留着下次再试 |
 
 - 验收：`tests/test_strategy_live.py`（位置顺序 / 自定义位置 label / `ensure_slots` 只补不改且幂等 / **新基金权重落在自己位置上而不是外溢** / 策略库校验与落盘 / key 归一化 / 原子写）；接口实测 `GET|POST|DELETE /api/strategies` 与 `switch-preview`（`added=['159915']`、`unplaced=[]`、15 笔订单）。
-- 已知限制：内置三策略的 `live_target_weights` 要跑三遍全历史，本机沙箱可用内存不足时会直接被 kill；这不是逻辑问题（`/api/*` 由独立进程处理）。
+- 已知限制：内置三策略的 `live_target_weights` 要跑三遍全历史，本机沙箱可用内存不足时会直接被 kill；这不是逻辑问题（`/api/*` 由独立进程处理）。**Streamlit 版仍按 `HG.SLOTS` 循环**（已冻结），自定义位置在那边看不到、也不能编辑 —— 自定义策略只走 H5。
 
 ## 架构参考
 
