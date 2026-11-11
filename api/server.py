@@ -426,29 +426,10 @@ async def trades(request, aid, P, a):
 
 
 # ------------------------------------------------------------------ 调仓 / 新钱怎么分
-def _attach_quote(rows: list[dict]) -> None:
-    """给场内单挂上「现价 / 溢价率」，买入提示用。
-
-    溢价 = 场内现价 ÷ 最新净值 − 1。场外按净值申购，没有溢价这回事，所以只处理 otc=False。
-    取不到（断网、接口改版）就留 None —— 页面不显示，绝不因此拦住下单。
-    """
-    from allweather import quote as QUOTE
-    ex = [r for r in rows if r.get("code") and not r.get("otc")]
-    if not ex:
-        return
-    try:
-        q = QUOTE.snapshot([r["code"] for r in ex])
-    except Exception:  # noqa: BLE001
-        return
-    for r in ex:
-        r["quote"] = q.get(r["code"])
-
-
 def _calc_payload(P: Portfolio, a: dict) -> dict:
     p = P.plan
     act = [_hj(P.holding(it)) | {"slot_w": _r(it["slot_w"] * 100), "slot_tgt_w": _r(it["slot_tgt_w"] * 100)}
            for it in p["rows"] if it.get("side")]
-    _attach_quote(act)
     hold = [_hj(P.holding(it)) | {"slot_w": _r(it["slot_w"] * 100), "slot_tgt_w": _r(it["slot_tgt_w"] * 100),
                                   "slot_first": it["slot_first"]} for it in p["rows"] if not it.get("side")]
     slots = []

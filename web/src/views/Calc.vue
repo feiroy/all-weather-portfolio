@@ -36,7 +36,7 @@
                   <span>{{ o.code }} · {{ o.otc ? '场外' : '场内' }} · {{ o.slot }}</span>
                   <!-- 溢价率只对场内成立：场外按净值申购，买不到「贵」也买不到「便宜」。
                        卖出单给了信息但不报警 —— 溢价卖出去是多卖钱 -->
-                  <PremiumTag v-if="!o.otc" :q="o.quote" :calm="o.side !== '买入'" />
+                  <PremiumTag v-if="!o.otc" :q="pq[o.code]" :calm="o.side !== '买入'" />
                 </div>
                 <!-- 记一笔原来单独占一行且靠右，左边整片空白（用户 2026-11-08「下面太空了」）：
                      现在并到「股数 × 价格 / 占比」这一行右侧，卡片少一行、不留空档。
@@ -106,7 +106,20 @@ const d = ref(peek(url) || null)
 const refreshing = ref(false)
 const filt = ref('全部')
 const basis = ref([])   // 依据 / 不用动 默认收起
-async function load(fresh = false) { try { d.value = await get(url, { fresh }) } finally { refreshing.value = false } }
+// 现价与溢价率单独取：行情接口慢（走代理，冷启动约 1 秒、失败还会重试），
+// 不能塞在 /calc 里同步等 —— 否则 proxied push2 挂掉时整页要等十几秒。先出单，徽标随后补上。
+const pq = ref({})
+async function loadPrem() {
+  const codes = [...new Set((d.value?.orders || []).filter(o => !o.otc).map(o => o.code))]
+  if (!codes.length) return
+  try {
+    const r = await get(`/api/market/premium?codes=${codes.join(',')}`)
+    pq.value = Object.fromEntries((r.rows || []).map(x => [x.code, x]))
+  } catch { /* 行情拿不到就不显示溢价，不影响下单 */ }
+}
+async function load(fresh = false) {
+  try { d.value = await get(url, { fresh }); loadPrem() } finally { refreshing.value = false }
+}
 load(); watch(dataVer, () => load(true))
 const title = computed(() => {
   const s = d.value.status
@@ -120,7 +133,7 @@ const maxW = computed(() => Math.max(10, ...d.value.slots.flatMap(s => [s.now, s
 const bw = v => `${Math.min(100, (v / maxW.value) * 100)}%`
 // 溢价只在「买入 + 明显偏高」时多说一句。卖出去是按现价成交，溢价高反而占便宜，不提醒。
 function premWarn(o) {
-  const q = o.quote
+  const q = pq.value[o.code]
   if (!q || !q.ok || o.side !== '买入') return ''
   const p = (q.premium * 100).toFixed(1)
   if (q.level === 'block') return `溢价 ${p}% 已经很高：按高于净值 ${p}% 的价格买，多付的这部分要等溢价回落才拿得回来`
@@ -129,7 +142,7 @@ function premWarn(o) {
 }
 // 「≈ 股数 × 价格」里的价格是净值；场内实际按现价成交，偏 2% 以上就该说明差多少
 function pxNote(o) {
-  const q = o.quote
+  const q = pq.value[o.code]
   if (!q || !q.ok || Math.abs(q.premium) < 0.02) return ''
   const p = (Math.abs(q.premium) * 100).toFixed(1)
   return o.side === '买入'
