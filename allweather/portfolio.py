@@ -395,11 +395,11 @@ class Portfolio:
     def slot_options(self) -> list[dict]:
         """记一笔可选的基金（app.py::_hg_slot_options）：参与调仓的在前，关掉的位置、已删的代码在后。"""
         out, off = [], []
-        for s in HG.SLOTS:
+        for s in HG.slots_of(self.holdings):
             on = bool(self.holdings.get(s, {}).get("on", True))
             for f in HG.funds(self.holdings.get(s, {})):
                 (out if on else off).append({"slot": s, "code": f["code"], "name": f.get("name") or FL.fund_name(f["code"]) or f["code"],
-                                             "slot_label": HG.SLOT_LABEL[s] + ("（位置已关闭）" if not on else ""),
+                                             "slot_label": HG.slot_label(self.holdings, s) + ("（位置已关闭）" if not on else ""),
                                              "unit": "股" if str(f.get("unit") or HG.default_unit(f["code"])) == "股" else "份"})
         out += off
         have = {o["code"] for o in out}

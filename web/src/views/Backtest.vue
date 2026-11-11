@@ -22,6 +22,7 @@
           <div v-for="s in strategies" :key="s.id" class="srow">
             <i :style="{ background: customColor(s.id) }"></i>
             <div class="sinf"><b>{{ s.name }}</b><small class="num">{{ s.funds.length }} 只基金 · {{ methodLabel(s.method) || '固定权重' }} · {{ freqLabel(s.freq, s.method) }}</small></div>
+            <a @click="useLive(s)">用它实盘</a>
             <a @click="editStrategy(s)">编辑</a>
             <a @click="delStrategy(s)">删除</a>
           </div>
@@ -141,10 +142,10 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { showConfirmDialog } from 'vant'
+import { showConfirmDialog, showFailToast } from 'vant'
 import { get, post } from '../api'
 import { signed, pct, tone } from '../fmt'
-import { loadStrategies, saveStrategies } from '../strategyStore'
+import { loadStrategies, deleteStrategy } from '../strategyStore'
 import { SERIES_COLORS } from '../utils/chartTheme'
 import SubBar from '../components/SubBar.vue'
 import MultiLine from '../components/MultiLine.vue'
@@ -208,7 +209,7 @@ watch([cad, start], async () => {
 }, { immediate: true })
 
 // ---- 我的策略：多条自定义策略并入同一套指标卡 / 曲线 / 月年表 ----
-const strategies = ref(loadStrategies()), customs = ref([])
+const strategies = ref([]), customs = ref([])
 const cpLoading = ref(false), cpErr = ref('')
 const freqLabel = (f, method) => {
   const fixed = { M: '每月再平衡', Q: '每季再平衡', N: '不再平衡' }
@@ -222,7 +223,12 @@ const customColor = id => CUSTOM_PAL[Math.max(0, strategies.value.findIndex(s =>
 let cpSeq = 0
 async function refreshCustoms() {
   const seq = ++cpSeq
-  const list = loadStrategies()
+  let list = []
+  try { list = await loadStrategies(true) } catch (e) {
+    if (seq === cpSeq) { strategies.value = []; customs.value = []; cpLoading.value = false; cpErr.value = `策略列表读不出来：${e.message}` }
+    return
+  }
+  if (seq !== cpSeq) return
   strategies.value = list
   if (!list.length) { customs.value = []; cpErr.value = ''; cpLoading.value = false; return }
   cpLoading.value = true; cpErr.value = ''
@@ -364,10 +370,12 @@ function cloneSpec(n) {
   router.push({ path: `/a/${aid}/market/strategy-new`, query: { tpl: '1' } })
 }
 function editStrategy(s) { router.push({ path: `/a/${aid}/market/strategy-new`, query: { edit: s.id } }) }
+// 「用它实盘」：到账户入口页直接弹换策略确认（那一页才有账户列表和预览）
+function useLive(s) { router.push({ path: '/', query: { use: `custom:${s.id}`, acct: aid } }) }
 async function delStrategy(s) {
   try { await showConfirmDialog({ title: '删除策略', message: `确定删除「${s.name}」吗？` }) }
   catch { return }
-  saveStrategies(loadStrategies().filter(x => x.id !== s.id))
+  try { await deleteStrategy(s.id) } catch (e) { showFailToast(`删除失败：${e.message}`); return }
   refreshCustoms()
 }
 const startNote = computed(() => {

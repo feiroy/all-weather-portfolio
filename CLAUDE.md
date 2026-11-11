@@ -455,6 +455,23 @@ V3-B RP 和 V3c 去掉了 bond_10y（CAGR +1.43pp，Sharpe 仅 -0.02）。
 
 - 验收：`tests/test_custom_strategy.py` 的 `test_bucket_plan_follows_current_holdings` / `test_custom_compare_reports_effective_buckets` / `test_trend_filter_requires_safe_asset` / `test_safe_asset_accepts_code_alias`（代码写法与内部 key 写法 CAGR/MDD/曲线**逐位一致**）/ `test_safe_asset_configurable`（换避风港必须改变结果，指定持仓外的必须报错）；真实浏览器 7 场景（内置分桶行 → 复刻 8 行都有桶 → 未选桶被拦 → 新增基金后 4 桶·增长↓2 → 老快照红色退化警告 → 缺避风港 400 报错 → 代码别名不再误报），另验编辑器保存路径与每个 `.tseg` 单行渲染，页面 0 报错。
 
+### 自定义策略上实盘（2026-11-11 用户「我自己加的策略可以保存为模板，然后按照我自己的策略进行买卖」）
+要求里两个明确选择：**要支持第 10 只新基金**（不只内置 9 个资产）、策略**存服务端 `data/strategies.json`**（跟 git 多端同步，服务端读得到才算得出实盘权重）。
+
+| 项 | 要求 |
+|---|---|
+| 策略库 | `allweather/strategies.py` 只做「存 + 校验 + 归一化 key」，不复制任何回测逻辑；`upsert/delete` 走「临时文件 + `os.replace`」。`canonicalize()` 必须过 `custom_backtest.canonical_key`（`511220 → credit`），否则实盘按 key 找不到位置、权重被摊到别的位置上 |
+| 位置动态化 | 位置不再写死 9 个：`HG.slots_of(holdings)` = 配置里存在的内置位置（固定顺序）+ 自定义位置（按插入顺序）；`HG.slot_label()` 内置查 `SLOT_LABEL`，自定义读配置 `label`、兜底挂的第一只基金名。`all_codes/fund_meta/active/default_codes/slot_options` 全部改用 `slots_of`，禁止再直接 `for s in SLOTS` |
+| 绑定时建位置 | `POST /api/acct/{aid}/strategy` 收到 `custom:*` 先 `HG.ensure_slots()`：只补不改（用户在同一位置换过的基金、改过的占比一律保留）。返回值 `added` 告诉前端新建了哪些位置 |
+| 换策略预览 | `switch-preview` 必须**按换过去之后的位置体系**算（先 `ensure_slots` 再 `Portfolio`）：否则新基金那部分权重被摊到别的位置上，笔数 / 卖出金额 / 清仓名单全跟真下出来的不一样（2026-11-11 实测 14 笔 vs 真实 15 笔） |
+| 实盘权重 | `custom_backtest.live_custom_weights()` = 内置策略 `live_target_weights` 的同一手法：非固定权重一律 `rebal_dates=[最后一天]`（「假如今天调仓」）；`freq='N'`（不再平衡）用 `_drifted()` 取漂到今天的权重，否则账本每月把它拉回目标；`cash_ratio` 按比例摊回满仓（实盘账户不留现金），诊断里 `cash_dropped` 标记。**先算权重再建 Portfolio** —— 算权重时会把新基金净值拉进本地缓存，Portfolio 才定得出价 |
+| 缓存 | `_data_ver()` 要把 `data/strategies.json` 的 mtime 算进去；`_SW` 按 `(策略key, 数据版本)` 缓存，`upsert/delete` 后 `_SW`+`_P` 全清 |
+| 前端入口 | 回测页「我的策略」每行加「用它实盘」→ `/?use=custom:<id>&acct=<aid>`，账户页读到 query 直接走同一个预览确认（用过就 `router.replace` 清参）；「换策略」选择器 = 内置三策略 + 自定义（`custom:<id>`），策略被删显示「自定义（已删除）」；预览弹窗除笔数金额外要显示 `added`、`cash_dropped`、`buckets_fallback`、`safe_missing`、`diag.asof` |
+| 迁移 | 老的浏览器 localStorage（`aw-strategies`）只作一次性迁移来源：本地有、服务端没有的自动上传，成功的从本地删、失败的留着下次再试 |
+
+- 验收：`tests/test_strategy_live.py`（位置顺序 / 自定义位置 label / `ensure_slots` 只补不改且幂等 / **新基金权重落在自己位置上而不是外溢** / 策略库校验与落盘 / key 归一化 / 原子写）；接口实测 `GET|POST|DELETE /api/strategies` 与 `switch-preview`（`added=['159915']`、`unplaced=[]`、15 笔订单）。
+- 已知限制：内置三策略的 `live_target_weights` 要跑三遍全历史，本机沙箱可用内存不足时会直接被 kill；这不是逻辑问题（`/api/*` 由独立进程处理）。
+
 ## 架构参考
 
 ```

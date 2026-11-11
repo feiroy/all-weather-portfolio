@@ -133,7 +133,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { showFailToast } from 'vant'
 import { get } from '../api'
-import { loadStrategies, saveStrategies } from '../strategyStore'
+import { loadStrategies, saveStrategy } from '../strategyStore'
 import SubBar from '../components/SubBar.vue'
 
 const route = useRoute(), router = useRouter()
@@ -230,7 +230,7 @@ onMounted(async () => {
     sessionStorage.removeItem('aw-strategy-tpl')
   }
   if (isEdit) {
-    const s = loadStrategies().find(x => x.id === editId)
+    const s = (await loadStrategies()).find(x => x.id === editId)
     if (s) {
       name.value = s.name; freq.value = s.freq || 'M'
       method.value = s.method || 'fixed'
@@ -280,12 +280,12 @@ watch(method, m => {
   if (!ok.includes(freq.value)) freq.value = 'M'
 })
 function cancel() { router.push(backTo) }
-function save() {
+async function save() {
   const n = name.value.trim()
   if (!n) { err.value = '先给策略起个名字'; return }
   const funds = rows.value.filter(r => Number(r.weight) > 0)
   if (!funds.length) { err.value = '至少给一只基金大于 0 的权重'; return }
-  const list = loadStrategies()
+  const list = await loadStrategies(true)   // 重名要跟服务端最新的比（别的设备可能刚存过）
   if (list.some(s => s.name === n && s.id !== editId)) { err.value = '已经有同名策略了，换个名字'; return }
   const trend_map = {}
   funds.forEach(f => { if (Number(f.trend) > 0) trend_map[f.key] = Number(f.trend) })
@@ -309,17 +309,19 @@ function save() {
       if (ks.length) rp_buckets[b] = ks
     }
   }
-  const rec = { id: editId || 's' + Date.now(), name: n, freq: freq.value, method: method.value,
+  // id 交给服务端生成（cs-开头）；编辑时带上原 id 就覆盖那一条
+  const rec = { id: editId || '', name: n, freq: freq.value, method: method.value,
                 window: Number(window.value) || 20, max_w: (Number(maxW.value) || 25) / 100,
                 cash_ratio: Number(cash.value) || 0,
                 target_vol: Number(volCap.value) ? Number(volCap.value) / 100 : null,
                 trend_map, rp_buckets, safe_asset: safeAsset.value,
                 funds: funds.map(f => ({ ...f })) }
-  if (editId) {
-    const i = list.findIndex(s => s.id === editId)
-    if (i >= 0) list[i] = rec; else list.push(rec)
-  } else list.push(rec)
-  saveStrategies(list)
+  try {
+    await saveStrategy(rec)
+  } catch (e) {
+    err.value = `保存失败：${e.message}`
+    return
+  }
   router.push(backTo)
 }
 </script>

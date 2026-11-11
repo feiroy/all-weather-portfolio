@@ -35,6 +35,7 @@ sys.path.insert(0, str(ROOT / "streamlit_app"))
 
 from allweather import accounts as AC  # noqa: E402
 from allweather import holdings as HG  # noqa: E402
+from allweather import strategies as ST  # noqa: E402
 from allweather.chart_html import pnl_chart_html, trend_chart_data, trend_chart_html  # noqa: E402
 from allweather.config import DATA_DIR, ETF_META, STRATEGY_PARAMS  # noqa: E402,F401
 from allweather.portfolio import Portfolio, close_trade_idx  # noqa: E402
@@ -47,6 +48,7 @@ STRAT_NAME = {"B-Con": "V3-B 保守增强", "B-RP": "V3-B 风险平价", "V3c": 
 BENCH_COL = {"B-RP": "V3-B 风险平价(20d)_100% RP", "B-Con": "V3-B 保守增强(20d)_100% RP", "V3c": "V3c 多元_100% RP"}
 _W: dict = {}
 _P: dict = {}
+_SW: dict = {}          # 自定义策略的目标权重缓存：(策略key, 数据版本) → (权重, 诊断)
 _LOCK = threading.Lock()
 
 
@@ -76,11 +78,15 @@ def _r(v, d=2):
 # ------------------------------------------------------------------ 数据与缓存
 def _data_ver() -> float:
     fs = list(DATA_DIR.glob("*.csv")) + list((DATA_DIR / "nav_detail").glob("*.csv"))
+    # 自定义策略库也算「数据」：改了策略就该重算目标权重，否则要等下一次行情更新才生效
+    st = DATA_DIR / "strategies.json"
+    if st.exists():
+        fs.append(st)
     return max((f.stat().st_mtime for f in fs), default=0.0)
 
 
 def _live() -> dict:
-    """三个策略的目标权重（含趋势过滤）与原始权重 + 行情面板 —— 按数据版本缓存一份。"""
+    """三个内置策略的目标权重（含趋势过滤）与原始权重 + 行情面板 —— 按数据版本缓存一份。"""
     ver = _data_ver()
     with _LOCK:
         if _W.get("ver") != ver:
@@ -92,7 +98,36 @@ def _live() -> dict:
             _W.update({"ver": ver, "panel": panel, "w": {k: v[0] for k, v in ws.items()},
                        "w0": {k: v[1] for k, v in ws.items()}})
             _P.clear()
+            _SW.clear()
         return _W
+
+
+def strategy_weights(key: str | None) -> tuple[dict, dict]:
+    """策略 key → (目标权重, 诊断)。内置三策略走 pipeline，`custom:<id>` 走策略库 + 回测引擎。
+
+    自定义策略按 (key, 数据版本) 缓存：它的权重靠跑一遍回测引擎算（约 0.2~2 秒），
+    每次切页都重算没必要；改了策略文件或行情，_data_ver() 会变，缓存自然失效。
+    """
+    live = _live()
+    key = str(key or "B-Con")
+    if not key.startswith("custom:"):
+        return live["w"].get(key, live["w"]["B-Con"]), {}
+    ck = (key, live["ver"])
+    with _LOCK:
+        hit = _SW.get(ck)
+    if hit is not None:
+        return hit
+    from allweather.custom_backtest import live_custom_weights
+    rec = ST.get(key.split(":", 1)[1])
+    if rec is None:
+        # 用 ValueError 而不是 KeyError：KeyError 在 acct_view 里被当成「没有这个账户」，
+        # 会把「策略被删了」误报成账户不存在（用户就找不到原因了）
+        raise ValueError("跟随的自定义策略不存在了，可能已被删除，请给它换个策略")
+    w, diag = live_custom_weights(rec, live["panel"])
+    with _LOCK:
+        _SW.clear()
+        _SW[ck] = (w, diag)
+    return w, diag
 
 
 def _portfolio(aid: str, target=None) -> tuple[Portfolio, dict]:
@@ -107,14 +142,41 @@ def _portfolio(aid: str, target=None) -> tuple[Portfolio, dict]:
         if key not in _P:
             for k in [k for k in _P if k[0] == aid and k[3] == stg]:
                 del _P[k]
-            _P[key] = Portfolio(a, live["w"].get(stg, live["w"]["B-Con"]))
+            # 先算权重再建 Portfolio：算权重时会把新基金的净值拉进本地缓存，
+            # Portfolio 建面板才读得到它（否则新加的第 10 只基金定不出价）。
+            w = strategy_weights(stg)[0]
+            _P[key] = Portfolio(a, w)
         return _P[key], a
+
+
+def _strategy_name(key: str) -> str:
+    """策略 key → 显示名。自定义策略的名字来自策略库，策略被删了要看得出来。"""
+    key = str(key or "B-Con")
+    if key in STRAT_NAME:
+        return STRAT_NAME[key]
+    if key.startswith("custom:"):
+        rec = ST.get(key.split(":", 1)[1])
+        return (rec or {}).get("name") or "自定义策略（已删除）"
+    return key
+
+
+def _strategy_rec(key: str):
+    """校验策略 key：内置三个返回 None，自定义返回它的记录；不存在就抛 ValueError。"""
+    key = str(key or "")
+    if key in KEYS:
+        return None
+    if key.startswith("custom:"):
+        rec = ST.get(key.split(":", 1)[1])
+        if rec:
+            return rec
+        raise ValueError("这个自定义策略不存在了，可能已被删除")
+    raise ValueError("没有这个策略")
 
 
 def _acct_info(aid: str, a: dict) -> dict:
     stg = a.get("strategy") or "B-Con"
     return {"id": aid, "name": a.get("name") or aid, "kind": a.get("kind") or "实盘",
-            "strategy": stg, "strategy_name": STRAT_NAME.get(stg, stg), "created": a.get("created")}
+            "strategy": stg, "strategy_name": _strategy_name(stg), "created": a.get("created")}
 
 
 def _hj(h: dict) -> dict:
@@ -131,6 +193,9 @@ def acct_view(fn):
             P, a = _portfolio(aid)
         except KeyError:
             return J({"error": "没有这个账户"}, 404)
+        except ValueError as e:
+            # 账户本身在、但算不出目标权重（比如跟随的自定义策略被删了）
+            return J({"error": str(e)}, 400)
         try:
             return await fn(request, aid, P, a)
         except ValueError as e:
@@ -546,9 +611,9 @@ async def weights(request, aid, P, a):
                    for k in KEYS},
              "note": {k: _note(k, x) for k in KEYS}} for x in assets]
     slots = []
-    for s in HG.SLOTS:
+    for s in HG.slots_of(P.holdings):
         h = P.holdings.get(s, {})
-        slots.append({"slot": s, "label": HG.SLOT_LABEL[s], "on": bool(h.get("on", True)),
+        slots.append({"slot": s, "label": HG.slot_label(P.holdings, s), "on": bool(h.get("on", True)),
                       "funds": [{"code": f["code"], "name": f.get("name") or FL.fund_name(f["code"]) or f["code"],
                                  "unit": f.get("unit"), "share": _r(f.get("share") or 0, 4)} for f in HG.funds(h)]})
     return J({"account": _acct_info(aid, a), "strategies": [{"key": k, "name": STRAT_NAME[k]} for k in KEYS],
@@ -557,30 +622,44 @@ async def weights(request, aid, P, a):
 
 @acct_view
 async def switch_preview(request, aid, P, a):
-    to = request.query_params.get("to")
-    if to not in KEYS:
-        return J({"error": "没有这个策略"}, 400)
-    Q, _ = _portfolio(aid, target=to)
-    from allweather.rebalance import STRATEGIES
+    to = str(request.query_params.get("to") or "")
+    rec = _strategy_rec(to)
+    w_to, diag = strategy_weights(to)
+    # 预览必须按「换过去之后」的位置体系算（和 set_strategy 一样先 ensure_slots）：
+    # 否则新基金那 30% 会被摊到别的位置上，笔数、卖出金额、清仓名单全跟真下出来的不一样。
+    hs, added = (HG.ensure_slots(a.get("holdings") or {}, ST.fund_map(rec)) if rec
+                 else (a.get("holdings") or {}, []))
+    Q = Portfolio({**a, "holdings": hs}, w_to) if added else _portfolio(aid, target=to)[0]
     liq = [o for o in Q.plan["orders"] if o.get("liq")]
-    zero = [HG.SLOT_LABEL[s] for s in HG.active(Q.holdings)
-            if float(Q.slot_w.get(s, 0) or 0) <= 0 and s not in STRATEGIES[to]["assets"]]
-    unp = HG.unplaced_assets(_live()["w"][to], Q.holdings)
-    return J({"to": to, "to_name": STRAT_NAME[to], "n_now": len(P.plan["orders"]), "n": len(Q.plan["orders"]),
+    # 目标为 0 的位置 = 换过去以后会被清掉的位置（原来只比内置策略的 assets 列表，
+    # 自定义策略没有那张表，直接按算出来的权重看，逻辑反而更准）
+    zero = [HG.slot_label(Q.holdings, s) for s in HG.active(Q.holdings)
+            if float(Q.slot_w.get(s, 0) or 0) <= 0]
+    unp = HG.unplaced_assets(w_to, Q.holdings)
+    names = {k: v.get("name") or k for k, v in ((ST.fund_map(rec) if rec else {}) or {}).items()}
+    return J({"to": to, "to_name": _strategy_name(to), "n_now": len(P.plan["orders"]), "n": len(Q.plan["orders"]),
               "buy": _r(Q.plan["buy"]), "sell": _r(Q.plan["sell"]),
               "liq": [{"name": FL.fund_name(o["code"]) or o["code"], "amount": _r(o["shares"] * o["nav"])} for o in liq],
-              "zero": zero, "unplaced": [{"name": ETF_META.get(k, {}).get("name", k),
-                                          "w": _r(float(_live()["w"][to].get(k, 0)) * 100), "to": v} for k, v in unp.items()]})
+              "zero": zero, "added": added, "diag": diag,
+              "unplaced": [{"name": names.get(k) or ETF_META.get(k, {}).get("name", k),
+                            "w": _r(float(w_to.get(k, 0)) * 100), "to": v} for k, v in unp.items()]})
 
 
 @acct_view
 async def set_strategy(request, aid, P, a):
-    to = (await request.json()).get("to")
-    if to not in KEYS:
-        return J({"error": "没有这个策略"}, 400)
+    to = str((await request.json()).get("to") or "")
+    rec = _strategy_rec(to)
     a["strategy"] = to
+    added: list[str] = []
+    if rec:
+        # 换到自定义策略时，给它新加的基金补位置（已有位置一律不动）
+        hs, added = HG.ensure_slots(a.get("holdings") or {}, ST.fund_map(rec))
+        if added:
+            a["holdings"] = hs
     AC.save(aid, a)
-    return J({"ok": True})
+    with _LOCK:
+        _P.clear()          # 账户文件变了，Portfolio 缓存全作废（含换策略后的旧对象）
+    return J({"ok": True, "to": to, "to_name": _strategy_name(to), "added": added})
 
 
 @acct_view
@@ -588,7 +667,7 @@ async def edit_holdings(request, aid, P, a):
     """选基配置：开关位置 / 加一只 / 删一只 / 改买卖单位 / 改位置内占比。"""
     b = await request.json()
     s, op = b.get("slot"), b.get("op")
-    if s not in HG.SLOTS:
+    if s not in HG.slots_of(a.get("holdings") or {}):
         return J({"error": "没有这个位置"}, 400)
     h = {k: HG._norm_slot(v) for k, v in (a.get("holdings") or HG._default_holdings()).items()}
     slot = h.get(s, HG._norm_slot({}))
@@ -870,6 +949,39 @@ async def fund_detail(request: Request):
               "dates": [f"{d:%Y-%m-%d}" for d in nv.index], "values": [round(float(v), 4) for v in nv]})
 
 
+# ------------------------------------------------------------------ 自定义策略库
+async def list_strategies(request: Request):
+    """策略工厂保存的模板。前端拿它做「换策略」列表，实盘绑定时也按它算权重。"""
+    rows = ST.load()
+    return J({"rows": [{"id": r.get("id"), "name": r.get("name"), "method": r.get("method"),
+                        "freq": r.get("freq"), "n_funds": len(r.get("funds") or []),
+                        "updated": r.get("updated"), **r} for r in rows]})
+
+
+async def save_strategy(request: Request):
+    b = await request.json()
+    try:
+        rec = ST.upsert(b)
+    except ValueError as e:
+        return J({"error": str(e)}, 400)
+    with _LOCK:
+        _SW.clear()          # 策略改了，缓存的权重立刻作废
+        _P.clear()
+    return J({"ok": True, "strategy": rec})
+
+
+async def delete_strategy(request: Request):
+    sid = request.path_params["sid"]
+    try:
+        ST.delete(sid)
+    except KeyError:
+        return J({"error": "没有这条策略"}, 404)
+    with _LOCK:
+        _SW.clear()
+        _P.clear()
+    return J({"ok": True})
+
+
 # ------------------------------------------------------------------ 更新数据（后台线程）
 _UPD = {"running": False, "errors": [], "finished": 0.0, "started": 0.0}
 # 看门狗上限：akshare 内部大量 requests 不带 timeout，网络一旦半通（比如走了一个不回包的代理），
@@ -1110,6 +1222,9 @@ routes = [
     Route("/api/acct/{aid}/switch-preview", switch_preview),
     Route("/api/acct/{aid}/strategy", set_strategy, methods=["POST"]),
     Route("/api/acct/{aid}/holdings", edit_holdings, methods=["POST"]),
+    Route("/api/strategies", list_strategies),
+    Route("/api/strategies", save_strategy, methods=["POST"]),
+    Route("/api/strategies/{sid}", delete_strategy, methods=["DELETE"]),
     Route("/api/market/signals", signals),
     Route("/api/market/backtest", backtest),
     Route("/api/market/custom-backtest", custom_backtest, methods=["POST"]),

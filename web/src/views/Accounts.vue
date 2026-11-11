@@ -16,13 +16,14 @@
             <div class="amt num">¥{{ money(a.total) }}</div>
             <div class="pnl num"><span :class="tone(a.pnl)">{{ signed(a.pnl) }}</span>
               <span :class="tone(a.pnl_pct)">{{ pct(a.pnl_pct) }}</span><small>持有收益</small></div>
-            <div class="ops" @click.stop>
-              <a @click="openRename(a)">改名</a>
-              <a @click="openStrategy(a)">换策略</a>
-              <a class="red" :class="{ dis: list.length <= 1 }" @click="askDelete(a)">删除</a>
-              <span class="enter">进入 <van-icon name="arrow" /></span>
-            </div>
           </template>
+          <!-- 操作行放在错误分支外面：跟随的自定义策略被删了也要能换策略，否则这个账户就死锁了 -->
+          <div class="ops" @click.stop>
+            <a @click="openRename(a)">改名</a>
+            <a @click="openStrategy(a)">换策略</a>
+            <a class="red" :class="{ dis: list.length <= 1 }" @click="askDelete(a)">删除</a>
+            <span class="enter">进入 <van-icon name="arrow" /></span>
+          </div>
         </div>
         <div class="acard add" @click="openNew"><van-icon name="plus" /><span>新建账户</span><small>模拟盘试策略 / 再开一个实盘</small></div>
       </div>
@@ -82,12 +83,13 @@
 <script setup>
 defineOptions({ name: 'Accounts' })
 import { computed, reactive, ref, onActivated, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { showConfirmDialog, showSuccessToast, showFailToast } from 'vant'
 import { get, peek, post, patch, del, dataVer } from '../api'
+import { loadStrategies } from '../strategyStore'
 import { money, signed, pct, tone } from '../fmt'
 import UpdateBtn from '../components/UpdateBtn.vue'
-const router = useRouter()
+const router = useRouter(), route = useRoute()
 const c0 = peek('/api/accounts')
 const list = ref(c0?.accounts || null), trash = ref(c0?.trash || []), asof = ref(c0?.asof || '')
 const last = ref(localStorage.getItem('aw-last') || '')
@@ -98,8 +100,14 @@ const load = async (fresh = false) => {
 }
 load(); onActivated(() => load()); watch(dataVer, () => load(true))
 
-const STG = [{ text: 'V3-B 保守增强', value: 'B-Con' }, { text: 'V3-B 风险平价', value: 'B-RP' }, { text: 'V3c 多元', value: 'V3c' }]
-const stgCols = STG, stgName = k => STG.find(s => s.value === k)?.text
+// 跟随策略 = 内置三策略 + 策略工厂存下来的自定义策略（自定义的 id 形如 custom:cs-xxxxxx）
+const BASE_STG = [{ text: 'V3-B 保守增强', value: 'B-Con' }, { text: 'V3-B 风险平价', value: 'B-RP' }, { text: 'V3c 多元', value: 'V3c' }]
+const customs = ref([])
+const STG = computed(() => [...BASE_STG, ...customs.value.map(r => ({ text: `自定义 · ${r.name}`, value: `custom:${r.id}` }))])
+const stgCols = computed(() => STG.value)
+// 策略被删了 / 还没读到时，直接显示 key，别显示空白
+const stgName = k => STG.value.find(s => s.value === k)?.text || (k?.startsWith('custom:') ? '自定义（已删除）' : k)
+loadStrategies().then(r => { customs.value = r }).catch(() => {})
 const today = new Date().toISOString().slice(0, 10)
 const f = reactive({ name: '', kind: '模拟', strategy: 'B-Con', from: '', copy_trades: false, created: today })
 const dateParts = ref(today.split('-'))
@@ -139,7 +147,8 @@ function openStrategy(a) { stgAcct.value = a; showStgChange.value = true }
 async function doStrategy({ selectedValues }) {
   const to = selectedValues[0], a = stgAcct.value
   showStgChange.value = false
-  if (!a || to === a.strategy) return
+  if (!a) return
+  if (to === a.strategy) return showFailToast(`已经在跟随「${stgName(to)}」了`)
   let p
   try { p = await get(`/api/acct/${a.id}/switch-preview?to=${to}`, { fresh: true }) }
   catch (e) { return showFailToast(e.message) }
@@ -147,7 +156,14 @@ async function doStrategy({ selectedValues }) {
                  `卖出 ¥${money(p.sell, 0)} · 买入 ¥${money(p.buy, 0)}`]
   if (p.liq.length) lines.push(`清仓：${p.liq.map(x => `${x.name} ¥${money(x.amount, 0)}`).join('、')}`)
   if (p.zero.length) lines.push(`目标为 0 的位置：${p.zero.join('、')}`)
+  if (p.added?.length) lines.push(`会新建 ${p.added.length} 个位置：${p.added.join('、')}`)
   if (p.unplaced.length) lines.push(`新策略有、还没配位置的资产：${p.unplaced.map(x => `${x.name} ${x.w}%`).join('、')}`)
+  // 自定义策略特有的口径差异，先说清楚再让人点确认
+  const dg = p.diag || {}
+  if (dg.cash_dropped) lines.push('这条策略设了留现金，实盘不留现金：按比例摊回满仓')
+  if (dg.buckets_fallback) lines.push('分桶没覆盖全部基金，风险平价按单桶算')
+  if (dg.safe_missing) lines.push('避风港不在持仓里，趋势过滤不会生效')
+  if (dg.asof) lines.push(`按 ${dg.asof} 收盘后的净值算的权重`)
   try {
     await showConfirmDialog({ title: `「${a.name}」改为跟随「${p.to_name}」？`,
       message: lines.join('\n'), messageAlign: 'left', confirmButtonText: '确认更换' })
@@ -155,6 +171,16 @@ async function doStrategy({ selectedValues }) {
   try { await post(`/api/acct/${a.id}/strategy`, { to }); showSuccessToast('已更换'); load(true) }
   catch (e) { showFailToast(e.message) }
 }
+// 回测页点「用它实盘」跳过来：/ ?use=<策略key>&acct=<账户id>，直接走同一个预览确认
+let usedOnce = false
+watch(list, v => {
+  const sid = String(route.query.use || ''), a = (v || []).find(x => x.id === route.query.acct)
+  if (usedOnce || !sid || !a) return
+  usedOnce = true
+  router.replace({ path: '/', query: {} })   // 清掉参数，刷新不会又弹一次
+  stgAcct.value = a
+  doStrategy({ selectedValues: [sid] })
+}, { immediate: true })
 async function restore(t) {
   try { await post(`/api/trash/${t.file}/restore`, {}); showSuccessToast('已恢复'); load(true) } catch (e) { showFailToast(e.message) }
 }

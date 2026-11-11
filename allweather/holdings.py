@@ -42,6 +42,7 @@ for _a in ("hs300", "us_sp500", "credit", "bond_10y", "bond_30y", "gold", "nonfe
     SLOT_BUCKET.setdefault(_a, _a)
 
 SLOTS = ["hs300", "us_sp500", "credit", "bond_10y", "bond_30y", "gold", "nonferr", "ene", "divlow"]
+BASE_SLOTS = SLOTS      # 内置 9 个位置；账户里还可以有自定义位置（见 slots_of）
 SLOT_LABEL = {
     "hs300": "增长↑权益(A股)", "us_sp500": "增长↑权益(海外)", "credit": "收益垫(信用债)",
     "bond_10y": "增长↓10Y国债", "bond_30y": "增长↓30Y国债", "gold": "通胀↑黄金",
@@ -70,7 +71,7 @@ def _fund(f: dict) -> dict:
 
 
 def _norm_slot(h: dict | None) -> dict:
-    """位置配置规范化：统一成 {"on": bool, "funds": [...]}；旧的单只结构自动迁移。"""
+    """位置配置规范化：统一成 {"on": bool, "label": str, "funds": [...]}；旧的单只结构自动迁移。"""
     h = h if isinstance(h, dict) else {}
     raw = h.get("funds")
     if not isinstance(raw, list):
@@ -80,7 +81,52 @@ def _norm_slot(h: dict | None) -> dict:
     if out and sum(f["share"] for f in out) <= 0:
         for f in out:
             f["share"] = round(1.0 / len(out), 6)
-    return {"on": bool(h.get("on", True)), "funds": out}
+    # label 只有自定义位置（绑定自定义策略时自动建的）才会有值；内置位置留给 SLOT_LABEL
+    return {"on": bool(h.get("on", True)), "label": str(h.get("label") or ""), "funds": out}
+
+
+def slots_of(holdings: dict | None) -> list[str]:
+    """账户实际拥有的位置：内置 9 个在前（只保留配置里存在的），自定义位置按配置顺序跟在后面。
+
+    为什么位置不再写死 9 个：自定义策略可以加第 10 只基金（科技 ETF、纳指…），
+    账本按「位置」记账和分钱，没有位置它的权重只能被摊到别的位置上（2026-11-11 用户要求支持）。
+    内置顺序固定，是为了让所有页面的位置顺序不随 dict 插入顺序漂移。
+    """
+    h = holdings or {}
+    return [s for s in BASE_SLOTS if s in h] + [s for s in h if s not in BASE_SLOTS]
+
+
+def slot_label(holdings: dict | None, slot: str) -> str:
+    """位置显示名：内置用固定表，自定义位置用配置里的 label（没写就用它挂的第一只基金名）。"""
+    if slot in SLOT_LABEL:
+        return SLOT_LABEL[slot]
+    h = (holdings or {}).get(slot) or {}
+    if h.get("label"):
+        return str(h["label"])
+    fs = funds(h)
+    return (fs[0].get("name") or fs[0]["code"]) if fs else slot
+
+
+def ensure_slots(holdings: dict, strategy_funds: dict) -> tuple[dict, list[str]]:
+    """给自定义策略里的每只基金备好位置，返回 (新 holdings, 新建的位置名)。
+
+    - 策略资产 key 与内置位置同名（hs300 / credit …）→ 已经有位置，原样不动；
+    - 策略用的是 6 位代码且能归一成内置资产（511220 → credit）→ 也已有位置；
+    - 真正的新基金（159915 这种）→ 建一个同名位置，默认开着、挂上去。
+    只补不改：用户在这个位置上换过基金、改过占比，一律保留。
+    """
+    out = {s: _norm_slot(v) for s, v in (holdings or {}).items()}
+    added: list[str] = []
+    for key, info in (strategy_funds or {}).items():
+        key = str(key)
+        if not key or key in out:
+            continue
+        code = str(info.get("code") or key)
+        name = str(info.get("name") or code)
+        out[key] = {"on": True, "label": name,
+                    "funds": [_fund({"code": code, "name": name, "unit": default_unit(code)})]}
+        added.append(key)
+    return out, added
 
 
 def funds(h: dict | None) -> list[dict]:
@@ -115,7 +161,7 @@ def share_of(h: dict | None) -> list[float]:
 def all_codes(holdings: dict) -> list[str]:
     """配置里出现过的全部基金代码（去重、保序）。"""
     out: list[str] = []
-    for s in SLOTS:
+    for s in slots_of(holdings):
         for c in codes(holdings.get(s, {})):
             if c not in out:
                 out.append(c)
@@ -124,7 +170,7 @@ def all_codes(holdings: dict) -> list[str]:
 
 def fund_meta(holdings: dict, code: str) -> tuple[str | None, dict]:
     """代码 → (位置, 该基金配置)；配置里没有时返回 (None, {})。"""
-    for s in SLOTS:
+    for s in slots_of(holdings):
         for f in funds(holdings.get(s, {})):
             if f["code"] == code:
                 return s, f
@@ -191,8 +237,8 @@ def save(holdings: dict) -> None:
 
 
 def active(holdings: dict) -> list[str]:
-    """启用的位置（开关打开且至少挂了一只基金）。"""
-    return [s for s in SLOTS
+    """启用的位置（开关打开且至少挂了一只基金）。内置在前、自定义在后。"""
+    return [s for s in slots_of(holdings)
             if holdings.get(s, {}).get("on", True) and codes(holdings.get(s, {}))]
 
 
@@ -347,8 +393,18 @@ def unplaced_assets(w: dict, holdings: dict) -> dict[str, str]:
 
 
 def default_codes(holdings: dict) -> dict[str, str]:
-    """项目默认代码（ETF_META），用于「项目默认基金同期收益」对照。"""
-    return {s: ETF_META.get(s, {}).get("code", "") for s in active(holdings)}
+    """项目默认代码（ETF_META），用于「项目默认基金同期收益」对照。
+
+    自定义位置在 ETF_META 里没有条目，退回它自己挂的第一只 —— 那个位置本来就是围绕那只基金建的。
+    """
+    out = {}
+    for s in active(holdings):
+        code = ETF_META.get(s, {}).get("code", "")
+        if not code:
+            fs = codes(holdings.get(s, {}))
+            code = fs[0] if fs else ""
+        out[s] = code
+    return out
 
 
 def default_unit(code: str, otc: bool | None = None) -> str:

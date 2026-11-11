@@ -206,6 +206,120 @@ def custom_series(rets, method="fixed", weights=None, freq="M", **params):
     return r.nv, int(r.n_rebal), last
 
 
+def prepare_funds(raw_items: list, panel: pd.DataFrame | None = None,
+                  start: str = "2015-01-01") -> dict:
+    """策略的基金清单 → 对齐到同一交易日轴的收益矩阵。
+
+    **回测页和实盘权重共用这一份**：同一条策略，页面看到的曲线和实盘下的单必须同源，
+    否则「回测 8%、实盘走成 6%」这种账永远对不清。
+
+    Returns: {keys, meta, wmap, first, eff, fund_rets, panel_rets}
+    """
+    from allweather.data import load_panel, panel_returns
+
+    if panel is None:
+        panel = load_panel()
+    items = [it for it in raw_items if it.get("weight") is not None and float(it["weight"]) > 0]
+    if not items:
+        raise ValueError("至少选一只基金并给一个大于 0 的权重")
+    cols, meta, wmap = {}, {}, {}
+    for it in items:
+        key = canonical_key(str(it.get("key") or "").strip(), panel)
+        if not key or key in cols:
+            continue
+        s, nm, src, code = _resolve(key, panel)
+        cols[key] = s.reindex(panel.index).ffill()
+        meta[key] = {"name": it.get("name") or nm, "code": it.get("code") or code, "src": src}
+        wmap[key] = float(it["weight"])
+    keys = list(cols)
+    px = pd.DataFrame(cols)
+    first = {k: px[k].first_valid_index() for k in keys}
+    bad = [meta[k]["name"] for k in keys if first[k] is None]
+    if bad:
+        raise ValueError(f"{'、'.join(bad)} 在回测区间内没有净值")
+    # 起点取「所有选中基金都有日收益」的第一天（与 pipeline.strategy_window 同一规则）：
+    # 只用价格首个有效日会多出一天 NaN 收益，风险平价/逆波动率的窗口会因此错位。
+    px_rets = px.pct_change(fill_method=None).iloc[1:]
+    first_ret = {k: px_rets[k].first_valid_index() for k in keys}
+    eff = max(pd.Timestamp(start), max(v for v in first_ret.values() if v is not None))
+    if len(px.loc[eff:]) < 2:
+        raise ValueError("所选基金的可用区间太短，换更早成立的基金或把起点提前")
+    # 收益必须先在全历史上算、再切片：内置引擎是「整条面板 pct_change 后丢首行」，
+    # 若在切片后再 pct_change 会晚一天，导致自定义策略与内置策略差一个交易日（实测年化差 0.01pp）。
+    fund_rets = px_rets.loc[eff:].dropna()
+    panel_rets = panel_returns(panel).loc[eff:]
+    # 二者同起点同交易日轴；万一有缺行，补齐后按 0 收益处理，不让曲线错位
+    if len(fund_rets) != len(panel_rets):
+        fund_rets = fund_rets.reindex(panel_rets.index).fillna(0.0)
+    return {"keys": keys, "meta": meta, "wmap": wmap, "first": first, "eff": eff,
+            "fund_rets": fund_rets, "panel_rets": panel_rets}
+
+
+def _drifted(rets: pd.DataFrame, w0: pd.Series) -> pd.Series:
+    """买入持有（freq='N'）到今天，初始权重随涨跌漂到了哪 —— 这就是「不再平衡」的目标。"""
+    h = w0.values.astype(float).copy()
+    arr = rets.values
+    for i in range(1, len(arr)):
+        h = h * (1 + arr[i])
+        s = h.sum()
+        if s > 0:
+            h = h / s
+    return pd.Series(h, index=w0.index)
+
+
+def live_custom_weights(rec: dict, panel: pd.DataFrame | None = None):
+    """自定义策略「假如今天调仓」的目标权重 —— 实盘下单用。
+
+    与 pipeline.live_target_weights 对内置三策略的做法一致：非固定权重模式**强制在最后一个
+    交易日调仓**（rebal_dates=[last]），否则拿到的只是上次调仓日那一行，可能是几周前的权重。
+    固定权重：M/Q 就是设定权重；N（不再平衡）用 `_drifted` 取今天漂到的权重，这样账本不会
+    把「不再平衡」的策略每月拉回一次。
+
+    Returns: (权重 dict 资产key→w 已归一到 1, 诊断 dict)
+      诊断里 cash_dropped = 策略设了留现金（实盘账户不留现金，按比例摊回满仓，与内置策略同口径）；
+              safe_missing = 配了趋势过滤但避风港不在持仓里（引擎里会静默失效，页面要提示）。
+    """
+    from allweather.data import load_panel
+
+    if panel is None:
+        panel = load_panel()
+    method = str(rec.get("method") or "fixed").lower()
+    freq = str(rec.get("freq") or "M").upper()
+    prep = prepare_funds(rec.get("funds") or [], panel, str(rec.get("start") or "2015-01-01"))
+    keys, fund_rets = prep["keys"], prep["fund_rets"]
+    tm = {str(k): int(v) for k, v in (rec.get("trend_map") or {}).items() if int(v or 0) > 0}
+    safe = str(rec.get("safe_asset") or "credit")
+    diag = {"start": f"{prep['eff']:%Y-%m-%d}", "asof": f"{fund_rets.index[-1]:%Y-%m-%d}",
+            "cash_dropped": float(rec.get("cash_ratio") or 0) > 0,
+            "buckets_fallback": False,
+            "safe_missing": bool(method != "fixed" and tm and safe not in keys)}
+    w0 = pd.Series({k: float(prep["wmap"][k]) for k in keys})
+    w0 = w0 / float(w0.sum())
+    if method == "fixed":
+        w = _drifted(fund_rets[keys], w0) if freq == "N" else w0
+    else:
+        kw = build_engine_kwargs(fund_rets[keys], method=method, rebal=freq,
+                                 window=int(rec.get("window") or 20),
+                                 max_w=float(rec.get("max_w") or 0.25),
+                                 min_w=float(rec.get("min_w") if rec.get("min_w") is not None else 0.02),
+                                 cash_ratio=float(rec.get("cash_ratio") or 0.0),
+                                 trend_map=tm or None, safe_asset=safe,
+                                 target_vol=rec.get("target_vol"),
+                                 rp_buckets=rec.get("rp_buckets"))
+        diag["buckets_fallback"] = bool(kw.pop("_buckets_fallback", False))
+        kw["rebal_dates"] = [fund_rets.index[-1]]      # 只在这一天调仓 = 「假如今天调仓」
+        from allweather.backtest import backtest
+        r = backtest(fund_rets[keys], **kw)
+        if r.weight_df is None or not len(r.weight_df):
+            raise ValueError("策略算不出今天的权重（回测引擎没返回权重表）")
+        w = r.weight_df.iloc[-1].astype(float)
+    w = w[w > 0]
+    total = float(w.sum())
+    if total <= 0:
+        raise ValueError("策略算出来的权重全是 0，检查趋势过滤和权重设置")
+    return {str(k): float(v) / total for k, v in w.items()}, diag
+
+
 def custom_compare(weights: dict | None = None, start: str = "2015-01-01",
                    freq: str = "M", name: str = "我的组合",
                    funds: list | None = None, method: str = "fixed",
@@ -239,16 +353,8 @@ def custom_compare(weights: dict | None = None, start: str = "2015-01-01",
         freq = "M"
 
     ck = lambda k: canonical_key(k, panel)  # noqa: E731 — 6 位代码统一转成内部资产 key
-    cols, meta, wmap = {}, {}, {}
-    for it in items:
-        key = ck(str(it.get("key") or "").strip())
-        if not key or key in cols:
-            continue
-        s, nm, src, code = _resolve(key, panel)
-        cols[key] = s.reindex(panel.index).ffill()
-        meta[key] = {"name": it.get("name") or nm, "code": it.get("code") or code, "src": src}
-        wmap[key] = float(it["weight"])
-    keys = list(cols)
+    prep = prepare_funds(items, panel, start)
+    keys, meta, wmap = prep["keys"], prep["meta"], prep["wmap"]
     # 趋势窗口 / 分桶也是按资产 key 索引的，用户用 6 位代码带进来的要一起归一化，
     # 否则会「明明配了却匹配不上列名」。trend_map=None 时仍传 None，保持原来的兼容参数路径。
     tm_default = {"nonferr": trend_commodity, "ene": trend_commodity, "gold": trend_gold,
@@ -282,25 +388,8 @@ def custom_compare(weights: dict | None = None, start: str = "2015-01-01",
             f"当前持仓代码：{codes} —— 里面没有 511220（可能被替换成了别的债基）。"
             "请在「常用资产」里加入「城投债 ETF」，或把所有均线窗口设为 0。"
         )
-    px = pd.DataFrame(cols)
-    first = {k: px[k].first_valid_index() for k in keys}
-    bad = [meta[k]["name"] for k in keys if first[k] is None]
-    if bad:
-        raise ValueError(f"{'、'.join(bad)} 在回测区间内没有净值")
-    # 起点取「所有选中基金都有日收益」的第一天（与 pipeline.strategy_window 同一规则）：
-    # 只用价格首个有效日会多出一天 NaN 收益，风险平价/逆波动率的窗口会因此错位。
-    px_rets = px.pct_change(fill_method=None).iloc[1:]
-    first_ret = {k: px_rets[k].first_valid_index() for k in keys}
-    eff = max(pd.Timestamp(start), max(v for v in first_ret.values() if v is not None))
-    if len(px.loc[eff:]) < 2:
-        raise ValueError("所选基金的可用区间太短，换更早成立的基金或把起点提前")
-    # 收益必须先在全历史上算、再切片：内置引擎是「整条面板 pct_change 后丢首行」，
-    # 若在切片后再 pct_change 会晚一天，导致自定义策略与内置策略差一个交易日（实测年化差 0.01pp）。
-    fund_rets = px_rets.loc[eff:].dropna()
-    panel_rets = panel_returns(panel).loc[eff:]
-    # 二者同起点同交易日轴；万一有缺行，补齐后按 0 收益处理，不让曲线错位
-    if len(fund_rets) != len(panel_rets):
-        fund_rets = fund_rets.reindex(panel_rets.index).fillna(0.0)
+    first, eff = prep["first"], prep["eff"]
+    fund_rets, panel_rets = prep["fund_rets"], prep["panel_rets"]
 
     w = pd.Series({k: wmap[k] for k in keys})
     w = w / w.sum() if w.sum() > 0 else w
