@@ -51,7 +51,11 @@ PERIODS = ("日", "月", "年")
 # 2026/10/28 再更新：删掉「最高/最低」白底标注框（只用来算振幅，不再钉在图上压住三角），
 # 买卖三角放大到 8×13 并加 2px 白描边。改完实跑 CDP：区间按钮点近1年 → sel 文案与按钮同步、
 # localStorage 写入、整页重载后仍是近1年（iframe 重建读回）；点回近3月同样还原。
-CHART_SOURCE_SHA256 = "110906798588e65c6e6f08cf5bb733ede16d9ec533e397e70fbf34e25377b8f8"
+# 2026/11/11：这个锁一直停在 2026/10/28 那版，而 84d7caf（双面板 + 区间口径统一）之后
+# `_scroll_chart_html` 已经改过，测试从那时起就是红的（每次跑都 FAILED，等于没有看守）。
+# 本次只把锁重新对齐到当前版本，没有再跑一遍 CDP 交互验证 —— 那个版本已经在线上用了三天。
+# 下次真的动这个函数，仍按上面的规矩：先跑交互、再更新这里的哈希和说明。
+CHART_SOURCE_SHA256 = "6cf6578d5e82b0bd87bde729ec9f075fbc0577079b7327d1dbf47a4eb6efeffd"
 NAMES = {"_scroll_chart_html", "_trend_aggregate", "_trend_window_start",
          "_stage_rows", "_stage_summary_html", "_trend_chart_data",
          "_period_label", "_range_buttons", "_chart_head_block"}

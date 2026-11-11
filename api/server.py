@@ -426,10 +426,29 @@ async def trades(request, aid, P, a):
 
 
 # ------------------------------------------------------------------ 调仓 / 新钱怎么分
+def _attach_quote(rows: list[dict]) -> None:
+    """给场内单挂上「现价 / 溢价率」，买入提示用。
+
+    溢价 = 场内现价 ÷ 最新净值 − 1。场外按净值申购，没有溢价这回事，所以只处理 otc=False。
+    取不到（断网、接口改版）就留 None —— 页面不显示，绝不因此拦住下单。
+    """
+    from allweather import quote as QUOTE
+    ex = [r for r in rows if r.get("code") and not r.get("otc")]
+    if not ex:
+        return
+    try:
+        q = QUOTE.snapshot([r["code"] for r in ex])
+    except Exception:  # noqa: BLE001
+        return
+    for r in ex:
+        r["quote"] = q.get(r["code"])
+
+
 def _calc_payload(P: Portfolio, a: dict) -> dict:
     p = P.plan
     act = [_hj(P.holding(it)) | {"slot_w": _r(it["slot_w"] * 100), "slot_tgt_w": _r(it["slot_tgt_w"] * 100)}
            for it in p["rows"] if it.get("side")]
+    _attach_quote(act)
     hold = [_hj(P.holding(it)) | {"slot_w": _r(it["slot_w"] * 100), "slot_tgt_w": _r(it["slot_tgt_w"] * 100),
                                   "slot_first": it["slot_first"]} for it in p["rows"] if not it.get("side")]
     slots = []
@@ -811,6 +830,23 @@ async def valuation_hist(request: Request):
               "pb": [_r(v, 4) if pd.notna(v) and v > 0 else None for v in h.get("pb", pd.Series(index=h.index))]})
 
 
+async def etf_premium(request: Request):
+    """场内 ETF 的现价 / 最新净值 / 溢价率（估算）。codes 逗号分隔，不传就查默认那 9 只。
+
+    溢价率一律用**小数**返回（0.1146 = 11.46%），与 /calc 里挂的 quote 同一口径，
+    格式化交给前端，免得两边一个百分数一个小数。
+    """
+    from allweather import quote as QUOTE
+    codes = [c.strip() for c in (request.query_params.get("codes") or "").split(",") if c.strip()]
+    if not codes:
+        codes = [m["code"] for m in ETF_META.values()]
+    rows = []
+    for r in QUOTE.snapshot(codes).values():
+        rows.append({**r, "price": _r(r["price"], 4), "nav": _r(r["nav"], 4),
+                     "chg": _r(r["chg"], 5), "premium": _r(r["premium"], 5)})
+    return J({"asof": f"{pd.Timestamp.now():%Y-%m-%d}", "rows": rows})
+
+
 async def fund_search(request: Request):
     q = request.query_params.get("q") or ""
     d = FL.name_candidates(q, limit=20)
@@ -1098,6 +1134,7 @@ routes = [
     Route("/api/market/custom-backtest", custom_backtest, methods=["POST"]),
     Route("/api/market/strategy-funds", strategy_funds),
     Route("/api/market/valuation", valuation),
+    Route("/api/market/premium", etf_premium),
     Route("/api/market/valuation/{code}", valuation_hist),
     Route("/api/market/fund-search", fund_search),
     Route("/api/market/fund/{code}", fund_detail),

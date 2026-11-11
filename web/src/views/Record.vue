@@ -30,11 +30,17 @@
 
         <div class="preview" v-if="fund">
           <div>{{ fund.unit === '股' ? '场内 · 按股成交，100 股一手' : '场外 · 按份额申购，一天一个净值' }}</div>
+          <!-- 溢价 = 现价 ÷ 最新净值 − 1。只有场内、只有买入才拦：卖出按现价成交，溢价高是好事 -->
+          <div v-if="prem" class="prem-line">现价 <b class="num">{{ prem.price }}</b>
+            <span class="vs">净值 {{ prem.nav }}（{{ (prem.nav_date || '').slice(5).replace('-', '/') }}）</span>
+            <PremiumTag :q="prem" />
+          </div>
           <div v-if="shares > 0">≈ <b class="num">{{ money(shares, fund.unit === '股' ? 0 : 2) }}</b> {{ fund.unit }}</div>
           <div v-if="feeDesc" class="fee-hint">费率：{{ feeDesc }}<template v-if="+fee > 0"> · 本笔 {{ money(+fee) }} 元</template></div>
           <div v-if="side === '卖出' && held != null">到这天持有 {{ money(held, fund.unit === '股' ? 0 : 2) }} {{ fund.unit }}
             <a @click="sellAll" v-if="held > 0 && Number(nav) > 0">全部卖出</a></div>
           <div class="warn" v-if="lotWarn">{{ lotWarn }}</div>
+          <div class="warn" v-if="premWarn">{{ premWarn }}</div>
         </div>
         <p class="tip" v-if="fromCalc">从「调仓」带过来的金额，按支付宝里实际成交的改一下再存</p>
 
@@ -61,6 +67,7 @@ import { showSuccessToast, showFailToast, showConfirmDialog } from 'vant'
 import { get, post, put, del } from '../api'
 import { money } from '../fmt'
 import SubBar from '../components/SubBar.vue'
+import PremiumTag from '../components/PremiumTag.vue'
 
 const route = useRoute(), router = useRouter()
 const aid = route.params.aid
@@ -141,10 +148,45 @@ const lotWarn = computed(() => {
   return near <= 0 ? '场内买入按整手 100 股，这个金额不够一手' : `场内买入按整手 100 股；就近是 ${near} 股 ≈ ¥${money(near * nav.value)}`
 })
 function sellAll() { amount.value = (held.value * nav.value - (+fee.value || 0)).toFixed(2) }
+
+// 溢价：只有「场内 + 买入 + 最近这几天」才有意义。
+//   - 卖出按现价成交，溢价高是好事，不提示；
+//   - 改旧账、补记几个月前的一笔，今天这份溢价和那一笔无关，也不提示。
+// 取不到就整个不显示，绝不因此拦住记账（台账是本机数据，不该依赖外网）。
+const prem = ref(null)
+const isRecent = () => Date.now() - new Date(`${date.value}T00:00:00`).getTime() < 7 * 864e5
+watch([() => fund.value?.code, side, date], async () => {
+  prem.value = null
+  const f = fund.value
+  if (!f || f.unit !== '股' || side.value !== '买入' || editIdx != null || !isRecent()) return
+  try {
+    const r = await get(`/api/market/premium?codes=${f.code}`, { fresh: true })
+    prem.value = (r.rows || []).find(x => x.ok) || null
+  } catch { /* 溢价拿不到不影响这一笔 */ }
+}, { immediate: true })
+
+// 按现价成交，所以金额里「多付给溢价」的那一份 = 金额 × p / (1 + p)，不是 × p
+const premWarn = computed(() => {
+  const q = prem.value, p = q?.ok ? q.premium : 0
+  if (!p || (q.level !== 'high' && q.level !== 'block')) return ''
+  const amt = +amount.value || 0
+  const over = amt * p / (1 + p)
+  const head = over >= 1
+    ? `这笔 ¥${money(amt, 0)} 里约 ¥${money(over, 0)} 是溢价`
+    : `买入价比净值高 ${(p * 100).toFixed(1)}%`
+  return `${head}；溢价回落时这部分就亏掉了，未必会还回来`
+})
+
 const back = () => (window.history.state?.back ? router.back() : router.replace(`/a/${aid}/trades`))
 
 async function save() {
   if (!fund.value) return showFailToast('先选基金')
+  if (premWarn.value) {
+    try {
+      await showConfirmDialog({ title: `溢价 ${(prem.value.premium * 100).toFixed(1)}%，仍然买入？`,
+                                message: premWarn.value, confirmButtonText: '仍然买入', cancelButtonText: '再想想' })
+    } catch { return }
+  }
   const b = { side: side.value, code: fund.value.code, slot: fund.value.slot,
               date: date.value, amount: +amount.value, nav: +nav.value,
               fee: fee.value === '' ? null : +fee.value }
@@ -172,6 +214,8 @@ async function remove() {
 .seg button.on.money{ background:var(--brand-soft); border-color:#C7D2FE; color:var(--brand); }
 .ex{ color:var(--muted); font-size:13px; margin-left:6px; }
 .fee-hint{ font-size:11.5px; color:var(--muted); }
+.prem-line{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.prem-line .vs{ font-size:11.5px; color:var(--muted); }
 .preview{ margin:12px 18px 0; font-size:12.5px; color:var(--sub); line-height:1.8; }
 .preview a{ color:var(--brand); margin-left:8px; cursor:pointer; }
 .warn{ color:#B45309; }

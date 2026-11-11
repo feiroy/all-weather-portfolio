@@ -17,7 +17,12 @@
               <van-switch :model-value="s.on" size="20px" @update:model-value="v => op(s, { op: 'toggle', on: v })" /></div>
             <template v-if="s.on">
               <div v-for="f in s.funds" :key="f.code" class="fr">
-                <div class="fn"><div>{{ f.name }}</div><small>{{ f.code }}</small></div>
+                <div class="fn"><div>{{ f.name }}</div>
+                  <small>{{ f.code }}</small>
+                  <!-- 场内才有溢价：现价单独一行，徽标不跟代码挤在一起被省略号吃掉 -->
+                  <small v-if="f.unit === '股' && pq[f.code]?.ok" class="qx">
+                    现价 {{ pq[f.code].price }} <PremiumTag :q="pq[f.code]" />
+                  </small></div>
                 <span class="seg2 u"><button :class="{ on: f.unit === '股' }" @click="op(s, { op: 'unit', code: f.code, unit: '股' })">场内</button>
                   <button :class="{ on: f.unit !== '股' }" @click="op(s, { op: 'unit', code: f.code, unit: '份额' })">场外</button></span>
                 <input v-if="s.funds.length > 1" class="sh num" type="number" :value="Math.round(f.share * 100)" @change="e => setShare(s, f, e.target.value)" /><span v-if="s.funds.length > 1" class="pc">%</span>
@@ -52,10 +57,22 @@ import { showConfirmDialog, showSuccessToast, showFailToast } from 'vant'
 import { get, peek, post, dataVer } from '../api'
 import { money } from '../fmt'
 import SubBar from '../components/SubBar.vue'
+import PremiumTag from '../components/PremiumTag.vue'
 const aid = useRoute().params.aid
 const url = `/api/acct/${aid}/weights`
 const d = ref(peek(url) || null)
-const load = async (fresh = false) => { d.value = await get(url, { fresh }) }
+// 场内那几只的现价与溢价率（场外按净值申购，没有溢价）。取不到就整块不显示。
+const pq = ref({})
+async function loadPrem() {
+  const codes = (d.value?.slots || []).filter(s => s.on)
+    .flatMap(s => (s.funds || []).filter(f => f.unit === '股').map(f => f.code))
+  if (!codes.length) return
+  try {
+    const r = await get(`/api/market/premium?codes=${[...new Set(codes)].join(',')}`)
+    pq.value = Object.fromEntries((r.rows || []).map(x => [x.code, x]))
+  } catch { /* 行情拿不到不影响配置页 */ }
+}
+const load = async (fresh = false) => { d.value = await get(url, { fresh }); loadPrem() }
 load(); watch(dataVer, () => load(true))
 async function op(s, body) {
   try { await post(`/api/acct/${aid}/holdings`, { slot: s.slot, ...body }); await load(true) } catch (e) { showFailToast(e.message) }
@@ -113,7 +130,9 @@ async function add(r) {
 .slot{ padding:12px 14px; } .slot.off{ opacity:.75; }
 .s1{ display:flex; justify-content:space-between; align-items:center; font-size:15px; }
 .fr{ display:flex; align-items:center; gap:8px; padding:9px 0; border-top:1px solid var(--line); margin-top:8px; }
-.fn{ flex:1; min-width:0; font-size:13.5px; } .fn div{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; } .fn small{ font-size:11.5px; color:var(--muted); }
+.fn{ flex:1; min-width:0; font-size:13.5px; } .fn div{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; } .fn small{ display:block; font-size:11.5px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+/* 现价 + 溢价徽标：单独一行，flex 排，徽标不被截断 */
+.fn .qx{ display:flex; align-items:center; gap:5px; margin-top:2px; }
 .u button{ padding:3px 8px; font-size:11.5px; }
 .sh{ width:40px; border:1px solid var(--line); border-radius:6px; padding:3px 4px; text-align:right; font-size:13px; }
 .pc{ font-size:12px; color:var(--muted); margin-left:-4px; }

@@ -32,7 +32,12 @@
                   <b class="on" @click="$router.push(`/a/${aid}/fund/${o.code}`)">{{ o.name }}</b>
                   <span class="oa num" :class="o.side === '买入' ? 'up' : 'down'">¥{{ money(o.amount, 0) }}</span>
                 </div>
-                <div class="o2">{{ o.code }} · {{ o.otc ? '场外' : '场内' }} · {{ o.slot }}</div>
+                <div class="o2">
+                  <span>{{ o.code }} · {{ o.otc ? '场外' : '场内' }} · {{ o.slot }}</span>
+                  <!-- 溢价率只对场内成立：场外按净值申购，买不到「贵」也买不到「便宜」。
+                       卖出单给了信息但不报警 —— 溢价卖出去是多卖钱 -->
+                  <PremiumTag v-if="!o.otc" :q="o.quote" :calm="o.side !== '买入'" />
+                </div>
                 <!-- 记一笔原来单独占一行且靠右，左边整片空白（用户 2026-11-08「下面太空了」）：
                      现在并到「股数 × 价格 / 占比」这一行右侧，卡片少一行、不留空档。
                      图标统一用 plus，和交易流水页、基金详情页的「记一笔」一致（原来这里是 edit）。 -->
@@ -43,6 +48,10 @@
                               :to="{ path: `/a/${aid}/record`, query: { code: o.code, side: o.side, amount: Math.round(o.amount * 100) / 100 } }">记一笔</van-button>
                 </div>
                 <div class="note" v-if="o.note">{{ o.note }}</div>
+                <div class="note prem" v-if="premWarn(o)">{{ premWarn(o) }}</div>
+                <!-- 上面的「≈ 股数 × 价格」是按净值算的，场内实际按现价成交；
+                     溢价/折价超过 2% 时两者差得明显，得说清差在哪 -->
+                <div class="note calcn" v-else-if="pxNote(o)">{{ pxNote(o) }}</div>
               </div>
             </div>
           </template>
@@ -87,6 +96,7 @@ import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { get, peek, dataVer } from '../api'
 import { money, signed } from '../fmt'
+import PremiumTag from '../components/PremiumTag.vue'
 import TabBar from '../components/TabBar.vue'
 
 const route = useRoute()
@@ -108,6 +118,24 @@ const shown = computed(() => {
 })
 const maxW = computed(() => Math.max(10, ...d.value.slots.flatMap(s => [s.now, s.tgt])) * 1.08)
 const bw = v => `${Math.min(100, (v / maxW.value) * 100)}%`
+// 溢价只在「买入 + 明显偏高」时多说一句。卖出去是按现价成交，溢价高反而占便宜，不提醒。
+function premWarn(o) {
+  const q = o.quote
+  if (!q || !q.ok || o.side !== '买入') return ''
+  const p = (q.premium * 100).toFixed(1)
+  if (q.level === 'block') return `溢价 ${p}% 已经很高：按高于净值 ${p}% 的价格买，多付的这部分要等溢价回落才拿得回来`
+  if (q.level === 'high') return `溢价 ${p}% 偏高，能等就等回落到 2% 以内，或换跟踪同一指数的场外那只`
+  return ''
+}
+// 「≈ 股数 × 价格」里的价格是净值；场内实际按现价成交，偏 2% 以上就该说明差多少
+function pxNote(o) {
+  const q = o.quote
+  if (!q || !q.ok || Math.abs(q.premium) < 0.02) return ''
+  const p = (Math.abs(q.premium) * 100).toFixed(1)
+  return o.side === '买入'
+    ? `上面按净值 ${q.nav} 估的股数偏多：实际按现价 ${q.price} 成交，买得到的少约 ${p}%`
+    : `实际按现价 ${q.price} 成交，到手比上面按净值 ${q.nav} 算的多约 ${p}%`
+}
 </script>
 <style scoped>
 .ptitle b{ font-size:24px; font-weight:700; color:var(--ink); letter-spacing:-.3px; line-height:1.25; }
@@ -161,13 +189,14 @@ const bw = v => `${Math.min(100, (v / maxW.value) * 100)}%`
 .on{ flex:1; min-width:0; font-size:15px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:pointer; }
 .oa{ font-size:17px; font-weight:700; }
 .tag.liq{ color:#fff; background:#16A34A; }
-.o2{ font-size:12px; color:var(--muted); margin-top:4px; }
+.o2{ font-size:12px; color:var(--muted); margin-top:4px; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
 .o3{ display:flex; align-items:center; font-size:12.5px; color:var(--sub);
   margin-top:6px; gap:6px 12px; flex-wrap:wrap; }
 /* 占比推到右边、紧挨「记一笔」，右边缘和上面的金额对齐；股数那半段占剩下的宽度 */
 .o3 .num:nth-child(2){ margin-left:auto; }
 .ogo{ flex:0 0 auto; min-width:82px; }
 .note{ font-size:12px; color:#B45309; margin-top:4px; }
+.note.calcn{ color:var(--muted); }
 .hn{ font-size:14.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .hs{ font-size:12px; color:var(--muted); margin-top:2px; }
 .hv{ color:var(--ink); font-weight:600; }
