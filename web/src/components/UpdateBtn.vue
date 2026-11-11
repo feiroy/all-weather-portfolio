@@ -22,13 +22,27 @@ import { get, post, dropAll, dataVer } from '../api'
 defineProps({ compact: Boolean, label: Boolean })
 const asof = ref(''), running = ref(false), errors = ref([]), show = ref(false)
 let timer = null
+// 前端兜底：后端看门狗是 15 分钟，这里 12 分钟先停手 —— 页面开着的时候不能无限转圈。
+// 行情接口卡住时既不返回也不报错，用户只会看到一个永远在转的图标（2026-11-11 就是这个现象）。
+const MAX_WAIT = 12 * 60 * 1000
+let pollStart = 0
 
 async function poll() {
   const s = await get('/api/update', { fresh: true })
   const was = running.value
   running.value = s.running
   if (s.asof) asof.value = s.asof
-  if (s.running) { timer = setTimeout(poll, 1500); return }
+  if (s.running) {
+    if (!pollStart) pollStart = Date.now()
+    if (Date.now() - pollStart > MAX_WAIT) {
+      running.value = false
+      errors.value = [`更新超过 ${MAX_WAIT / 60000} 分钟没结束，已停止等待（多半是行情接口卡住，过一会儿再点一次）`]
+      pollStart = 0
+      return
+    }
+    timer = setTimeout(poll, 1500); return
+  }
+  pollStart = 0
   errors.value = s.errors || []
   if (was) {
     dropAll()
@@ -39,6 +53,7 @@ async function poll() {
 async function start() {
   if (running.value) return
   running.value = true
+  pollStart = Date.now()
   await post('/api/update', {})
   timer = setTimeout(poll, 1500)
 }

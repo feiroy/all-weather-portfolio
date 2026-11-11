@@ -844,7 +844,10 @@ async def fund_detail(request: Request):
 
 
 # ------------------------------------------------------------------ 更新数据（后台线程）
-_UPD = {"running": False, "errors": [], "finished": 0.0}
+_UPD = {"running": False, "errors": [], "finished": 0.0, "started": 0.0}
+# 看门狗上限：akshare 内部大量 requests 不带 timeout，网络一旦半通（比如走了一个不回包的代理），
+# 更新线程会永久阻塞在 read 上，running 永远是 True。
+UPD_TIMEOUT = 15 * 60
 
 
 def _do_update():
@@ -1007,8 +1010,14 @@ async def export_report(request: Request):
 
 
 async def update(request: Request):
+    # 看门狗：任务跑在后台线程里，网络挂住时它永远不会走到 finally，running 一直是 True ——
+    # 前端那个按钮就会一直转圈、点不动，只能重启服务（2026-11-11 用户遇到的就是这个）。
+    # 超时直接复位，让用户能重来一次；卡住的那次线程还在后台，但不再挡住界面。
+    if _UPD["running"] and _UPD.get("started") and time.time() - _UPD["started"] > UPD_TIMEOUT:
+        _UPD.update(running=False, finished=time.time(),
+                    errors=[f"上次更新超过 {UPD_TIMEOUT // 60} 分钟没结束，已重置（多半是行情接口卡住，再点一次通常就好）"])
     if request.method == "POST" and not _UPD["running"]:
-        _UPD.update(running=True, errors=[])
+        _UPD.update(running=True, errors=[], started=time.time())
         threading.Thread(target=_do_update, daemon=True).start()
     return J({**_UPD, "asof": f'{_live()["panel"].index[-1]:%Y-%m-%d}' if not _UPD["running"] else None})
 
