@@ -82,10 +82,12 @@
           <RangeBar :range="range" :period="period" :periods="periods"
                     @update:range="setRange" @update:period="setPeriod" />
           <!-- 双面板共用一条时间轴：上面区间涨跌、下面回撤，拖拽缩放天然同步，只剩一份控件和一条状态行 -->
+          <!-- 图例隐藏要往外传：在这张图上关掉一条策略，下面「单期收益」热力图与区间指标小表跟着不显示它 -->
           <MultiLine :series="curvesChg" :second="ddCurves" second-label="回撤"
                      :second-ratio="0.28" :height="400" :colors="colors"
                      :dashed="Object.keys(curvesAgg).filter(isBase)"
-                     :window="win" :reset-key="resetKey" group="backtest" />
+                     :window="win" :reset-key="resetKey" group="backtest"
+                     :hidden-names="hiddenNames" @update:hidden-names="onLegendHidden" />
           <!-- 曲线下面这张小表：一行一个策略，数值右对齐，别再挤成一条会换行的长句 -->
           <!-- 表头写清口径：这些数都是「当前调仓节奏」的，月末只出现在最后两列的差里 -->
           <p class="rsum-cap">
@@ -93,7 +95,7 @@
           </p>
           <!-- 单节奏（月末）时「与月末的差」恒无值：整列都是「—」就整列去掉，
                别留两列破折号（CLAUDE.md 回测指标卡同一条规矩：单节奏不显示节奏列） -->
-          <table class="rsum" :class="{ 'no-opt': !rangeStats.some(t => t.cum != null) }">
+          <table class="rsum" v-if="rangeStats.length" :class="{ 'no-opt': !rangeStats.some(t => t.cum != null) }">
             <thead><tr>
               <th>策略</th><th>年化</th><th>最大回撤</th>
               <th class="opt">累计超额</th><th class="opt">比月末回撤</th>
@@ -108,12 +110,14 @@
               </tr>
             </tbody>
           </table>
+          <p v-else class="empty-tip">图例上的策略都被关掉了，点图表上方的图例恢复显示</p>
           <p class="rsum-note" v-if="rangeStats.some(t => t.cum != null)">累计超额 = 每期「{{ cadLabel }} − 月末」相加，和下面那行「区间累计」是同一个数；比月末回撤 = 区间最大回撤之差</p>
         </div>
         <div class="card">
           <!-- 不再单独给这图配「日/月/年」控件：跟着上面那套 区间 + 日线/月线/年线 走，全页一套控件 -->
           <div class="ct"><b>单期收益</b><span class="k">每期相对上一期 · 跟随上面的区间与粒度</span></div>
-          <p v-if="!barCount" class="empty-tip">这个区间不够划分出一期，换个更长的区间试试</p>
+          <p v-if="!barPeriods" class="empty-tip">这个区间不够划分出一期，换个更长的区间试试</p>
+          <p v-else-if="!barCount" class="empty-tip">图例上的策略都被关掉了，点上面那张图的图例恢复显示</p>
           <Heatmap v-else :series="barCurves" />
         </div>
         <div class="card" v-if="Object.keys(excessCurves).length">
@@ -398,6 +402,15 @@ const cadLabel = computed(() => ({ monthly: '月末', biweekly: '双周', weekly
 const anyShort = computed(() => allRows.value.some(r => r.short))
 const allCurves = computed(() => ({ ...(d.value?.curves || {}),
   ...Object.fromEntries(customs.value.map(c => [c.name, c.curve])) }))
+// 图例隐藏（在上面「区间涨跌 / 回撤」图上点掉一条策略）要联动到本页其它读数卡：
+// 用户关掉一条 = 「这条我不想看」，那么下面的「单期收益」热力图和区间指标小表就不该还挂着它。
+// 状态由 MultiLine 受控传回（它在自己内部维护隐藏集合，包括联动的「N 回撤」）。
+const hiddenNames = ref([])
+const onLegendHidden = v => { hiddenNames.value = Array.isArray(v) ? v : [] }
+const hiddenSet = computed(() => new Set(hiddenNames.value))
+// 调仓节奏（或起点）一变，曲线名字换了一批（「· 月末」→「· 双周」），旧的隐藏名单要清掉，
+// 否则新名字一个都没被隐藏、图例却还记着上一批，看着像没生效。
+watch([cad, start], () => { hiddenNames.value = [] })
 const colors = computed(() => Object.keys(curvesAgg.value).map(n => colorOf(n)))
 // 时间区间：全站统一 8 档 + 日/月/年线；回测曲线从所选起点起（默认 2006 = 最长可信历史），默认「近1年」
 const periods = ['日线', '月线', '年线']
@@ -430,10 +443,13 @@ const win = computed(() => windowForRange(axis.value, range.value))
 // 单期收益柱：把区间内的曲线按 日/月/年 取期末值，再算「本期 / 上期 - 1」
 // 粒度直接跟页面的「日线/月线/年线」，不再单独一套开关
 const barUnit = computed(() => period.value.replace('线', ''))
+// 期数只由「区间 + 粒度」决定，与显示哪几条策略无关：全隐藏时不能误报「区间不够划分出一期」
+const barPeriods = computed(() => aggregate(axis.value.slice(baseIdx.value), [], barUnit.value).labels.length)
 const barCurves = computed(() => {
   const ax = axis.value, b = baseIdx.value
   const out = {}
   for (const [n, s] of Object.entries(curvesAgg.value)) {
+    if (hiddenSet.value.has(n)) continue
     const m = new Map(s.dates.map((d, i) => [d, s.ret[i]]))
     const ds = [], vs = []
     for (let i = b; i < ax.length; i++) { const v = m.get(ax[i]); if (v != null) { ds.push(ax[i]); vs.push(v) } }
@@ -449,7 +465,7 @@ const barCurves = computed(() => {
   }
   return out
 })
-const barCount = computed(() => Object.values(barCurves.value)[0]?.dates.length || 0)
+const barCount = computed(() => Object.keys(barCurves.value).length)   // 热力图里有几条策略（全被图例关掉时是 0）
 
 // 相对月末的超额：同一策略「当前节奏」与「月末」两条曲线，按同一批期间算收益再相减（同策略同色）
 const pairs = computed(() => {
@@ -521,7 +537,7 @@ const rangeStats = computed(() => {
   for (const n of Object.keys(curvesAgg.value)) all[n] = one(n)
   const strip = n => n.replace(/ · [^·]+$/, '')
   return Object.keys(curvesAgg.value)
-    .filter(n => !isBase(n))
+    .filter(n => !isBase(n) && !hiddenSet.value.has(n))
     .map(n => {
       const base = Object.keys(all).find(x => isBase(x) && strip(x) === strip(n))
       const b0 = base ? all[base] : null

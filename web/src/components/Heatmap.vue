@@ -233,7 +233,11 @@ onMounted(() => {
   window.addEventListener('resize', resize)
 })
 function resize() { if (chart) { chart.resize(); chart.setOption(build(), true); syncSpan() } }
-watch(() => props.series, () => { if (chart) { chart.setOption(build(), true); syncSpan() } })
+// 行数变了（图例里关掉几条策略、或数据刚回来）容器高度 h 就变，必须让 ECharts 按新尺寸重算 canvas。
+// 只 setOption 不 resize 的话，画布还是上一轮的旧高度，会往下溢出、压在状态行上 —— 底部
+// 「每列 N 期 · 左右拖动」和 x 轴日期糊成一团（2026-11-11 用户截图：关掉策略后只剩 2 行）。
+// flush:'post' 不能省：pre 阶段 DOM 还挂着旧高度，chart.resize() 读到的仍是旧尺寸，等于没改。
+watch(() => props.series, () => { if (chart) resize() }, { flush: 'post' })
 onBeforeUnmount(() => {
   el.value?.removeEventListener('mousemove', onHover)
   el.value?.removeEventListener('mouseleave', onLeave)

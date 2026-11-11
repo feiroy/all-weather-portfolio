@@ -44,7 +44,12 @@ const props = defineProps({
   // 后续 MACD / 神奇九转就是往这个数组里加一项：MACD 用多序列 + bar，九转在净值面板挂 markPoint。
   // 传了 panels 就忽略 series / second（panels[0] 即主面板）；不传则完全走原来的单/双面板逻辑。
   panels: { type: Array, default: null },
+  // 图例受控（可选）：传了数组 = 把「图例上关掉了哪几条」这份状态同步给父组件，
+  // 父组件据此让同页其它卡片（如单期收益热力图 / 区间指标小表）一起隐藏；不传 = 老行为，纯内部状态。
+  // 数组里除策略名还会带「N 回撤」（下方面板的联动隐藏），父组件按自己的名字取交集即可。
+  hiddenNames: { type: Array, default: null },
 })
+const emit = defineEmits(['update:hiddenNames'])
 const el = ref(null)
 const visRange = ref('')
 // 聚合后只剩 1 期（比如建仓两个月的账户切「年线」）：折线画不出来，状态行要说明白
@@ -498,7 +503,10 @@ onMounted(() => {
         else if (on && was) { hidden.value.delete(key); changed = true }
       }
     }
-    if (changed) { calcDot(); calcDec(); chart.setOption(option(), true); syncRange() }
+    if (!changed) return
+    calcDot(); calcDec(); chart.setOption(option(), true); syncRange()
+    // 受控模式：把最新隐藏集合发给父组件（数组拷贝，避免父组件拿到会被就地改动的 Set）
+    if (props.hiddenNames) emit('update:hiddenNames', [...hidden.value])
   })
   el.value.__awChart = chart
   detachWheel = attachWheel(chart, el.value)
@@ -523,6 +531,15 @@ const resize = () => {
 }
 let detachWheel = null
 watch(() => props.series, () => { if (chart) { calcDot(); calcDec(); chart.setOption(option(), true); syncRange() } })
+// 受控图例：父组件换了一批策略（调仓节奏 / 起点变了）会把它清空，这里要跟着把内部隐藏集合同步过来，
+// 否则新的一批曲线会「看着显示、状态里却算隐藏」。父组件原样回传我们 emit 出去的值时内容相同，直接跳过。
+watch(() => props.hiddenNames, v => {
+  if (!Array.isArray(v) || !chart) return
+  const next = new Set(v)
+  if (next.size === hidden.value.size && [...next].every(n => hidden.value.has(n))) return
+  hidden.value = next
+  calcDot(); calcDec(); chart.setOption(option(), true); syncRange()
+})
 // 下方面板可能比上方面板晚一步到（两个 computed 各自触发），必须单独监听，
 // 否则首帧按空面板算出的 grid / 精度会一直留着
 watch(() => props.second, () => { if (chart) { calcDot(); calcDec(); chart.setOption(option(), true); syncRange() } })
