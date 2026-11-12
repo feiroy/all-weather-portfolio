@@ -470,7 +470,8 @@ V3-B RP 和 V3c 去掉了 bond_10y（CAGR +1.43pp，Sharpe 仅 -0.02）。
 | 迁移 | 老的浏览器 localStorage（`aw-strategies`）只作一次性迁移来源：本地有、服务端没有的自动上传，成功的从本地删、失败的留着下次再试 |
 
 - 验收：`tests/test_strategy_live.py`（位置顺序 / 自定义位置 label / `ensure_slots` 只补不改且幂等 / **新基金权重落在自己位置上而不是外溢** / 策略库校验与落盘 / key 归一化 / 原子写）；接口实测 `GET|POST|DELETE /api/strategies` 与 `switch-preview`（`added=['159915']`、`unplaced=[]`、15 笔订单）。
-- 已知限制：内置三策略的 `live_target_weights` 要跑三遍全历史，本机沙箱可用内存不足时会直接被 kill；这不是逻辑问题（`/api/*` 由独立进程处理）。**Streamlit 版仍按 `HG.SLOTS` 循环**（已冻结），自定义位置在那边看不到、也不能编辑 —— 自定义策略只走 H5。
+- **锁的硬约束（2026-11-12 服务卡死一小时的事故）**：`_LOCK` 里**禁止**调用 `_live()` / `strategy_weights()` / `Portfolio()`。这三个会互相调用，`threading.Lock` 同线程重入 = 永久阻塞，事件循环跟着死，所有接口 25 秒超时无响应（现场：`sample` 看到主线程停在 `lock_PyThread_acquire_lock`）。现在 `_LOCK` 是 `RLock`，且 `_portfolio()` 把「算权重 + 建 Portfolio」放在锁外，锁里只做 dict 读写。守护测试 `tests/test_server_deadlock.py`（业务逻辑全对、278 条全绿也拦不住这类错，必须单独测加锁结构）。实测 `/api/accounts` 首次 1.87s、第二次 0.008s，进程只占 115MB —— **不是内存问题**。
+- **Streamlit 版仍按 `HG.SLOTS` 循环**（已冻结），自定义位置在那边看不到、也不能编辑 —— 自定义策略只走 H5。
 
 ## 架构参考
 

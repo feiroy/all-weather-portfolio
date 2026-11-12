@@ -49,7 +49,11 @@ BENCH_COL = {"B-RP": "V3-B 风险平价(20d)_100% RP", "B-Con": "V3-B 保守增�
 _W: dict = {}
 _P: dict = {}
 _SW: dict = {}          # 自定义策略的目标权重缓存：(策略key, 数据版本) → (权重, 诊断)
-_LOCK = threading.Lock()
+# 用可重入锁：`_live()` / `strategy_weights()` / `_portfolio()` 之间会互相调用，
+# 普通 Lock 一旦有人在持锁时调了另一个（2026-11-12 就这么挂过一次），
+# 同一线程重入会**永久阻塞**，整个事件循环跟着死，所有接口都不响应。
+# 真正的解法是别在锁里跑重计算（见 _portfolio），这把锁只是防再犯的兜底。
+_LOCK = threading.RLock()
 
 
 def J(obj, status=200):
@@ -139,14 +143,23 @@ def _portfolio(aid: str, target=None) -> tuple[Portfolio, dict]:
     stg = target or a.get("strategy") or "B-Con"
     key = (aid, path.stat().st_mtime, live["ver"], stg)
     with _LOCK:
-        if key not in _P:
-            for k in [k for k in _P if k[0] == aid and k[3] == stg]:
-                del _P[k]
-            # 先算权重再建 Portfolio：算权重时会把新基金的净值拉进本地缓存，
-            # Portfolio 建面板才读得到它（否则新加的第 10 只基金定不出价）。
-            w = strategy_weights(stg)[0]
-            _P[key] = Portfolio(a, w)
-        return _P[key], a
+        hit = _P.get(key)
+    if hit is not None:
+        return hit, a
+    # 算权重（自定义策略要跑一遍回测引擎）和建 Portfolio（读几十条净值序列）都是重活，
+    # 必须放在锁外面：
+    # ① 锁里跑重活会让所有请求串行排队，页面像卡死；
+    # ② `strategy_weights()` 第一行就是 `_live()`，它也要这把锁 —— 持锁调用会自我死锁。
+    #    2026-11-12 就是上一版把它挪进 `with _LOCK` 里，导致服务整整卡住一小时。
+    # 先算权重再建 Portfolio 的顺序仍然保留：算权重时会把新基金的净值拉进本地缓存，
+    # Portfolio 建面板才读得到它（否则新加的第 10 只基金定不出价）。
+    w = strategy_weights(stg)[0]
+    P = Portfolio(a, w)
+    with _LOCK:
+        for k in [k for k in _P if k[0] == aid and k[3] == stg]:
+            del _P[k]
+        _P[key] = P
+    return P, a
 
 
 def _strategy_name(key: str) -> str:
