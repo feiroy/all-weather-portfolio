@@ -1,0 +1,210 @@
+{
+ "strategies": [
+  {
+   "id": "s1794201271532",
+   "name": "V3-B 风险平价 副本",
+   "freq": "M",
+   "method": "risk_parity",
+   "window": 20,
+   "max_w": 0.2,
+   "cash_ratio": 0.0,
+   "target_vol": 0.09,
+   "trend_map": {
+    "hs300": 30,
+    "us_sp500": 75,
+    "gold": 75,
+    "nonferr": 75,
+    "ene": 75
+   },
+   "rp_buckets": {
+    "增长↑": [
+     "hs300",
+     "us_sp500",
+     "divlow"
+    ],
+    "收益垫": [
+     "161119"
+    ],
+    "增长↓": [
+     "bond_30y"
+    ],
+    "通胀↑": [
+     "gold",
+     "nonferr",
+     "ene"
+    ]
+   },
+   "safe_asset": "161119",
+   "funds": [
+    {
+     "key": "hs300",
+     "code": "510300",
+     "name": "沪深 300 ETF",
+     "weight": 12.5,
+     "trend": 30,
+     "bucket": "增长↑"
+    },
+    {
+     "key": "us_sp500",
+     "code": "513500",
+     "name": "标普 500 ETF（QDII）",
+     "weight": 12.5,
+     "trend": 75,
+     "bucket": "增长↑"
+    },
+    {
+     "key": "bond_30y",
+     "code": "511130",
+     "name": "30 年国债 ETF",
+     "weight": 12.5,
+     "trend": 0,
+     "bucket": "增长↓"
+    },
+    {
+     "key": "gold",
+     "code": "518850",
+     "name": "黄金 ETF",
+     "weight": 12.5,
+     "trend": 75,
+     "bucket": "通胀↑"
+    },
+    {
+     "key": "nonferr",
+     "code": "159980",
+     "name": "有色金属期货 ETF",
+     "weight": 12.5,
+     "trend": 75,
+     "bucket": "通胀↑"
+    },
+    {
+     "key": "ene",
+     "code": "159981",
+     "name": "能源化工期货 ETF",
+     "weight": 12.5,
+     "trend": 75,
+     "bucket": "通胀↑"
+    },
+    {
+     "key": "divlow",
+     "code": "512890",
+     "name": "红利低波 ETF",
+     "weight": 12.5,
+     "trend": 0,
+     "bucket": "增长↑"
+    },
+    {
+     "key": "161119",
+     "code": "161119",
+     "name": "易方达中债新综指发起式(LOF)A",
+     "from": "2012-11-08",
+     "src": "基金净值",
+     "bucket": "收益垫",
+     "weight": 12.5,
+     "trend": 0
+    }
+   ],
+   "min_w": 0.02,
+   "created": "2026-11-12 13:26",
+   "updated": "2026-11-12 13:26"
+  },
+  {
+   "id": "s1794201420423",
+   "name": "V3-B 风险平价-无低波红利",
+   "freq": "M",
+   "method": "risk_parity",
+   "window": 20,
+   "max_w": 0.2,
+   "cash_ratio": 0.0,
+   "target_vol": 0.09,
+   "trend_map": {
+    "hs300": 30,
+    "us_sp500": 75,
+    "gold": 75,
+    "nonferr": 75,
+    "ene": 75
+   },
+   "rp_buckets": {
+    "增长↑": [
+     "hs300",
+     "us_sp500"
+    ],
+    "收益垫": [
+     "161119"
+    ],
+    "增长↓": [
+     "bond_30y"
+    ],
+    "通胀↑": [
+     "gold",
+     "nonferr",
+     "ene"
+    ]
+   },
+   "safe_asset": "161119",
+   "funds": [
+    {
+     "key": "hs300",
+     "code": "510300",
+     "name": "沪深 300 ETF",
+     "weight": 12.5,
+     "trend": 30,
+     "bucket": "增长↑"
+    },
+    {
+     "key": "us_sp500",
+     "code": "513500",
+     "name": "标普 500 ETF（QDII）",
+     "weight": 12.5,
+     "trend": 75,
+     "bucket": "增长↑"
+    },
+    {
+     "key": "bond_30y",
+     "code": "511130",
+     "name": "30 年国债 ETF",
+     "weight": 12.5,
+     "trend": 0,
+     "bucket": "增长↓"
+    },
+    {
+     "key": "gold",
+     "code": "518850",
+     "name": "黄金 ETF",
+     "weight": 12.5,
+     "trend": 75,
+     "bucket": "通胀↑"
+    },
+    {
+     "key": "nonferr",
+     "code": "159980",
+     "name": "有色金属期货 ETF",
+     "weight": 12.5,
+     "trend": 75,
+     "bucket": "通胀↑"
+    },
+    {
+     "key": "ene",
+     "code": "159981",
+     "name": "能源化工期货 ETF",
+     "weight": 12.5,
+     "trend": 75,
+     "bucket": "通胀↑"
+    },
+    {
+     "key": "161119",
+     "code": "161119",
+     "name": "易方达中债新综指发起式(LOF)A",
+     "from": "2012-11-08",
+     "src": "基金净值",
+     "bucket": "收益垫",
+     "weight": 20.0,
+     "trend": 0
+    }
+   ],
+   "min_w": 0.02,
+   "created": "2026-11-12 13:26",
+   "updated": "2026-11-12 13:26"
+  }
+ ],
+ "updated": "2026-11-12 13:26"
+}
