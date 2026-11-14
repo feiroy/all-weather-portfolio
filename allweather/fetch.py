@@ -12,6 +12,62 @@ from .config import DATA_DIR, BACKTEST_END
 RETRY_TIMES = 3
 RETRY_DELAY = 5  # 秒
 
+# akshare 里大量 requests.get / post 不带 timeout：对方不回包时会在 SSL read 上永久阻塞，
+# 「更新数据」按钮跟着一直转圈（2026-11-15 实测卡在中债网 bond_treasury_index_cbond）。
+# 这里给**没指定超时**的请求统一兜一个 (连接 10s, 读 40s)，超时就走 fetch_one 的重试 / 记失败，
+# 已经自己传了 timeout 的调用不受影响。
+DEFAULT_HTTP_TIMEOUT = (10, 40)
+# 同一台服务器超时一次后，这段时间内直接判失败、不再等：中债网整站不回包时，
+# treasury_idx 的 3 次重试 + cgb_yields 各等满 40 秒，一轮更新被拖到 3 分钟（2026-11-15 实测 176s）
+HOST_COOLDOWN = 600
+_DEAD_HOSTS: dict[str, float] = {}
+
+
+def _install_default_timeout():
+    from urllib.parse import urlparse
+    from requests.adapters import HTTPAdapter
+    from requests.exceptions import ConnectTimeout, Timeout
+    if getattr(HTTPAdapter.send, "_aw_default_timeout", False):
+        return
+    _orig = HTTPAdapter.send
+
+    def send(self, request, *args, **kwargs):
+        host = urlparse(request.url).hostname or ""
+        if _DEAD_HOSTS.get(host, 0) > time.time():
+            raise ConnectTimeout(f"{host} 刚才超时没响应，{HOST_COOLDOWN // 60} 分钟内先跳过")
+        if kwargs.get("timeout") is None:
+            kwargs["timeout"] = DEFAULT_HTTP_TIMEOUT
+        try:
+            return _orig(self, request, *args, **kwargs)
+        except Timeout:
+            _DEAD_HOSTS[host] = time.time() + HOST_COOLDOWN
+            raise
+
+    send._aw_default_timeout = True
+    HTTPAdapter.send = send
+
+
+_install_default_timeout()
+
+# 只用来补「ETF 上市前」那段历史的代理序列 → 对应的 ETF 文件（2026-11-15 用户：
+# 「怎么用到了这种不经常用的网站」）。拼接见 data.py：treasury_idx 只用在 511260 上市（2017-08-04）之前，
+# cgb_yields 只用在 511130 上市（2024-03-20）之前；之后全用 ETF 自己的净值。
+# 两个都来自中债网，那边一抽风就拖住整个「更新数据」，而新拉的日子回测里一天都用不上。
+HISTORY_ONLY = {"treasury_idx": "bond_10y_etf"}
+
+
+def _history_covered(path, etf_name: str, date_col=0) -> bool:
+    """代理序列本地文件已覆盖到对应 ETF 的上市首日（= 拼接日）→ True，不必再更新。读不了一律 False（照旧去拉）。"""
+    try:
+        etf = DATA_DIR / f"{etf_name}.csv"
+        if not (path.exists() and etf.exists()):
+            return False
+        first = pd.to_datetime(pd.read_csv(etf, usecols=[0]).iloc[:, 0]).min()
+        last = pd.to_datetime(pd.read_csv(path, usecols=[date_col]).iloc[:, 0]).max()
+        return bool(pd.notna(first) and pd.notna(last) and last >= first)
+    except Exception:  # noqa: BLE001
+        return False
+
 DEFAULT_START = "20050101"
 # 抓取默认拉到今天：写死 BACKTEST_END 会让数据停在旧日期（2026-11-08 实测停在 10-16）
 DEFAULT_END   = date.today().strftime("%Y%m%d")
@@ -375,6 +431,11 @@ def fetch_all(force: bool = False, start: str = DEFAULT_START, end: str = DEFAUL
 
     for name, (kind, sym) in TARGETS.items():
         path = DATA_DIR / f"{name}.csv"
+        # 只用来拼 ETF 上市前历史的序列：本地已经覆盖到拼接日，新增的日子回测里一天都用不上，不再请求
+        if (not force) and name in HISTORY_ONLY and _history_covered(path, HISTORY_ONLY[name]):
+            up_to_date.append(name)
+            print(f"  -- {name} 只用于 {HISTORY_ONLY[name]} 上市前的历史，本地已覆盖拼接日，不再更新", flush=True)
+            continue
         # 全量接口（不支持增量）：treasury/sp500/fx 等每次调用都会下全量，
         # 若今天已经拉过（文件 mtime 是今天），直接跳过，避免重复下载。
         FULL_FETCH_KINDS = {"treasury", "sp500"}
@@ -446,7 +507,9 @@ def fetch_all(force: bool = False, start: str = DEFAULT_START, end: str = DEFAUL
         and yield_path.exists()
         and _dt.date.fromtimestamp(yield_path.stat().st_mtime) == _dt.date.today()
     )
-    if _skip_yield:
+    if (not force) and _history_covered(yield_path, "bond_30y_etf", date_col=1):
+        print("  -- cgb_yields 只用于 30 年国债 ETF 上市前的历史，本地已覆盖拼接日，不再更新", flush=True)
+    elif _skip_yield:
         print(f"  >> cgb_yields 今日已更新，跳过（全量接口）", flush=True)
     else:
         print(f"  >> cgb_yields (bond_china_yield，按年增量)", flush=True)
