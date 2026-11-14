@@ -32,7 +32,8 @@
               <div class="num rv" :class="{ zero: !r.amount }">¥{{ money(r.amount, 0) }}</div>
               <div class="num rs" v-if="r.qty">{{ money(r.qty, r.otc ? 2 : 0) }} {{ r.unit }}</div>
               <van-button v-if="r.amount" size="mini" round plain type="primary" class="rb"
-                          :to="{ path: `/a/${aid}/record`, query: { code: r.code, side: '买入', amount: r.amount } }">记一笔</van-button>
+                          :to="{ path: `/a/${aid}/record`, query: r.otc ? { code: r.code, side: '买入', amount: r.amount }
+                            : { code: r.code, side: '买入', amount: Math.round((r.amount + r.fee) * 100) / 100, nav: r.px } }">记一笔</van-button>
             </template>
           </van-cell>
         </van-cell-group>

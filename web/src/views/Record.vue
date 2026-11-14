@@ -18,7 +18,7 @@
           <van-field v-model="amount" label="金额" type="number" placeholder="0.00" :label-width="72" clearable>
             <template #extra><span class="ex">元</span></template>
           </van-field>
-          <van-field v-model="nav" label="单价" type="number" :placeholder="navHint" :label-width="72"
+          <van-field v-model="nav" :label="fund?.unit === '股' ? '成交价' : '单价'" type="number" :placeholder="navHint" :label-width="72"
                      @update:model-value="navTouched = true">
             <template #extra><span class="ex">元/{{ fund?.unit || '份' }}</span></template>
           </van-field>
@@ -30,6 +30,9 @@
 
         <div class="preview" v-if="fund">
           <div>{{ fund.unit === '股' ? '场内 · 按股成交，100 股一手' : '场外 · 按份额申购，一天一个净值' }}</div>
+          <!-- 台账里的金额是「实际扣款 / 实际到账」：场内买入 = 成交金额 + 佣金，卖出 = 成交金额 − 佣金。
+               只填成交金额会让份数变成 199.95 这种小数（2026-11-14 用户第一笔就差点踩到） -->
+          <div v-if="fund.unit === '股'" class="how">{{ side === '买入' ? '金额填 App 里的实际扣款 = 成交金额 + 佣金；成交价填 App 成交回报里的价格' : '金额填 App 里的实际到账 = 成交金额 − 佣金；成交价填成交回报里的价格' }}</div>
           <!-- 溢价 = 现价 ÷ 最新净值 − 1。只有场内、只有买入才拦：卖出按现价成交，溢价高是好事 -->
           <div v-if="prem" class="prem-line">现价 <b class="num">{{ prem.price }}</b>
             <span class="vs">净值 {{ prem.nav }}（{{ (prem.nav_date || '').slice(5).replace('-', '/') }}）</span>
@@ -42,7 +45,7 @@
           <div class="warn" v-if="lotWarn">{{ lotWarn }}</div>
           <div class="warn" v-if="premWarn">{{ premWarn }}</div>
         </div>
-        <p class="tip" v-if="fromCalc">从「调仓」带过来的金额，按支付宝里实际成交的改一下再存</p>
+        <p class="tip" v-if="fromCalc">带过来的是网页算的金额和手续费；照 App 成交确认里的实际数改一下再存</p>
 
         <div class="btn-row">
           <van-button v-if="editIdx != null" round plain type="danger" @click="remove">删除</van-button>
@@ -77,7 +80,7 @@ const opt = ref(null)
 const side = ref(q.side === '卖出' ? '卖出' : '买入')   // 只有买入 / 卖出，没有资金进出
 const fund = ref(null)
 const amount = ref(q.amount ? String(q.amount) : '')
-const nav = ref(''), navHint = ref('选好基金和日期后自动带出'), navTouched = ref(false)
+const nav = ref(q.nav ? String(q.nav) : ''), navHint = ref('选好基金和日期后自动带出'), navTouched = ref(!!q.nav)
 const fee = ref('')
 const feeTouched = ref(false), feeDesc = ref('')      // 费率说明（申购 0.10% / 场内佣金 …）
 // 选了基金 + 填了金额后，按该基金真实费率自动带出手续费；手改过就不动
@@ -88,7 +91,7 @@ async function autoFee() {
   try {
     const r = await get(`/api/market/fund/${code}/fee?amount=${amt}&side=${encodeURIComponent(side.value)}`)
     feeDesc.value = r.desc || ''
-    if (r.fee != null) fee.value = r.fee ? String(r.fee) : ''
+    if (r.fee != null) fee.value = String(r.fee)        // 0 也显示出来：「网页算出来 0 元」和「没算」要分得清
   } catch { /* 费率取不到就先留空，保存时后端还会再算一次 */ }
 }
 watch([() => fund.value?.code, amount, side], autoFee)
@@ -133,7 +136,9 @@ watch([fund, date], async () => {
   const skip = editIdx != null ? `&skip=${editIdx}` : ''
   const r = await get(`/api/acct/${aid}/nav/${fund.value.code}?date=${date.value}${skip}`, { fresh: true })
   held.value = r.held
-  if (r.nav) { navHint.value = String(r.nav); if (!navTouched.value) nav.value = String(r.nav) }
+  // 场内最近的买入：成交价应当是现价，净值只作参考（下面 prem 取到现价后会填进来）
+  const usePx = fund.value.unit === '股' && side.value === '买入' && editIdx == null && isRecent()
+  if (r.nav) { navHint.value = String(r.nav); if (!navTouched.value && !(usePx && prem.value?.price)) nav.value = String(r.nav) }
   else navHint.value = '这天没有净值，手工填成交价'
 })
 const shares = computed(() => {
@@ -145,7 +150,9 @@ const lotWarn = computed(() => {
   if (!fund.value || fund.value.unit !== '股' || side.value !== '买入' || shares.value <= 0) return ''
   if (Math.abs(Math.round(shares.value) - shares.value) <= 0.01) return ''
   const near = Math.round(shares.value / 100) * 100
-  return near <= 0 ? '场内买入按整手 100 股，这个金额不够一手' : `场内买入按整手 100 股；就近是 ${near} 股 ≈ ¥${money(near * nav.value)}`
+  if (near <= 0) return '场内买入按整手 100 股，这个金额不够一手'
+  const f = +fee.value || 0, deal = near * nav.value
+  return `场内按整手：${near} 股 × ${nav.value} = 成交 ¥${money(deal)}` + (f ? ` + 佣金 ¥${money(f)} = 实际扣款 ¥${money(deal + f)}` : '')
 })
 function sellAll() { amount.value = (held.value * nav.value - (+fee.value || 0)).toFixed(2) }
 
@@ -162,6 +169,7 @@ watch([() => fund.value?.code, side, date], async () => {
   try {
     const r = await get(`/api/market/premium?codes=${f.code}`, { fresh: true })
     prem.value = (r.rows || []).find(x => x.ok) || null
+    if (prem.value?.price && !navTouched.value) nav.value = String(prem.value.price)
   } catch { /* 溢价拿不到不影响这一笔 */ }
 }, { immediate: true })
 
@@ -219,5 +227,6 @@ async function remove() {
 .preview{ margin:12px 18px 0; font-size:12.5px; color:var(--sub); line-height:1.8; }
 .preview a{ color:var(--brand); margin-left:8px; cursor:pointer; }
 .warn{ color:#B45309; }
+.how{ color:#1E40AF; }
 .tip{ font-size:12px; color:var(--muted); margin:10px 18px 0; }
 </style>
