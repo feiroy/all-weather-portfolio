@@ -75,3 +75,34 @@ def test_otc_fund_charged_subscription_not_commission(monkeypatch):
     monkeypatch.setattr(F, "get", lambda code: {"redeem": [], "buy_rate": 0.0012})
     assert F.buy_fee("110020", 10000) == 12.0
     assert F.buy_fee("110020", 100) == 0.12
+
+
+def test_purchase_refresh_only_when_stale(tmp_path, monkeypatch):
+    """「更新数据」按钮：申购状态表新的就跳过，旧的 / 没有才重抓（用户只在网页操作，不跑命令）。"""
+    import os
+    import sys
+    import time
+    sys.path.insert(0, str(F.ROOT / "streamlit_app"))
+    import fund_lookup as FL
+    csv = tmp_path / "purchase_all.csv"
+    monkeypatch.setattr(FL, "PURCHASE_CSV", csv)
+    calls = []
+    monkeypatch.setattr(F, "refresh_purchase", lambda: calls.append(1) or 28000)
+    assert F.refresh_purchase_if_stale()[0] is True and len(calls) == 1          # 没有 → 抓
+    csv.write_text("x")
+    assert F.refresh_purchase_if_stale()[0] is False and len(calls) == 1         # 刚抓过 → 跳过
+    old = time.time() - 13 * 3600
+    os.utime(csv, (old, old))
+    assert F.refresh_purchase_if_stale()[0] is True and len(calls) == 2          # 超过 12 小时 → 再抓
+
+
+def test_all_codes_includes_configured_funds(tmp_path, monkeypatch):
+    """新账户还没下单时，选基配置里挂的场外基金也要在费率刷新范围内。"""
+    import json
+    d = tmp_path / "data" / "accounts"
+    d.mkdir(parents=True)
+    (d / "sim-x.json").write_text(json.dumps({"trades": [], "holdings": {
+        "credit": {"on": True, "funds": [{"code": "161119"}]}, "gold": {"on": True, "funds": [{"code": "000217"}]}}}))
+    monkeypatch.setattr(F, "ROOT", tmp_path)
+    codes = F.all_codes()
+    assert "161119" in codes and "000217" in codes

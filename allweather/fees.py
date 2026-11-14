@@ -211,7 +211,10 @@ def save(data: dict) -> None:
 
 
 def all_codes() -> list[str]:
-    """账户里出现过的代码 + 项目默认 9 只 ETF。"""
+    """账户里出现过的代码（交易 + 选基配置里挂着的）+ 项目默认 9 只 ETF。
+
+    原来只看交易记录：新账户还没下单时，选基配置里挂的场外基金费率永远不会被刷新。
+    """
     codes = {v.get("code") for v in ETF_META.values() if v.get("code")}
     try:
         for p in (ROOT / "data" / "accounts").glob("*.json"):
@@ -219,6 +222,8 @@ def all_codes() -> list[str]:
                 continue
             a = json.loads(p.read_text())
             codes |= {t.get("code") for t in (a.get("trades") or []) if t.get("code")}
+            for slot in (a.get("holdings") or {}).values():
+                codes |= {f.get("code") for f in (slot or {}).get("funds") or [] if f.get("code")}
     except Exception:  # noqa: BLE001
         pass
     return sorted(c for c in codes if c)
@@ -335,6 +340,26 @@ def describe(code: str) -> str:
             + ("免费" if not x["rate"] else f"{x['rate'] * 100:.2f}%")
             for x in red))
     return " · ".join(parts)
+
+
+PURCHASE_MAX_AGE_H = 12   # 申购状态（QDII 额度、暂停申购）一天里就会变，超过半天就重抓
+
+
+def refresh_purchase_if_stale(max_age_h: float = PURCHASE_MAX_AGE_H) -> tuple[bool, str]:
+    """「更新数据」按钮用：申购状态表不存在或超过 max_age_h 小时才重抓。返回 (是否重抓了, 说明)。
+
+    用户只在网页上操作、不跑命令（2026-11-14），所以它必须挂在按钮上，而不是只留一条命令。
+    """
+    import sys
+    ss = str(ROOT / "streamlit_app")
+    if ss not in sys.path:
+        sys.path.insert(0, ss)
+    import fund_lookup as FL  # noqa: PLC0415
+    p = FL.PURCHASE_CSV
+    if p.exists() and (time.time() - p.stat().st_mtime) < max_age_h * 3600:
+        return False, "申购状态表还新，跳过"
+    n = refresh_purchase()
+    return True, f"申购状态表已更新（{n} 只）"
 
 
 def refresh_purchase() -> int:

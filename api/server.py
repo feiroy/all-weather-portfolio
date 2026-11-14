@@ -1054,7 +1054,17 @@ def _do_update():
         _pok, e2 = fetch_prices()
         _m, e3 = update_nav_detail()
         _vm, e4 = V.update_all()
-        _UPD["errors"] = list(e1) + list(e2) + list(e3) + list(e4)
+        # 申购状态表（场内 / 场外计费、QDII 限购）和费率也挂在这个按钮上：用户只在网页操作，不跑命令。
+        # 单独 try：它们失败不影响行情更新，只在按钮的红字里报一条
+        e5 = []
+        try:
+            from allweather import fees as FEES
+            FEES.refresh_purchase_if_stale()
+            FEES._PURCHASE = None
+            FEES.refresh(force=False)           # 只补缺失 / 超过 30 天的
+        except Exception as e:  # noqa: BLE001
+            e5 = [f"申购状态 / 费率没更新上：{str(e)[:120]}（不影响行情，下次再点一次）"]
+        _UPD["errors"] = list(e1) + list(e2) + list(e3) + list(e4) + e5
     except Exception as e:  # noqa: BLE001
         _UPD["errors"] = [f"更新失败：{str(e)[:160]}"]
     finally:
