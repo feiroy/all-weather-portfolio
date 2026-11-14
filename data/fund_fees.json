@@ -5,7 +5,7 @@
   "code": "000005",
   "company": "嘉实基金",
   "exchange": false,
-  "fetched_at": "2026-11-08",
+  "fetched_at": "2026-11-14",
   "inception": "2013-02-18",
   "manager": "吴翠",
   "min_buy": 10.0,
@@ -17,23 +17,23 @@
     "rate": 0.015
    },
    {
-    "max_days": null,
+    "max_days": 91,
     "min_days": 7,
     "rate": 0.003
    },
    {
-    "max_days": null,
-    "min_days": 90,
+    "max_days": 181,
+    "min_days": 91,
     "rate": 0.002
    },
    {
-    "max_days": null,
-    "min_days": 180,
+    "max_days": 271,
+    "min_days": 181,
     "rate": 0.001
    },
    {
     "max_days": null,
-    "min_days": 270,
+    "min_days": 271,
     "rate": 0.0
    }
   ],
@@ -47,7 +47,7 @@
   "code": "000006",
   "company": "西部利得基金",
   "exchange": false,
-  "fetched_at": "2026-11-08",
+  "fetched_at": "2026-11-14",
   "inception": "2019-02-15",
   "manager": "盛丰衍",
   "min_buy": 10.0,
@@ -59,17 +59,17 @@
     "rate": 0.015
    },
    {
-    "max_days": null,
+    "max_days": 30,
     "min_days": 7,
     "rate": 0.0075
    },
    {
-    "max_days": null,
+    "max_days": 180,
     "min_days": 30,
     "rate": 0.005
    },
    {
-    "max_days": null,
+    "max_days": 365,
     "min_days": 180,
     "rate": 0.002
    },
@@ -89,14 +89,19 @@
   "code": "000033",
   "company": "易方达基金",
   "exchange": false,
-  "fetched_at": "2026-11-08",
+  "fetched_at": "2026-11-14",
   "inception": "2013-03-26",
   "manager": "纪玲云",
   "min_buy": 10.0,
   "name": "易方达信用债债券C",
   "redeem": [
    {
-    "max_days": null,
+    "max_days": 7,
+    "min_days": 0,
+    "rate": 0.015
+   },
+   {
+    "max_days": 30,
     "min_days": 7,
     "rate": 0.0075
    },
@@ -116,7 +121,7 @@
   "code": "000090",
   "company": "民生加银基金",
   "exchange": false,
-  "fetched_at": "2026-11-08",
+  "fetched_at": "2026-11-14",
   "inception": "2013-04-17",
   "manager": "李文君",
   "min_buy": 10.0,
@@ -143,7 +148,7 @@
   "code": "000216",
   "company": "华安基金",
   "exchange": false,
-  "fetched_at": "2026-11-08",
+  "fetched_at": "2026-11-14",
   "inception": "2013-07-24",
   "manager": "许之彦",
   "min_buy": 10.0,
@@ -155,7 +160,7 @@
     "rate": 0.015
    },
    {
-    "max_days": null,
+    "max_days": 365,
     "min_days": 7,
     "rate": 0.001
    },
@@ -169,13 +174,45 @@
   "size": 10424071266.23,
   "type": "指数型-其他"
  },
+ "000217": {
+  "buy_rate": 0.0,
+  "buy_rate_raw": 0.0,
+  "code": "000217",
+  "company": "华安基金",
+  "exchange": false,
+  "fetched_at": "2026-11-14",
+  "inception": "2013-07-24",
+  "manager": "许之彦",
+  "min_buy": 10.0,
+  "name": "华安黄金ETF联接C",
+  "redeem": [
+   {
+    "max_days": 7,
+    "min_days": 0,
+    "rate": 0.015
+   },
+   {
+    "max_days": 30,
+    "min_days": 7,
+    "rate": 0.001
+   },
+   {
+    "max_days": null,
+    "min_days": 30,
+    "rate": 0.0
+   }
+  ],
+  "risk": "中高",
+  "size": 28081641627.23,
+  "type": "指数型-其他"
+ },
  "000961": {
   "buy_rate": 0.001,
   "buy_rate_raw": 0.01,
   "code": "000961",
   "company": "天弘基金",
   "exchange": false,
-  "fetched_at": "2026-11-08",
+  "fetched_at": "2026-11-14",
   "inception": "2015-01-19",
   "manager": "陈瑶",
   "min_buy": 10.0,
@@ -196,25 +233,94 @@
   "size": 2319844984.02,
   "type": "指数型-股票"
  },
+ "002611": {
+  "buy_rate": 0.0,
+  "buy_rate_raw": 0.0,
+  "code": "002611",
+  "company": "博时基金",
+  "exchange": false,
+  "fetched_at": "2026-11-14",
+  "inception": "2016-04-11",
+  "manager": "赵云阳,王祥",
+  "min_buy": 10.0,
+  "name": "博时黄金ETF联接C",
+  "redeem": [
+   {
+    "max_days": 7,
+    "min_days": 0,
+    "rate": 0.015
+   },
+   {
+    "max_days": 30,
+    "min_days": 7,
+    "rate": 0.001
+   },
+   {
+    "max_days": null,
+    "min_days": 30,
+    "rate": 0.0
+   }
+  ],
+  "risk": "中高",
+  "size": 31724066968.09,
+  "type": "指数型-其他"
+ },
+ "002963": {
+  "buy_rate": 0.0,
+  "buy_rate_raw": 0.0,
+  "code": "002963",
+  "company": "易方达基金",
+  "exchange": false,
+  "fetched_at": "2026-11-14",
+  "inception": "2016-05-03",
+  "manager": "张湛",
+  "min_buy": 10.0,
+  "name": "易方达黄金ETF联接C",
+  "redeem": [
+   {
+    "max_days": 7,
+    "min_days": 0,
+    "rate": 0.015
+   },
+   {
+    "max_days": 30,
+    "min_days": 7,
+    "rate": 0.001
+   },
+   {
+    "max_days": null,
+    "min_days": 30,
+    "rate": 0.0
+   }
+  ],
+  "risk": "中高",
+  "size": 20349661537.97,
+  "type": "指数型-其他"
+ },
  "003358": {
   "buy_rate": 0.0005,
   "buy_rate_raw": 0.005,
   "code": "003358",
   "company": "易方达基金",
   "exchange": false,
-  "fetched_at": "2026-11-08",
+  "fetched_at": "2026-11-14",
   "inception": "2016-09-22",
   "manager": "杨真",
   "min_buy": 10.0,
   "name": "易方达中债7-10年期国开行债券指数A",
   "redeem": [
    {
-    "max_days": null,
+    "max_days": 7,
+    "min_days": 0,
+    "rate": 0.015
+   },
+   {
+    "max_days": 365,
     "min_days": 7,
     "rate": 0.001
    },
    {
-    "max_days": null,
+    "max_days": 730,
     "min_days": 365,
     "rate": 0.0005
    },
@@ -228,13 +334,131 @@
   "size": 4047071236.89,
   "type": "指数型-固收"
  },
+ "006131": {
+  "buy_rate": 0.0,
+  "buy_rate_raw": 0.0,
+  "code": "006131",
+  "company": "华泰柏瑞基金",
+  "exchange": false,
+  "fetched_at": "2026-11-14",
+  "inception": "2012-04-23",
+  "manager": "柳军",
+  "min_buy": 10.0,
+  "name": "华泰柏瑞沪深300ETF联接C",
+  "redeem": [
+   {
+    "max_days": 7,
+    "min_days": 0,
+    "rate": 0.015
+   },
+   {
+    "max_days": null,
+    "min_days": 7,
+    "rate": 0.0
+   }
+  ],
+  "risk": "中高",
+  "size": 4117592390.72,
+  "type": "指数型-股票"
+ },
+ "007339": {
+  "buy_rate": 0.0,
+  "buy_rate_raw": 0.0,
+  "code": "007339",
+  "company": "易方达基金",
+  "exchange": false,
+  "fetched_at": "2026-11-14",
+  "inception": "2009-07-28",
+  "manager": "余海燕,庞亚平",
+  "min_buy": 10.0,
+  "name": "易方达沪深300ETF联接C",
+  "redeem": [
+   {
+    "max_days": 7,
+    "min_days": 0,
+    "rate": 0.015
+   },
+   {
+    "max_days": null,
+    "min_days": 7,
+    "rate": 0.0
+   }
+  ],
+  "risk": "中高",
+  "size": 9065849665.31,
+  "type": "指数型-股票"
+ },
+ "007467": {
+  "buy_rate": 0.0,
+  "buy_rate_raw": 0.0,
+  "code": "007467",
+  "company": "华泰柏瑞基金",
+  "exchange": false,
+  "fetched_at": "2026-11-14",
+  "inception": "2019-06-13",
+  "manager": "柳军",
+  "min_buy": 10.0,
+  "name": "华泰柏瑞中证红利低波ETF联接C",
+  "redeem": [
+   {
+    "max_days": 7,
+    "min_days": 0,
+    "rate": 0.015
+   },
+   {
+    "max_days": 30,
+    "min_days": 7,
+    "rate": 0.001
+   },
+   {
+    "max_days": null,
+    "min_days": 30,
+    "rate": 0.0
+   }
+  ],
+  "risk": "中高",
+  "size": 5455999005.64,
+  "type": "指数型-股票"
+ },
+ "007911": {
+  "buy_rate": 0.0,
+  "buy_rate_raw": 0.0,
+  "code": "007911",
+  "company": "大成基金",
+  "exchange": false,
+  "fetched_at": "2026-11-14",
+  "inception": "2019-09-16",
+  "manager": "刘淼",
+  "min_buy": 10.0,
+  "name": "大成有色金属期货ETF联接C",
+  "redeem": [
+   {
+    "max_days": 7,
+    "min_days": 0,
+    "rate": 0.015
+   },
+   {
+    "max_days": 30,
+    "min_days": 7,
+    "rate": 0.001
+   },
+   {
+    "max_days": null,
+    "min_days": 30,
+    "rate": 0.0
+   }
+  ],
+  "risk": "中高",
+  "size": 406998498.61,
+  "type": "指数型-其他"
+ },
  "008163": {
   "buy_rate": 0.0012,
   "buy_rate_raw": 0.012,
   "code": "008163",
   "company": "南方基金",
   "exchange": false,
-  "fetched_at": "2026-11-08",
+  "fetched_at": "2026-11-14",
   "inception": "2020-01-02",
   "manager": "崔蕾",
   "min_buy": 10.0,
@@ -261,7 +485,7 @@
   "code": "008558",
   "company": "永赢基金",
   "exchange": false,
-  "fetched_at": "2026-11-08",
+  "fetched_at": "2026-11-14",
   "inception": "2020-04-13",
   "manager": "吴玮,谢越",
   "min_buy": 10.0,
@@ -282,13 +506,40 @@
   "size": 1207934982.19,
   "type": "债券型-长债"
  },
+ "008702": {
+  "buy_rate": 0.0,
+  "buy_rate_raw": 0.0,
+  "code": "008702",
+  "company": "华夏基金",
+  "exchange": false,
+  "fetched_at": "2026-11-14",
+  "inception": "2020-04-13",
+  "manager": "荣膺",
+  "min_buy": 10.0,
+  "name": "华夏黄金ETF联接C",
+  "redeem": [
+   {
+    "max_days": 7,
+    "min_days": 0,
+    "rate": 0.015
+   },
+   {
+    "max_days": null,
+    "min_days": 7,
+    "rate": 0.0
+   }
+  ],
+  "risk": "中高",
+  "size": 5827584925.95,
+  "type": "指数型-其他"
+ },
  "010365": {
   "buy_rate": 0.0,
   "buy_rate_raw": 0.0,
   "code": "010365",
   "company": "鹏华基金",
   "exchange": false,
-  "fetched_at": "2026-11-08",
+  "fetched_at": "2026-11-14",
   "inception": "2016-10-10",
   "manager": "张羽翔",
   "min_buy": 10.0,
@@ -315,7 +566,7 @@
   "code": "015279",
   "company": "东财基金",
   "exchange": false,
-  "fetched_at": "2026-11-09",
+  "fetched_at": "2026-11-14",
   "inception": "2022-03-02",
   "manager": "姚楠燕",
   "min_buy": 10.0,
@@ -327,7 +578,7 @@
     "rate": 0.015
    },
    {
-    "max_days": null,
+    "max_days": 30,
     "min_days": 7,
     "rate": 0.001
    },
@@ -341,13 +592,40 @@
   "size": 65347597.44,
   "type": "指数型-股票"
  },
+ "020286": {
+  "buy_rate": 0.0,
+  "buy_rate_raw": 0.0,
+  "code": "020286",
+  "company": "兴业基金",
+  "exchange": false,
+  "fetched_at": "2026-11-14",
+  "inception": "2016-10-14",
+  "manager": "伍方方,郭益均",
+  "min_buy": 10.0,
+  "name": "中证兴业中高等级信用债指数C",
+  "redeem": [
+   {
+    "max_days": 7,
+    "min_days": 0,
+    "rate": 0.015
+   },
+   {
+    "max_days": null,
+    "min_days": 7,
+    "rate": 0.0
+   }
+  ],
+  "risk": "中低",
+  "size": 2323779265.76,
+  "type": "指数型-固收"
+ },
  "023411": {
   "buy_rate": 0.0,
   "buy_rate_raw": 0.0,
   "code": "023411",
   "company": "天弘基金",
   "exchange": false,
-  "fetched_at": "2026-11-09",
+  "fetched_at": "2026-11-14",
   "inception": "2025-02-24",
   "manager": "沙川",
   "min_buy": 10.0,
@@ -368,13 +646,50 @@
   "size": 39065670.07,
   "type": "指数型-股票"
  },
+ "110020": {
+  "buy_rate": 0.0012,
+  "buy_rate_raw": 0.012,
+  "code": "110020",
+  "company": "易方达基金",
+  "exchange": false,
+  "fetched_at": "2026-11-14",
+  "inception": "2009-07-28",
+  "manager": "余海燕,庞亚平",
+  "min_buy": 10.0,
+  "name": "易方达沪深300ETF联接A",
+  "redeem": [
+   {
+    "max_days": 7,
+    "min_days": 0,
+    "rate": 0.015
+   },
+   {
+    "max_days": 365,
+    "min_days": 7,
+    "rate": 0.005
+   },
+   {
+    "max_days": 730,
+    "min_days": 365,
+    "rate": 0.0025
+   },
+   {
+    "max_days": null,
+    "min_days": 730,
+    "rate": 0.0
+   }
+  ],
+  "risk": "中高",
+  "size": 15824191881.54,
+  "type": "指数型-股票"
+ },
  "159337": {
   "buy_rate": null,
   "buy_rate_raw": null,
   "code": "159337",
   "company": "东财基金",
   "exchange": true,
-  "fetched_at": "2026-11-08",
+  "fetched_at": "2026-11-14",
   "inception": "2024-08-14",
   "manager": "吴逸",
   "min_buy": null,
@@ -391,7 +706,7 @@
   "code": "159920",
   "company": "华夏基金",
   "exchange": true,
-  "fetched_at": "2026-11-09",
+  "fetched_at": "2026-11-14",
   "inception": "2012-07-09",
   "manager": "徐猛",
   "min_buy": null,
@@ -408,7 +723,7 @@
   "code": "159980",
   "company": "大成基金",
   "exchange": true,
-  "fetched_at": "2026-11-08",
+  "fetched_at": "2026-11-14",
   "inception": "2019-09-03",
   "manager": "刘淼",
   "min_buy": null,
@@ -425,7 +740,7 @@
   "code": "159981",
   "company": "建信基金",
   "exchange": true,
-  "fetched_at": "2026-11-08",
+  "fetched_at": "2026-11-14",
   "inception": "2019-11-11",
   "manager": "朱金钰,亢豆",
   "min_buy": null,
@@ -442,7 +757,7 @@
   "code": "159985",
   "company": "华夏基金",
   "exchange": true,
-  "fetched_at": "2026-11-08",
+  "fetched_at": "2026-11-14",
   "inception": "2019-09-06",
   "manager": "荣膺",
   "min_buy": null,
@@ -458,21 +773,25 @@
   "buy_rate_raw": 0.008,
   "code": "161119",
   "company": "易方达基金",
-  "exchange": true,
-  "fetched_at": "2026-11-08",
+  "exchange": false,
+  "fetched_at": "2026-11-14",
   "inception": "2012-09-28",
   "manager": "杨真",
   "min_buy": 10.0,
   "name": "易方达中债新综指发起式(LOF)A",
-  "note": "场内佣金",
   "redeem": [
    {
-    "max_days": null,
+    "max_days": 7,
+    "min_days": 0,
+    "rate": 0.015
+   },
+   {
+    "max_days": 365,
     "min_days": 7,
     "rate": 0.001
    },
    {
-    "max_days": null,
+    "max_days": 730,
     "min_days": 365,
     "rate": 0.0005
    },
@@ -491,13 +810,12 @@
   "buy_rate_raw": 0.012,
   "code": "501018",
   "company": "南方基金",
-  "exchange": true,
-  "fetched_at": "2026-11-08",
+  "exchange": false,
+  "fetched_at": "2026-11-14",
   "inception": "2016-05-17",
   "manager": "张其思",
   "min_buy": 10.0,
   "name": "南方原油A",
-  "note": "场内佣金",
   "redeem": [
    {
     "max_days": 7,
@@ -505,12 +823,12 @@
     "rate": 0.015
    },
    {
-    "max_days": null,
+    "max_days": 180,
     "min_days": 7,
     "rate": 0.005
    },
    {
-    "max_days": null,
+    "max_days": 365,
     "min_days": 180,
     "rate": 0.0025
    },
@@ -530,7 +848,7 @@
   "code": "510300",
   "company": "华泰柏瑞基金",
   "exchange": true,
-  "fetched_at": "2026-11-08",
+  "fetched_at": "2026-11-14",
   "inception": "2012-04-05",
   "manager": "柳军",
   "min_buy": null,
@@ -547,7 +865,7 @@
   "code": "510500",
   "company": "南方基金",
   "exchange": true,
-  "fetched_at": "2026-11-08",
+  "fetched_at": "2026-11-14",
   "inception": "2013-01-10",
   "manager": "罗文杰,龚涛",
   "min_buy": null,
@@ -564,7 +882,7 @@
   "code": "511130",
   "company": "博时基金",
   "exchange": true,
-  "fetched_at": "2026-11-08",
+  "fetched_at": "2026-11-14",
   "inception": "2024-03-06",
   "manager": "张磊,张朱霖",
   "min_buy": null,
@@ -581,7 +899,7 @@
   "code": "511220",
   "company": "海富通基金",
   "exchange": true,
-  "fetched_at": "2026-11-08",
+  "fetched_at": "2026-11-14",
   "inception": "2014-10-17",
   "manager": "陈轶平,唐灵儿,陶斐然,汪嘉琦",
   "min_buy": null,
@@ -598,7 +916,7 @@
   "code": "511260",
   "company": "国泰基金",
   "exchange": true,
-  "fetched_at": "2026-11-08",
+  "fetched_at": "2026-11-14",
   "inception": "2017-07-17",
   "manager": "王玉,王振扬",
   "min_buy": 5000000.0,
@@ -615,7 +933,7 @@
   "code": "511360",
   "company": "海富通基金",
   "exchange": true,
-  "fetched_at": "2026-11-08",
+  "fetched_at": "2026-11-14",
   "inception": "2020-04-30",
   "manager": "陈轶平,唐灵儿,陶斐然,汪嘉琦",
   "min_buy": null,
@@ -632,7 +950,7 @@
   "code": "512890",
   "company": "华泰柏瑞基金",
   "exchange": true,
-  "fetched_at": "2026-11-09",
+  "fetched_at": "2026-11-14",
   "inception": "2018-11-21",
   "manager": "柳军",
   "min_buy": null,
@@ -649,7 +967,7 @@
   "code": "513500",
   "company": "博时基金",
   "exchange": true,
-  "fetched_at": "2026-11-08",
+  "fetched_at": "2026-11-14",
   "inception": "2013-11-04",
   "manager": "万琼",
   "min_buy": null,
@@ -666,7 +984,7 @@
   "code": "513660",
   "company": "华夏基金",
   "exchange": true,
-  "fetched_at": "2026-11-09",
+  "fetched_at": "2026-11-14",
   "inception": "2014-12-09",
   "manager": "李俊",
   "min_buy": null,
@@ -683,7 +1001,7 @@
   "code": "513980",
   "company": "景顺长城基金",
   "exchange": true,
-  "fetched_at": "2026-11-09",
+  "fetched_at": "2026-11-14",
   "inception": "2021-05-31",
   "manager": "金璜",
   "min_buy": null,
@@ -700,7 +1018,7 @@
   "code": "515000",
   "company": "华宝基金",
   "exchange": true,
-  "fetched_at": "2026-11-08",
+  "fetched_at": "2026-11-14",
   "inception": "2019-07-04",
   "manager": "胡一江",
   "min_buy": null,
@@ -717,7 +1035,7 @@
   "code": "518850",
   "company": "华夏基金",
   "exchange": true,
-  "fetched_at": "2026-11-08",
+  "fetched_at": "2026-11-14",
   "inception": "2020-03-27",
   "manager": "荣膺",
   "min_buy": null,
@@ -734,7 +1052,7 @@
   "code": "563020",
   "company": "易方达基金",
   "exchange": true,
-  "fetched_at": "2026-11-09",
+  "fetched_at": "2026-11-14",
   "inception": "2023-10-16",
   "manager": "宋钊贤,杨正旺",
   "min_buy": null,
@@ -751,7 +1069,7 @@
   "code": "563690",
   "company": "永赢基金",
   "exchange": true,
-  "fetched_at": "2026-11-09",
+  "fetched_at": "2026-11-14",
   "inception": "2025-09-15",
   "manager": "蔡路平",
   "min_buy": null,

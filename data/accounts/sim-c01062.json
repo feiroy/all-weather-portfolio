@@ -1,0 +1,137 @@
+{
+ "name": "模拟实操",
+ "kind": "模拟",
+ "strategy": "custom:s1794201271532",
+ "capital": 0.0,
+ "created": "2026-11-14",
+ "trades": [],
+ "holdings": {
+  "hs300": {
+   "on": true,
+   "label": "",
+   "funds": [
+    {
+     "code": "006131",
+     "name": "华泰柏瑞沪深300ETF联接C",
+     "unit": "份额",
+     "lot": 1,
+     "min_amount": 1.0,
+     "share": 1.0
+    }
+   ]
+  },
+  "us_sp500": {
+   "on": true,
+   "label": "",
+   "funds": [
+    {
+     "code": "513500",
+     "name": "标普 500 ETF（QDII）",
+     "unit": "股",
+     "lot": 100,
+     "min_amount": 1.0,
+     "share": 1.0
+    }
+   ]
+  },
+  "credit": {
+   "on": true,
+   "label": "",
+   "funds": [
+    {
+     "code": "161119",
+     "name": "易方达中债新综指发起式(LOF)A",
+     "unit": "份额",
+     "lot": 1,
+     "min_amount": 1.0,
+     "share": 0.5
+    }
+   ]
+  },
+  "bond_10y": {
+   "on": false,
+   "label": "",
+   "funds": [
+    {
+     "code": "511260",
+     "name": "10 年国债 ETF",
+     "unit": "股",
+     "lot": 100,
+     "min_amount": 1.0,
+     "share": 1.0
+    }
+   ]
+  },
+  "bond_30y": {
+   "on": true,
+   "label": "",
+   "funds": [
+    {
+     "code": "511130",
+     "name": "30 年国债 ETF",
+     "unit": "股",
+     "lot": 100,
+     "min_amount": 1.0,
+     "share": 1.0
+    }
+   ]
+  },
+  "gold": {
+   "on": true,
+   "label": "",
+   "funds": [
+    {
+     "code": "000217",
+     "name": "华安黄金ETF联接C",
+     "unit": "份额",
+     "lot": 1,
+     "min_amount": 1.0,
+     "share": 1.0
+    }
+   ]
+  },
+  "nonferr": {
+   "on": true,
+   "label": "",
+   "funds": [
+    {
+     "code": "159980",
+     "name": "有色金属期货 ETF",
+     "unit": "股",
+     "lot": 100,
+     "min_amount": 1.0,
+     "share": 1.0
+    }
+   ]
+  },
+  "ene": {
+   "on": true,
+   "label": "",
+   "funds": [
+    {
+     "code": "159981",
+     "name": "能源化工期货 ETF",
+     "unit": "股",
+     "lot": 100,
+     "min_amount": 1.0,
+     "share": 1.0
+    }
+   ]
+  },
+  "divlow": {
+   "on": true,
+   "label": "",
+   "funds": [
+    {
+     "code": "007467",
+     "name": "华泰柏瑞中证红利低波ETF联接C",
+     "unit": "份额",
+     "lot": 1,
+     "min_amount": 1.0,
+     "share": 1.0
+    }
+   ]
+  }
+ },
+ "updated": "2026-11-14 23:51"
+}
