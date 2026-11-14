@@ -144,8 +144,6 @@ async function add(r) {
 
 @media (min-width:900px){
   .stg{ grid-template-columns:repeat(3,1fr); }
-  .slot-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; padding:0 12px; align-items:start; }
-  .slot-grid .card{ margin:0; }
 }
 
 .sel-page{ max-width:960px; margin:0 auto; }
@@ -153,8 +151,12 @@ async function add(r) {
 .cur .cl{ font-size:15px; } .cur .cl b{ color:var(--brand); }
 .cur p{ font-size:12.5px; color:var(--sub); line-height:1.7; margin:6px 0 0; }
 .cur .go{ display:inline-flex; align-items:center; gap:3px; font-size:12.5px; color:var(--brand); margin-top:8px; text-decoration:none; }
+/* 双列时同一行两张卡等高（2026-11-14 用户「页面咋空隙不一样大」）：原来 align-items:start，
+   场内卡多一行「现价 / 溢价」、关掉的卡只有一行说明，矮的那张下面空出一截，看起来卡间距忽大忽小。
+   现在 stretch 等高，操作行 margin-top:auto 贴底，左右两张的「加一只」在同一水平线上。 */
 @media (min-width:900px){
-  .slot-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; padding:0 12px; align-items:start; }
-  .slot-grid .card{ margin:0; }
+  .slot-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; padding:0 12px; align-items:stretch; }
+  .slot-grid .card{ margin:0; display:flex; flex-direction:column; }
+  .slot-grid .card .s3{ margin-top:auto; padding-top:6px; }
 }
 </style>

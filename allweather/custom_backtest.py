@@ -185,10 +185,11 @@ def run_engine(rets, kw):
     return backtest_iv(rets, **kw) if "assets" in kw else backtest_b(rets, **kw)
 
 
-def custom_series(rets, method="fixed", weights=None, freq="M", **params):
+def custom_series(rets, method="fixed", weights=None, freq="M", since=None, **params):
     """自定义策略的净值序列。返回 (净值, 调仓次数, 期末目标权重)。
 
     method='fixed' 走原来的固定权重+定期再平衡；其余走统一回测引擎。
+    since：只数这天及以后的调仓次数（全历史预热、从评估起点开始计时用）。
     """
     m = str(method or "fixed").lower()
     if m == "fixed":
@@ -203,7 +204,10 @@ def custom_series(rets, method="fixed", weights=None, freq="M", **params):
     from allweather.backtest import backtest
     r = backtest(rets, **kw)
     last = r.weight_df.iloc[-1] if r.weight_df is not None and len(r.weight_df) else pd.Series(dtype=float)
-    return r.nv, int(r.n_rebal), last
+    n = int(r.n_rebal)
+    if since is not None and r.weight_df is not None:
+        n = int((r.weight_df.index >= pd.Timestamp(since)).sum())
+    return r.nv, n, last
 
 
 def prepare_funds(raw_items: list, panel: pd.DataFrame | None = None,
@@ -353,7 +357,8 @@ def custom_compare(weights: dict | None = None, start: str = "2015-01-01",
         freq = "M"
 
     ck = lambda k: canonical_key(k, panel)  # noqa: E731 — 6 位代码统一转成内部资产 key
-    prep = prepare_funds(items, panel, start)
+    # 数据从「所有基金都有收益」的第一天就准备好（不按 start 截）：均线 / 权重窗口要用起点之前的历史预热
+    prep = prepare_funds(items, panel, "1900-01-01")
     keys, meta, wmap = prep["keys"], prep["meta"], prep["wmap"]
     # 趋势窗口 / 分桶也是按资产 key 索引的，用户用 6 位代码带进来的要一起归一化，
     # 否则会「明明配了却匹配不上列名」。trend_map=None 时仍传 None，保持原来的兼容参数路径。
@@ -388,37 +393,66 @@ def custom_compare(weights: dict | None = None, start: str = "2015-01-01",
             f"当前持仓代码：{codes} —— 里面没有 511220（可能被替换成了别的债基）。"
             "请在「常用资产」里加入「城投债 ETF」，或把所有均线窗口设为 0。"
         )
-    first, eff = prep["first"], prep["eff"]
-    fund_rets, panel_rets = prep["fund_rets"], prep["panel_rets"]
+    first, data_start = prep["first"], prep["eff"]
+    fund_full, panel_full = prep["fund_rets"], prep["panel_rets"]
+
+    # 评估起点（2026-11-14 用户：「2019 起回撤 3.6%、2020 起回撤 9%」）：全历史跑权重、只在这天切净值。
+    # 原来从起点开始跑，均线和权重窗口从零攒，起点后两三个月过滤不生效 —— 2020-01 起正好撞上疫情暴跌。
+    # 基金自己的历史不够预热时（比如 2020-04 才成立、要 75 日均线），把起点推到预热完成那天，并告诉页面。
+    if method == "fixed" or engine_kwargs:
+        warm = 0
+    else:
+        wins = [int(window or 20)] + [int(v or 0) for k, v in (eff_tm or {}).items() if str(k) in keys]
+        if target_vol:
+            wins.append(int(vol_window or 60))
+        warm = max(wins) + 1
+    s_user = pd.Timestamp(start)
+    s_warm = fund_full.index[min(warm, len(fund_full) - 2)] if warm else fund_full.index[0]
+    eff = fund_full.index[fund_full.index.searchsorted(max(s_user, s_warm))] \
+        if max(s_user, s_warm) <= fund_full.index[-1] else fund_full.index[-1]
+    if len(fund_full.loc[eff:]) < 2:
+        raise ValueError("所选基金的可用区间太短，换更早成立的基金或把起点提前")
+    why = "warmup" if (warm and s_warm > s_user and s_warm > data_start) else \
+          ("fund" if data_start > s_user else "")
 
     w = pd.Series({k: wmap[k] for k in keys})
     w = w / w.sum() if w.sum() > 0 else w
     out, n_reb = {}, {}
+    full = panel_returns(panel)                    # 内置三策略同样用全历史预热
     for n in ("V3-B 保守增强", "V3-B 风险平价", "V3c 多元"):
-        r = run_strategy_backtest(panel_rets, n, "monthly")
-        out[n] = r.nv
-        n_reb[n] = int(r.n_rebal)
+        r = run_strategy_backtest(full, n, "monthly", track_weights=True)
+        nv0 = r.nv.loc[eff:]
+        out[n] = nv0 / float(nv0.iloc[0])
+        n_reb[n] = int((r.weight_df.index >= eff).sum()) if r.weight_df is not None else int(r.n_rebal)
     if method == "fixed" and w.sum() <= 0:
         raise ValueError("固定权重模式至少要给一只基金一个大于 0 的权重")
+    fund_rets, panel_rets = fund_full.loc[eff:], panel_full.loc[eff:]
     if engine_kwargs:
         # 高级通道：直接把引擎参数原样透传（测试用它证明「参数化没有复制回测逻辑」）
         ekw = dict(engine_kwargs)
         ekw.setdefault("track_weights", True)
-        r_c = run_engine(fund_rets[keys], ekw)
-        nv, n_reb_custom = r_c.nv, int(r_c.n_rebal)
+        r_c = run_engine(fund_full[keys], ekw)
+        nv = r_c.nv.loc[eff:]
+        n_reb_custom = int((r_c.weight_df.index >= eff).sum()) if r_c.weight_df is not None else int(r_c.n_rebal)
         last_w = r_c.weight_df.iloc[-1] if r_c.weight_df is not None and len(r_c.weight_df) else w
+    elif method == "fixed":
+        # 固定权重不需要预热；而且「不再平衡」必须从起点那天才开始持有，不能拿全历史漂过来的权重
+        nv, n_reb_custom, last_w = custom_series(fund_rets[keys], method=method,
+                                                 weights={k: float(w[k]) for k in keys}, freq=freq)
     else:
         nv, n_reb_custom, last_w = custom_series(
-            fund_rets[keys], method=method,
+            fund_full[keys], method=method, since=eff,
             weights={k: float(w[k]) for k in keys}, freq=freq,
             window=window, max_w=max_w, min_w=min_w, cash_ratio=cash_ratio,
             trend_commodity=trend_commodity, trend_gold=trend_gold, trend_equity=trend_equity,
             trend_map=tm_canon, target_vol=target_vol, vol_window=vol_window,
             rp_buckets=rp_buckets, safe_asset=safe_asset)
+        nv = nv.loc[eff:]
     nv.index = panel_rets.index
-    label = (str(name or "").strip()[:16]) or "我的组合"
-    if label in out:
-        label = label[:12] + "·自定义"
+    from allweather.strategies import NAME_MAX
+    label = (str(name or "").strip()[:NAME_MAX]) or "我的组合"
+    if label in out:                      # 和内置三策略同名：加后缀，不再截短（截短会让前端按名字找不到曲线）
+        label = label + "·自定义"
     out[label] = nv / float(nv.iloc[0])
     if n_reb_custom is None:      # 固定权重模式：按调仓周期数计
         n_reb_custom = 0 if freq == "N" else int(
@@ -465,9 +499,12 @@ def custom_compare(weights: dict | None = None, start: str = "2015-01-01",
                        "buckets": {k: list(v) for k, v in bk.items()},
                        "requested": len(rp_buckets or {})}
     return {"rows": rows, "curves": curves, "periods": periods, "bucket_info": bucket_info,
+            "label": label,          # 自定义策略那条曲线 / 那一行的实际名字（同名时带「·自定义」后缀）
             "weights": {k: r4(float(last_w.get(k, 0.0)) * 100) for k in keys},
             "funds": [{"key": k, "name": meta[k]["name"], "code": meta[k]["code"],
                        "src": meta[k]["src"], "w": r4(float(last_w.get(k, 0.0)) * 100),
                        "from": f"{first[k]:%Y-%m-%d}"} for k in keys],
             "start": start, "start_actual": f"{eff:%Y-%m-%d}", "freq": freq,
+            # 起点为什么晚于所选：fund = 基金成立晚；warmup = 基金历史不够让均线 / 权重窗口预热
+            "start_reason": why, "data_start": f"{data_start:%Y-%m-%d}", "warmup_days": warm,
             "method": method, "safe_asset": safe_asset}

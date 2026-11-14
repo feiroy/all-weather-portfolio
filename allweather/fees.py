@@ -12,6 +12,7 @@
     python -m allweather.fees              # 刷新 data/fund_fees.json（幂等，只补缺失/过期）
     python -m allweather.fees --refresh     # 强制全部重抓
     python -m allweather.fees --show        # 打印当前缓存
+    python -m allweather.fees --purchase    # 重抓全市场申购状态表（场内/场外判定、QDII 限购）
 """
 from __future__ import annotations
 
@@ -35,10 +36,47 @@ COMMISSION_MIN = 5.0
 _UA = {"User-Agent": "Mozilla/5.0", "Referer": "https://fundf10.eastmoney.com/"}
 
 
+_PURCHASE: dict | None = None
+
+
+def _purchase_status() -> dict:
+    """代码 → (申购状态, 赎回状态)，来自全市场申购状态表（fund_lookup.PURCHASE_CSV）。取不到返回空表。"""
+    global _PURCHASE
+    if _PURCHASE is not None:
+        return _PURCHASE
+    out: dict = {}
+    try:
+        import sys
+        ss = str(ROOT / "streamlit_app")
+        if ss not in sys.path:
+            sys.path.insert(0, ss)
+        import fund_lookup as FL  # noqa: PLC0415
+        import pandas as pd  # noqa: PLC0415
+        if FL.PURCHASE_CSV.exists():
+            d = pd.read_csv(FL.PURCHASE_CSV, dtype=str, usecols=["基金代码", "申购状态", "赎回状态"])
+            out = {str(r[0]).strip(): (str(r[1] or ""), str(r[2] or "")) for r in d.itertuples(index=False)}
+    except Exception:  # noqa: BLE001 —— 没有状态表就退回代码前缀规则
+        out = {}
+    _PURCHASE = out
+    return out
+
+
 def is_exchange(code: str) -> bool:
-    """场内 ETF / LOF：5 开头（510/511/512/513/515/518）或 1 开头（159/501）。"""
+    """按「场内买卖、收佣金」计费吗？
+
+    原来只看首位「1/5 开头 = 场内」，把 110020（易方达沪深300联接）、519xxx、LOF 场外申购
+    全算成「万 1.5 佣金、最低 5 元」，申购费和赎回阶梯一概不收（2026-11-14 用户要用场外基金
+    实盘对比网页时发现）。现在先查全市场申购状态表：申购或赎回状态是「场内交易」才算场内；
+    在表里但不是场内交易（含 LOF 在 App 里申购）一律按场外。表里查不到才退回代码前缀：
+    159xxx（深 ETF）与 51/52/56/58 开头（沪 ETF，519 除外）。
+    """
     c = str(code or "").strip()
-    return len(c) == 6 and c[0] in ("5", "1")
+    if len(c) != 6:
+        return False
+    st = _purchase_status().get(c)
+    if st is not None:
+        return "场内交易" in st[0] or "场内交易" in st[1]
+    return c.startswith("159") or (c[:2] in ("51", "52", "56", "58") and not c.startswith("519"))
 
 
 def _pct(s) -> float | None:
@@ -49,8 +87,33 @@ def _pct(s) -> float | None:
     return round(float(m.group(1)) / 100, 6) if m else None
 
 
+_UNIT_DAYS = {"天": 1, "日": 1, "个月": 30, "月": 30, "年": 365}
+_COND = re.compile(r"(大于等于|大于|小于等于|小于|≥|>|≤|<)\s*(\d+(?:\.\d+)?)\s*(个月|天|日|月|年)?")
+
+
+def _parse_cond(cond: str) -> tuple[int, int | None] | None:
+    """「大于等于7天，小于30天」→ (7, 30)，区间左闭右开、单位换成天；认不出返回 None。
+
+    原解析只取第一个数字：丢了上限（≥7 天 0.10% 被当成永远 0.10%），也不认「年/月」
+    （「大于等于1年」被当成 1 天）。2026-11-14 修。
+    """
+    lo, hi, hit = 0, None, False
+    for op, num, unit in _COND.findall(cond):
+        n = float(num) * _UNIT_DAYS.get(unit or "天", 1)
+        hit = True
+        if op in ("大于等于", "≥"):
+            lo = int(round(n))
+        elif op in ("大于", ">"):
+            lo = int(round(n)) + 1
+        elif op in ("小于等于", "≤"):
+            hi = int(round(n)) + 1
+        else:
+            hi = int(round(n))
+    return (lo, hi) if hit else None
+
+
 def _parse_redeem(html: str) -> list[dict]:
-    """从费率页解析赎回费阶梯 → [{'min_days': 0, 'rate': 0.015}, ...]（按 min_days 升序）。"""
+    """从费率页解析赎回费阶梯 → [{'min_days': 0, 'max_days': 7, 'rate': 0.015}, ...]（按 min_days 升序）。"""
     i = html.find("赎回费率")
     if i < 0:
         return []
@@ -62,14 +125,10 @@ def _parse_redeem(html: str) -> list[dict]:
         r = _pct(rate)
         if r is None:
             continue
-        m = re.search(r"(\d+)", cond)
-        if not m:
+        rng = _parse_cond(cond)
+        if rng is None:
             continue
-        n = int(m.group(1))
-        if "小于" in cond and "等于" not in cond:
-            out.append({"min_days": 0, "max_days": n, "rate": r})
-        elif "大于" in cond:
-            out.append({"min_days": n, "max_days": None, "rate": r})
+        out.append({"min_days": rng[0], "max_days": rng[1], "rate": r})
     out.sort(key=lambda x: x["min_days"])
     return out
 
@@ -262,7 +321,7 @@ def size_text(size: float | None) -> str:
 def describe(code: str) -> str:
     """一行说明，给页面/日志用。"""
     r = get(code)
-    if r.get("exchange"):
+    if is_exchange(code):          # 不读缓存里的 exchange：老缓存是按旧前缀规则写的
         return f"场内佣金 万{COMMISSION_RATE * 1e4:.1f}（单笔最低 {COMMISSION_MIN:.0f} 元）· 无申购赎回费"
     b = r.get("buy_rate")
     raw = r.get("buy_rate_raw")
@@ -278,11 +337,34 @@ def describe(code: str) -> str:
     return " · ".join(parts)
 
 
+def refresh_purchase() -> int:
+    """重抓全市场申购状态表（akshare.fund_purchase_em，约 2.8 万行），写到 fund_lookup.PURCHASE_CSV。
+
+    它决定「场内 / 场外」计费口径，也是 QDII 限购、暂停申购的唯一来源。返回行数。
+    """
+    global _PURCHASE
+    import sys
+    ss = str(ROOT / "streamlit_app")
+    if ss not in sys.path:
+        sys.path.insert(0, ss)
+    import akshare as ak  # noqa: PLC0415
+    import fund_lookup as FL  # noqa: PLC0415
+    d = ak.fund_purchase_em()
+    FL.PURCHASE_CSV.parent.mkdir(parents=True, exist_ok=True)
+    d.to_csv(FL.PURCHASE_CSV, index=False)
+    _PURCHASE = None
+    FL._PM = None
+    return len(d)
+
+
 if __name__ == "__main__":
     import sys
 
     args = sys.argv[1:]
-    if "--show" in args:
+    if "--purchase" in args:
+        print("刷新全市场申购状态表…")
+        print("完成，", refresh_purchase(), "行")
+    elif "--show" in args:
         for c, r in sorted(load().items()):
             print(c, r.get("name", "")[:16], "申购", r.get("buy_rate"),
                   "赎回", [x["rate"] for x in r.get("redeem", [])], r.get("fetched_at"))

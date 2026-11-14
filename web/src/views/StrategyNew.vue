@@ -7,7 +7,7 @@
         <div class="ct"><b>基本信息</b><span class="k">保存后自动加入回测对比</span></div>
         <div class="fld">
           <span class="lb">策略名</span>
-          <input v-model="name" class="nm" maxlength="16" placeholder="例如 我的稳健组合" />
+          <input v-model="name" class="nm" maxlength="30" placeholder="例如 我的稳健组合" />
         </div>
         <div class="fld">
           <span class="lb">加权方式</span>
@@ -48,11 +48,16 @@
           <div class="fld col">
             <span class="lb">趋势过滤</span>
             <div class="tlist">
-              <div class="trow" v-for="r in rows" :key="r.key">
-                <span class="tn">{{ r.name }}</span>
-                <input type="number" min="0" max="250" step="5" v-model.number="r.trend" />
-                <span class="tu">{{ r.trend > 0 ? `日均线（跌破转避风港）` : '不启用' }}</span>
-              </div>
+              <template v-for="r in rows" :key="r.key">
+                <div class="trow" :class="{ miss: trendMiss[r.key] }">
+                  <span class="tn">{{ r.name }}</span>
+                  <input type="number" min="0" max="250" step="5" v-model.number="r.trend" />
+                  <span class="tu">{{ r.trend > 0 ? `日均线（跌破转避风港）` : '不启用' }}</span>
+                </div>
+                <!-- 同类（宽基股票 / 商品 / 红利低波）别的都设了均线、只有它是 0：多半是先删后加、窗口没带过来
+                     （2026-11-14 用户的「模拟」策略就是这样漏了沪深300和黄金，回撤 -3.40% → -4.60%） -->
+                <p class="tmiss" v-if="trendMiss[r.key]"><b>没设均线，跌破也不会转避风港</b><span>同类的 {{ trendMiss[r.key] }} 都设了</span></p>
+              </template>
               <p class="k" v-if="!rows.length">先添加基金，再给每只单独设均线窗口（0 = 不启用）。任意基金都能设，包括新加的行业/科技 ETF。</p>
             </div>
             <div class="fld" v-if="rows.length">
@@ -179,6 +184,28 @@ const isSafeAsset = r => (r.key === safeAsset.value || (!!safeCode.value && r.co
 const trendWithoutSafe = computed(() => method.value !== 'fixed'
   && rows.value.some(r => Number(r.trend) > 0)
   && !rows.value.some(isSafeAsset))
+
+// 基金「同类」：按名字分。不用分桶 —— 红利低波和沪深300、标普同在「增长↑」桶，但内置策略本来就不给它设均线，
+// 按桶比会把内置配置误标红。红利低波单独一类；债券 / 货币不检查（内置也不过滤）。顺序有讲究：先认红利、商品、债券，最后才是宽基。
+const KINDS = [
+  ['红利低波', /红利|低波|高股息/],
+  ['商品', /黄金|上海金|有色|能源|能化|化工|原油|豆粕|白银|铜|商品|期货/],
+  ['债券', /债|国开|政金|利率|短融|货币|理财|存单/],
+  ['宽基股票', /沪深|中证|上证|深证|创业板|科创|标普|纳斯达克|纳指|道琼斯|恒生|港股|日经|德国|印度|指数|股票|ETF/],
+]
+const kindOf = r => (KINDS.find(([, re]) => re.test(r.name || '')) || [null])[0]
+// { 资产key: '同类已设均线的基金名' }：同类至少还有一只、而且别的都设了窗口，只有它是 0
+const trendMiss = computed(() => {
+  if (method.value === 'fixed') return {}
+  const out = {}
+  for (const r of rows.value) {
+    const k = kindOf(r)
+    if (!k || k === '债券' || Number(r.trend) > 0 || isSafeAsset(r)) continue
+    const peers = rows.value.filter(x => x !== r && kindOf(x) === k)
+    if (peers.length && peers.every(x => Number(x.trend) > 0)) out[r.key] = peers.map(x => shortName(x.name)).join('、')
+  }
+  return out
+})
 
 // 本地候选（长历史策略资产 + 已缓存基金）优先，远程名录补充；6 位代码未命中时允许直接拉取
 const options = computed(() => {
@@ -351,6 +378,11 @@ async function save() {
 .bksel.miss{ border-color:var(--up); color:var(--up); }
 .fbk .k{ font-size:10.5px; }
 .twarn{ font-size:11.5px; color:var(--up); margin:8px 0 0; }
+.trow.miss input{ border-color:var(--up); color:var(--up); }
+.trow.miss .tu{ color:var(--up); }
+.tmiss{ margin:0 0 5px; text-align:right; line-height:1.5; color:var(--up); }
+.tmiss b{ display:block; font-size:11.5px; font-weight:600; }
+.tmiss span{ display:block; font-size:10.5px; opacity:.85; }
 .finf{ flex:1 1 auto; min-width:0; cursor:pointer; }
 .finf b{ display:block; font-size:13px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .finf .sw{ font-size:11px; color:var(--muted); margin-left:2px; }

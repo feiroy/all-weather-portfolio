@@ -107,11 +107,29 @@ def slot_label(holdings: dict | None, slot: str) -> str:
     return (fs[0].get("name") or fs[0]["code"]) if fs else slot
 
 
+def slot_for_key(holdings: dict | None, key: str) -> str | None:
+    """策略资产 key 落在账户的哪个位置：同名位置优先；否则找**内置位置里挂着这只基金代码**的那个。
+
+    为什么：用户先在内置位置上换好了场外基金（收益垫挂 161119、A股挂 006131），再把同样用这些代码的
+    自定义策略「用它实盘」——原来会再给 161119 / 006131 各建一个同名位置，内置的那几个随后被关掉，
+    选基配置里一只基金出现两次、名字也变成基金全称（2026-11-14 用户：「选基配置里都乱了」）。
+    """
+    h = holdings or {}
+    key = str(key)
+    if key in h:
+        return key
+    for s in BASE_SLOTS:
+        if s in h and key in codes(h[s]):
+            return s
+    return None
+
+
 def ensure_slots(holdings: dict, strategy_funds: dict) -> tuple[dict, list[str]]:
     """给自定义策略里的每只基金备好位置，返回 (新 holdings, 新建的位置名)。
 
     - 策略资产 key 与内置位置同名（hs300 / credit …）→ 已经有位置，原样不动；
     - 策略用的是 6 位代码且能归一成内置资产（511220 → credit）→ 也已有位置；
+    - 账户的内置位置里已经挂着这只基金（credit 挂了 161119）→ 用那个位置，不另建；
     - 真正的新基金（159915 这种）→ 建一个同名位置，默认开着、挂上去。
     只补不改：用户在这个位置上换过基金、改过占比，一律保留。
     """
@@ -119,7 +137,7 @@ def ensure_slots(holdings: dict, strategy_funds: dict) -> tuple[dict, list[str]]
     added: list[str] = []
     for key, info in (strategy_funds or {}).items():
         key = str(key)
-        if not key or key in out:
+        if not key or slot_for_key(out, key):
             continue
         code = str(info.get("code") or key)
         name = str(info.get("name") or code)
@@ -242,6 +260,28 @@ def active(holdings: dict) -> list[str]:
             if holdings.get(s, {}).get("on", True) and codes(holdings.get(s, {}))]
 
 
+def apply_strategy_slots(holdings: dict, assets, held=()) -> tuple[dict, list[str], list[str]]:
+    """按策略的资产池给**内置**位置定开关，返回 (新 holdings, 打开的位置, 关闭的位置)。
+
+    - 策略要用的位置 → 打开（换到保守增强时 10 年国债必须开着，否则它的权重会被摊给别的位置）；
+    - 策略不用的位置 → 关闭，但 ``held`` 里有持仓的不关：关掉就看不到也卖不掉了；
+    - 自定义位置（绑定自定义策略时建的）一律不动，由 ensure_slots 管。
+    为什么要有：新建账户原来 9 个位置全开，风险平价 / V3c 根本不用 10 年国债，
+    页面上却勾着，看着像要买（2026-11-14 用户：「如果没有，默认不要勾选」）。
+    """
+    use, keep = set(assets or ()), set(held or ())
+    out = {s: _norm_slot(v) for s, v in (holdings or {}).items()}
+    opened, closed = [], []
+    for s in BASE_SLOTS:
+        if s not in out:
+            continue
+        want = s in use or (s in keep and out[s]["on"])
+        if want != out[s]["on"]:
+            out[s]["on"] = want
+            (opened if want else closed).append(s)
+    return out, opened, closed
+
+
 def slot_of(code: str, holdings: dict) -> str | None:
     """按基金代码反查位置（用于记账时自动归位）。"""
     for s, h in holdings.items():
@@ -357,10 +397,18 @@ def slot_weights(w: dict, holdings: dict) -> dict[str, float]:
     if not act:
         return {}
     raw = {s: float(w.get(s, 0) or 0) for s in act}
+    # 策略 key 是基金代码、而这只基金挂在某个内置位置上（161119 挂在收益垫）→ 权重直接给那个位置
+    left = {}
     for a, v in w.items():
         v = float(v or 0)
         if a in raw or v <= 0:
             continue
+        s = slot_for_key(holdings, a)
+        if s in raw:
+            raw[s] += v
+        else:
+            left[a] = v
+    for a, v in left.items():
         mates = [s for s in act if SLOT_BUCKET.get(s) == SLOT_BUCKET.get(a, a) and raw[s] > 0]
         base = sum(raw[s] for s in mates)
         if base <= 0:
@@ -383,7 +431,7 @@ def unplaced_assets(w: dict, holdings: dict) -> dict[str, str]:
     act = active(holdings)
     out: dict[str, str] = {}
     for a, v in w.items():
-        if a in act or float(v or 0) <= 0:
+        if a in act or float(v or 0) <= 0 or slot_for_key(holdings, a) in act:
             continue
         mates = [s for s in act if SLOT_BUCKET.get(s) == SLOT_BUCKET.get(a, a)
                  and float(w.get(s, 0) or 0) > 0]

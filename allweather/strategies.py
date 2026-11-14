@@ -34,6 +34,9 @@ from .config import DATA_DIR
 PATH = DATA_DIR / "strategies.json"
 
 METHODS = ("fixed", "inverse_vol", "risk_parity")
+# 策略名最长字数：编辑器 maxlength、这里的截断、回测曲线的名字三处共用这一个数。
+# 原来三处各写 16，用户「V3-B 风险平价 - 替换城投」（16 个字符）再多打一个字就打不进去（2026-11-14）
+NAME_MAX = 30
 FREQ_FIXED = ("M", "Q", "N")
 FREQ_DYNAMIC = ("M", "B", "W")
 
@@ -112,7 +115,9 @@ def norm(rec: dict) -> dict:
     name = str(rec.get("name") or "").strip()
     if not name:
         raise ValueError("策略得有个名字")
-    rec["name"] = name[:16]
+    if name in ("V3-B 保守增强", "V3-B 风险平价", "V3c 多元"):
+        raise ValueError(f"「{name}」是内置策略的名字，换一个（比如在后面加「 - 我的」）")
+    rec["name"] = name[:NAME_MAX]
     method = str(rec.get("method") or "fixed").lower()
     if method not in METHODS:
         raise ValueError(f"未知加权方式 {method}（可选 fixed / inverse_vol / risk_parity）")

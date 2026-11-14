@@ -157,6 +157,8 @@ async function doStrategy({ selectedValues }) {
   if (p.liq.length) lines.push(`清仓：${p.liq.map(x => `${x.name} ¥${money(x.amount, 0)}`).join('、')}`)
   if (p.zero.length) lines.push(`目标为 0 的位置：${p.zero.join('、')}`)
   if (p.added?.length) lines.push(`会新建 ${p.added.length} 个位置：${p.added.join('、')}`)
+  if (p.opened?.length) lines.push(`新策略要用，会打开：${p.opened.join('、')}`)
+  if (p.closed?.length) lines.push(`新策略不用，会关闭：${p.closed.join('、')}`)
   if (p.unplaced.length) lines.push(`新策略有、还没配位置的资产：${p.unplaced.map(x => `${x.name} ${x.w}%`).join('、')}`)
   // 自定义策略特有的口径差异，先说清楚再让人点确认
   const dg = p.diag || {}

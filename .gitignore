@@ -34,6 +34,8 @@ data/.last_auto_fetch
 streamlit_app/static/fund_names.json
 # 全市场基金名录缓存（运行时自动拉取，约 1.2MB，7 天刷新）
 streamlit_app/_fund_names.json
+# 全市场申购状态表（python -m allweather.fees --purchase 拉取，约 3MB，每天都变）
+data/fund_nav/purchase_all.csv
 # WorkBuddy 本地工作区数据（记忆、访问密码等，不进仓库）
 .workbuddy/
 .wbapp_*.genie

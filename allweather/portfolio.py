@@ -278,7 +278,7 @@ class Portfolio:
                 if it["px"] <= 0:
                     note = "缺净值"
                 elif it["dup"]:
-                    note = f'已在「{HG.SLOT_LABEL.get(it["dup"], it["dup"])}」计入'
+                    note = f'已在「{HG.slot_label(h, it["dup"])}」计入'
                 elif not moved or abs(diff) < min_order(tgt * it["x"]):
                     note = ""
                 else:
@@ -361,7 +361,7 @@ class Portfolio:
         day, day_pct = self.held_day(code, it["shares"], it["px"], it["px_prev"], it.get("px_prev_day"))
         hold = it["mv"] - it["shares"] * it["cost"]
         return {"code": code, "name": str(it["f"].get("name") or FL.fund_name(code) or code),
-                "slot": HG.SLOT_LABEL.get(it["slot"], it["slot"]), "otc": bool(it["otc"]),
+                "slot": HG.slot_label(self.holdings, it["slot"]), "otc": bool(it["otc"]),
                 "unit": "份" if it["otc"] else "股", "slot_n": it.get("slot_n", 1), "x": it.get("x", 1.0),
                 "dup": bool(it.get("dup")), "held": held, "shares": it["shares"], "px": it["px"],
                 "cost": it["cost"], "mv": it["mv"], "day": day if held else None,
@@ -435,7 +435,18 @@ class Portfolio:
 
 
     # ------------------------------------------------------------ 新钱怎么分（app.py::_calc_dca）
-    def dca(self, amount: float) -> dict:
+    def dca(self, amount: float, prices: dict | None = None) -> dict:
+        """一笔新钱怎么买：按目标比例分，给出能直接照着下单的清单和步骤（建仓也走这里）。
+
+        2026-11-14 用户「操作的时候应该提示下，否则不知道怎么买」后改：
+        - 场内按**最接近目标**取整（原来一律向下：511130 目标 2 万、一手 1.1 万 → 只给 1 手，
+          30 年国债比策略少 9pp），场内价格优先用现价（``prices``），取不到才用净值；
+        - 取整多出 / 少出的钱、场内佣金，全部由**最大那笔场外**兜底（``absorb``），整笔钱刚好花完；
+          没有场外可兜底时退回向下取整，剩下的钱如实写进「剩下」；
+        - 每行带 ``step``（①场内 ②场外 ③兜底）和 ``how``（怎么下这一笔），整体给 ``steps``。
+        """
+        from . import fees as FEES  # noqa: PLC0415
+        prices = prices or {}
         slots, meta, dead = {}, {}, []
         for it in self.plan["rows"]:
             g = slots.setdefault(it["slot"], {"slot": it["slot"], "w": float(it["slot_tgt_w"]), "mv": 0.0, "items": []})
@@ -445,25 +456,100 @@ class Portfolio:
                 continue
             g["items"].append({"code": it["code"], "x": float(it["x"])})
             meta[it["code"]] = it
-        rows, buy, lost = [], 0.0, 0.0
+
+        def fee_of(otc: bool, code: str, amt: float) -> float:
+            if amt <= 0:
+                return 0.0
+            if not otc:
+                return round(max(amt * FEES.COMMISSION_RATE, FEES.COMMISSION_MIN), 2)
+            r = FEES.get(code).get("buy_rate") or 0.0
+            return round(amt * r, 2)
+
+        items = []
         for a in HG.plan_invest(list(slots.values()), float(amount)):
             m = meta.get(a["code"])
             if not m:
                 continue
-            want = float(a["amount"])
-            qty, amt = HG.order_quantity(m["f"], want, float(m["px"]))
-            note = ""
-            if qty <= 0:
-                note = (f'低于最低申购 ¥{float(m["f"].get("min_amount") or 1):,.0f}' if HG.is_otc(m["f"])
-                        else f'不足一手（一手 ≈ ¥{int(m["f"].get("lot") or 100) * float(m["px"]):,.0f}）')
-                lost += want
+            otc = HG.is_otc(m["f"])
+            q = float(prices.get(m["code"]) or 0) if not otc else 0.0
+            items.append({"m": m, "otc": otc, "want": float(a["amount"]), "x": a["x"],
+                          "px": q if q > 0 else float(m["px"]), "px_src": "现价" if q > 0 else "净值",
+                          "lot": int(m["f"].get("lot") or 100), "qty": 0.0, "amt": 0.0})
+        exch = [it for it in items if not it["otc"]]
+        otcs = sorted([it for it in items if it["otc"]], key=lambda it: -it["want"])
+        absorb = otcs[0] if otcs else None
+        for it in exch:
+            unit = it["px"] * it["lot"]
+            lots = int(round(it["want"] / unit)) if absorb else int(it["want"] / unit)
+            it["qty"], it["amt"] = float(lots * it["lot"]), lots * unit
+        for it in otcs[1:]:
+            it["qty"], it["amt"] = HG.order_quantity(it["m"]["f"], it["want"], it["px"])
+        if absorb:
+            floor_amt = float(absorb["m"]["f"].get("min_amount") or 1.0)
+
+            def rest() -> float:
+                return (float(amount) - sum(i["amt"] + fee_of(False, i["m"]["code"], i["amt"]) for i in exch)
+                        - sum(i["amt"] for i in otcs[1:]))
+            # 场内向上取整太多、兜底那笔不够了 → 从「多买最多」的那只场内开始一手一手退回
+            while rest() < floor_amt and any(i["amt"] > 0 for i in exch):
+                worst = max((i for i in exch if i["amt"] > 0), key=lambda i: i["amt"] - i["want"])
+                worst["qty"] -= worst["lot"]
+                worst["amt"] = worst["qty"] * worst["px"]
+            absorb["amt"] = max(0.0, round(rest(), 2))
+            absorb["qty"] = absorb["amt"] / absorb["px"] if absorb["px"] > 0 else 0.0
+
+        rows, buy, lost, fee_tot = [], 0.0, 0.0, 0.0
+        gap = sum(i["amt"] - i["want"] for i in exch)          # 场内取整差（正 = 多买）
+        for it in exch + otcs[1:] + ([absorb] if absorb else []):
+            m, f, amt = it["m"], it["m"]["f"], it["amt"]
+            fee = fee_of(it["otc"], m["code"], amt)
+            name = str(f.get("name") or FL.fund_name(m["code"]) or m["code"])
+            note, how, step = "", "", 0
+            if amt <= 0:
+                lost += 0.0 if absorb else it["want"]
+                note = (f"不足半手（一手 ≈ ¥{it['px'] * it['lot']:,.0f}），这次不买，钱并进「{absorb['m']['f'].get('name') or absorb['m']['code']}」"
+                        if absorb and not it["otc"] else
+                        (f'低于最低申购 ¥{float(f.get("min_amount") or 1):,.0f}' if it["otc"]
+                         else f"不足一手（一手 ≈ ¥{it['px'] * it['lot']:,.0f}）"))
+            elif not it["otc"]:
+                step = 1
+                lots = int(it["qty"] / it["lot"])
+                how = (f"券商 App 买入 {int(it['qty']):,} 份（{lots} 手），参考{it['px_src']} {it['px']:.3f}，"
+                       f"约 ¥{amt:,.0f} + 佣金约 ¥{fee:,.0f}")
+                if abs(amt - it["want"]) >= it["px"] * it["lot"] * 0.05:
+                    note = (f"目标 ¥{it['want']:,.0f}，按最接近的整手取 {lots} 手，"
+                            f"{'多' if amt > it['want'] else '少'} ¥{abs(amt - it['want']):,.0f}"
+                            + ("，差额由最后一笔场外补齐" if absorb else ""))
+            elif it is absorb:
+                step = 3
+                how = f"最后一笔：把剩下的 ¥{amt:,.0f} 全部买入（场外按金额，15:00 前下单按当天净值成交）"
+                if abs(amt - it["want"]) >= 1:
+                    note = (f"目标 ¥{it['want']:,.0f}；场内取整{'多买' if gap > 0 else '少买'} ¥{abs(gap):,.0f}"
+                            f"、场内佣金约 ¥{sum(fee_of(False, i['m']['code'], i['amt']) for i in exch):,.0f}，"
+                            "都在这一笔里扣 / 补，整笔钱刚好花完")
             else:
-                buy += amt
-            rows.append({"code": m["code"], "name": str(m["f"].get("name") or FL.fund_name(m["code"]) or m["code"]),
-                         "slot": HG.SLOT_LABEL.get(a["slot"], a["slot"]), "otc": bool(m["otc"]),
-                         "unit": "份" if m["otc"] else "股", "want": want, "amount": amt, "qty": float(qty),
-                         "px": m["px"], "w_tgt": m["slot_tgt_w"], "x": a["x"], "slot_n": m["slot_n"], "note": note})
-        return {"rows": rows, "buy": buy, "lost": lost, "n": sum(1 for r in rows if r["qty"] > 0),
+                step = 2
+                how = f"基金 App 按金额买入 ¥{amt:,.0f}（15:00 前下单按当天净值成交）"
+            if amt > 0:
+                buy += amt + (fee if not it["otc"] else 0.0)
+                fee_tot += fee
+            rows.append({"code": m["code"], "name": name,
+                         "slot": HG.slot_label(self.holdings, m["slot"]), "otc": it["otc"],
+                         "unit": "份", "want": it["want"], "amount": amt, "qty": float(it["qty"]),
+                         "px": it["px"], "px_src": it["px_src"], "fee": fee, "step": step, "how": how,
+                         "w_tgt": m["slot_tgt_w"], "x": it["x"], "slot_n": m["slot_n"], "note": note})
+        rows.sort(key=lambda r: (r["step"] == 0, r["step"]))
+        steps = []
+        if any(r["step"] == 1 for r in rows):
+            steps.append("先买场内：成交价会变，先买它们，看到实际花了多少再算最后一笔")
+        if any(r["step"] == 2 for r in rows):
+            steps.append("再买场外：按下面的金额直接下单")
+        last = next((r for r in rows if r["step"] == 3), None)
+        if last:
+            steps.append(f"最后买「{last['name']}」：用剩下的全部钱买，取整差额和佣金都在这一笔里")
+        steps.append("每买完一笔，回来点「记一笔」，金额和手续费照 App 的成交确认抄")
+        return {"rows": rows, "buy": buy, "lost": lost, "fee": fee_tot, "steps": steps,
+                "n": sum(1 for r in rows if r["qty"] > 0),
                 "after": self.plan["total"] + float(amount), "dead": dead}
 
     # ------------------------------------------------------------ 体检（app.py::_acct_health_view）
@@ -489,7 +575,7 @@ class Portfolio:
         if any(sum(1 for r in rows if r["slot"] == k) > 1 for k in slot_w):
             add("单只最大占比", f"{big['w_now'] * 100:.1f}%（{nm(big)}）", "25%", "偏高",
                 "一只基金的涨跌就能左右整个账户；想分散就给这个位置再挂一只同类基金", float(big["w_now"]) > 0.25)
-            add("单一位置最大占比", f"{smax * 100:.1f}%（{HG.SLOT_LABEL.get(sk, sk)}）", "50%", "偏高",
+            add("单一位置最大占比", f"{smax * 100:.1f}%（{HG.slot_label(self.holdings, sk)}）", "50%", "偏高",
                 "整个位置同涨同跌，相当于半个账户压在一个资产上", smax > 0.50)
         else:
             add("最大仓位", f"{smax * 100:.1f}%（{nm(big)}）", "25%", "偏高",
@@ -501,7 +587,7 @@ class Portfolio:
             add("单只最大浮亏", f"{worst['pl'] * 100:.2f}%（{nm(worst)}）", "15%", "超线",
                 "只说明这一只买贵了，不等于该卖；先看是整体下跌还是它自己的问题", float(worst["pl"]) <= -0.15)
         if dev is not None:
-            add("偏离目标最大", f"{float(dev['dev']) * 100:+.1f}pp（{HG.SLOT_LABEL.get(dev['slot'], dev['slot'])}）", "±5pp",
+            add("偏离目标最大", f"{float(dev['dev']) * 100:+.1f}pp（{HG.slot_label(self.holdings, dev['slot'])}）", "±5pp",
                 "该调了", "和策略目标已经拉开距离；调多少看「调仓」", abs(float(dev["dev"])) >= 0.05)
         return {"items": items, "bad": [i for i in items if i["bad"]], "days": len(self.daily)}
 

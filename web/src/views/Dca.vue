@@ -9,17 +9,23 @@
       </div>
       <template v-if="d && +amount > 0">
         <div class="sum">
-          <div><span>能买进</span><b class="num">¥{{ money(d.buy, 0) }}</b></div>
-          <div><span>剩下</span><b class="num">¥{{ money(+amount - d.buy, 0) }}</b></div>
-          <div><span>投完总额</span><b class="num">¥{{ money(d.after, 0) }}</b></div>
+          <div><span>花出去</span><b class="num">¥{{ money(d.buy, 0) }}</b></div>
+          <div><span>剩下</span><b class="num">¥{{ money(Math.max(0, +amount - d.buy), 0) }}</b></div>
+          <div><span>手续费约</span><b class="num">¥{{ money(d.fee, 0) }}</b></div>
         </div>
         <p class="hint" v-if="d.lost > 1">有 ¥{{ money(d.lost, 0) }} 因为不够一手买不进，这次先不投，下次一起买</p>
-        <div class="sec-t"><span>每只买多少 · 按目标比例</span><span>金额</span></div>
+        <!-- 怎么买：照着顺序下单（2026-11-14 用户「操作的时候应该提示下，否则不知道怎么买」） -->
+        <div class="card how" v-if="d.steps?.length">
+          <div class="how-t">怎么买 · 按这个顺序</div>
+          <ol><li v-for="(s, i) in d.steps" :key="i">{{ s }}</li></ol>
+        </div>
+        <div class="sec-t"><span>每只买多少 · 按下单顺序</span><span>金额</span></div>
         <van-cell-group inset>
           <van-cell v-for="r in d.rows" :key="r.code">
             <template #title>
-              <div class="rn">{{ r.name }}</div>
-              <div class="rs">{{ r.slot }} · 目标 {{ r.w_tgt.toFixed(1) }}%<template v-if="r.slot_n > 1"> · 位置内 {{ r.x.toFixed(0) }}%</template></div>
+              <div class="rn"><span v-if="r.step" class="stp" :class="'s' + r.step">{{ '①②③'[r.step - 1] }}</span>{{ r.name }}</div>
+              <div class="rs">{{ r.code }} · {{ r.otc ? '场外' : '场内' }} · {{ r.slot }} · 目标 {{ r.w_tgt.toFixed(1) }}%<template v-if="r.slot_n > 1"> · 位置内 {{ r.x.toFixed(0) }}%</template></div>
+              <div class="rs howl" v-if="r.how">{{ r.how }}</div>
               <div class="rs warn" v-if="r.note">{{ r.note }}</div>
             </template>
             <template #value>
@@ -30,7 +36,7 @@
             </template>
           </van-cell>
         </van-cell-group>
-        <p class="hint">新钱优先补「低于目标」的位置；场内按整手，场外按金额。投完再看一眼「调仓」页有没有新的偏离</p>
+        <p class="hint">新钱优先补「低于目标」的位置；场内按整手（最接近目标）、场外按金额，取整差额由最后一笔场外补齐。投完再看一眼「调仓」页有没有新的偏离</p>
       </template>
       <p v-else class="empty-tip">输入这次要投的金额，按目标比例算出每只该买多少</p>
     </div>
@@ -69,4 +75,10 @@ watch(amount, v => {
 .rs.warn{ color:#B45309; }
 .rv{ color:var(--up); font-weight:650; font-size:15px; } .rv.zero{ color:var(--muted); font-weight:400; }
 .rb{ margin-top:4px; }
+.how{ margin:12px 12px 0; padding:12px 14px; }
+.how-t{ font-size:13px; font-weight:600; margin-bottom:6px; }
+.how ol{ margin:0; padding-left:18px; font-size:12.5px; line-height:1.75; color:var(--sub); }
+.stp{ display:inline-block; margin-right:5px; font-weight:700; }
+.stp.s1{ color:#1E40AF; } .stp.s2{ color:#0F766E; } .stp.s3{ color:#B45309; }
+.rs.howl{ color:var(--sub); line-height:1.55; }
 </style>

@@ -5,7 +5,16 @@
         <div class="ptitle"><b>调仓</b><span class="tag gray m-only" v-if="d">跟随 {{ d.account.strategy_name }}</span></div>
         <van-skeleton v-if="!d" title :row="8" style="padding:16px" />
         <div v-else class="calc-page">
-          <div class="verdict" :class="d.status.kind">
+          <!-- 还一分钱没投的账户：原来会显示「这一轮不用动」，像是叫人别买（2026-11-14 用户建新账户时发现） -->
+          <div class="verdict stuck" v-if="empty">
+            <van-icon name="info-o" class="vi" />
+            <div>
+              <div class="vt">还没建仓</div>
+              <div class="vs">第一笔钱从「新钱怎么分」进：输入本金，会按策略目标给出先买场内、再买场外、最后一笔补齐的下单顺序</div>
+              <van-button size="small" round type="primary" class="build" :to="`/a/${aid}/dca`">去建仓</van-button>
+            </div>
+          </div>
+          <div class="verdict" :class="d.status.kind" v-else>
             <van-icon :name="d.status.kind === 'orders' ? 'bell' : d.status.kind === 'stuck' ? 'warning-o' : 'passed'" class="vi" />
             <div>
               <div class="vt">{{ title }}</div>
@@ -17,7 +26,7 @@
           </div>
           <div class="calc-sub">
             <span class="hint" v-if="d.orders.length">先卖后买；按支付宝里实际成交的金额，每做完一笔点「记一笔」</span>
-            <router-link class="dca-link" :to="`/a/${aid}/dca`">有新钱怎么分 <van-icon name="arrow" /></router-link>
+            <router-link v-if="!empty" class="dca-link" :to="`/a/${aid}/dca`">有新钱怎么分 <van-icon name="arrow" /></router-link>
           </div>
 
           <template v-if="d.orders.length">
@@ -68,7 +77,7 @@
                 <div class="legend"><span><i class="now"></i>现在</span><span><em></em>目标</span>偏离 ≥ 0.5pp 才下单</div>
               </div>
             </van-collapse-item>
-            <van-collapse-item v-if="d.hold.length" name="h" :title="`不用动 · ${d.hold.length} 只`">
+            <van-collapse-item v-if="d.hold.length && !empty" name="h" :title="`不用动 · ${d.hold.length} 只`">
               <van-cell-group>
                 <van-cell v-for="h in d.hold" :key="h.code + h.slot" is-link :to="`/a/${aid}/fund/${h.code}`">
                   <template #title><div class="hn">{{ h.name }}</div><div class="hs">{{ h.slot }}<template v-if="h.note"> · {{ h.note }}</template></div></template>
@@ -125,6 +134,7 @@ const title = computed(() => {
   const s = d.value.status
   return s.kind === 'orders' ? `该动手了 · ${s.n} 笔${s.liq ? `（含 ${s.liq} 笔清仓）` : ''}` : s.kind === 'stuck' ? '偏离超标，但这一轮买不进' : '这一轮不用动'
 })
+const empty = computed(() => !(Number(d.value?.asset) > 0))
 const shown = computed(() => {
   const o = [...d.value.orders].sort((a, b) => (a.side === b.side ? b.amount - a.amount : a.side === '卖出' ? -1 : 1))
   return filt.value === '全部' ? o : o.filter(x => x.side === filt.value)
@@ -157,6 +167,7 @@ function pxNote(o) {
 .calc-page{ max-width:960px; margin:0 auto; }
 .calc-page .sec-t{ margin:18px 12px 8px; }
 .calc-page .verdict{ margin:12px 12px 0; }
+.calc-page .verdict .build{ margin-top:10px; padding:0 18px; }
 .calc-sub{ display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
   margin:8px 14px 0; }
 .calc-sub .hint{ margin:0; display:block; }

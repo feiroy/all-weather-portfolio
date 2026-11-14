@@ -253,9 +253,12 @@ async function refreshCustoms() {
     const out = [], errs = []
     for (const x of rs) {
       if (x.err) { errs.push(`${x.name}：${x.err}`); continue }
-      const r = x.r, row = r.rows[r.rows.length - 1]
-      out.push({ id: x.id, name: x.name, row, curve: r.curves[x.name],
+      // 按接口返回的实际名字取曲线（同名时后端会加「·自定义」）；页面上统一用策略自己的名字显示
+      const r = x.r, key = r.label || x.name
+      const row = { ...(r.rows.find(y => y.name === key) || r.rows[r.rows.length - 1]), name: x.name }
+      out.push({ id: x.id, name: x.name, row, curve: r.curves[key],
                  periods: r.periods, startActual: r.start_actual,
+                 startReason: r.start_reason || '', dataStart: r.data_start, warmup: r.warmup_days || 0,
                  bucketInfo: r.bucket_info || null })   // 实际生效的分桶，卡片按它显示，不再照抄配置
     }
     customs.value = out
@@ -378,10 +381,13 @@ async function delStrategy(s) {
   try { await deleteStrategy(s.id) } catch (e) { showFailToast(`删除失败：${e.message}`); return }
   refreshCustoms()
 }
+// 起点为什么比所选晚：只认后端给的原因（原来直接比日期字符串，1 月 1 日顺延到 1 月 2 日也会报「成立较晚」）
 const startNote = computed(() => {
-  const diff = customs.value.filter(c => c.startActual && c.startActual !== start.value)
+  const diff = customs.value.filter(c => c.startReason)
   if (!diff.length) return ''
-  return diff.map(c => `「${c.name}」因所选基金成立较晚，实际从 ${c.startActual} 开始`).join('；') +
+  return diff.map(c => c.startReason === 'warmup'
+    ? `「${c.name}」的基金 ${c.dataStart} 才有数据，均线 / 权重窗口要先攒 ${c.warmup} 个交易日，从 ${c.startActual} 开始算收益`
+    : `「${c.name}」因所选基金成立较晚，实际从 ${c.startActual} 开始`).join('；') +
     '。内置三策略也按同一区间计算，保证可比。'
 })
 

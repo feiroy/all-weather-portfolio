@@ -186,6 +186,28 @@ def _strategy_rec(key: str):
     raise ValueError("没有这个策略")
 
 
+def _strategy_assets(key: str) -> list[str]:
+    """策略用到的资产位置：内置看 pipeline.STRATEGY_ASSETS，自定义看策略库里的基金（key 已归一化）。"""
+    from allweather.pipeline import LIVE_STRATEGY, STRATEGY_ASSETS
+    rec = _strategy_rec(key)
+    return list(ST.fund_map(rec)) if rec else list(STRATEGY_ASSETS[LIVE_STRATEGY[key]])
+
+
+def _switch_holdings(a: dict, to: str, P=None) -> tuple[dict, list[str], list[str], list[str]]:
+    """换策略后的位置体系 → (holdings, 新建的位置, 打开的位置, 关闭的位置)。
+
+    预览和真换必须走这一个函数，否则预览的笔数金额会和真下单对不上（11-11 踩过：14 笔 vs 15 笔）。
+    """
+    rec = _strategy_rec(to)
+    hs, added = (HG.ensure_slots(a.get("holdings") or {}, ST.fund_map(rec)) if rec
+                 else (a.get("holdings") or {}, []))
+    held = {r["slot"] for r in (P.plan["rows"] if P is not None else []) if float(r.get("shares") or 0) > 0}
+    # 策略资产 → 账户位置（161119 挂在收益垫上，就是收益垫要开着，而不是另开一个「161119」）
+    use = [HG.slot_for_key(hs, k) or k for k in _strategy_assets(to)]
+    hs, opened, closed = HG.apply_strategy_slots(hs, use, held)
+    return hs, added, opened, closed
+
+
 def _acct_info(aid: str, a: dict) -> dict:
     stg = a.get("strategy") or "B-Con"
     return {"id": aid, "name": a.get("name") or aid, "kind": a.get("kind") or "实盘",
@@ -236,7 +258,14 @@ async def create_account(request: Request):
     src = AC.load(b.get("from")) if b.get("from") else None
     copy_tr = bool(b.get("copy_trades")) and src
     h = (src.get("holdings") if src and src.get("holdings") else HG._default_holdings())
-    aid = AC.create(b.get("name") or "新账户", b.get("kind") or "模拟", b.get("strategy") or "B-Con",
+    stg = b.get("strategy") or "B-Con"
+    if not src:
+        # 新账户：策略不用的内置位置默认关（风险平价 / V3c 没有 10 年国债）。从别的账户复制的配置原样保留
+        try:
+            h, _, _ = HG.apply_strategy_slots(h, _strategy_assets(stg))
+        except (ValueError, KeyError):
+            pass
+    aid = AC.create(b.get("name") or "新账户", b.get("kind") or "模拟", stg,
                     float(src.get("capital") or 0) if copy_tr else float(b.get("capital") or 0),
                     str(src["created"]) if copy_tr else str(b.get("created") or pd.Timestamp.today().date()),
                     {k: HG._norm_slot(v) for k, v in h.items()},
@@ -513,7 +542,7 @@ def _calc_payload(P: Portfolio, a: dict) -> dict:
     slots = []
     for it in p["rows"]:
         if it["slot_first"]:
-            slots.append({"slot": HG.SLOT_LABEL.get(it["slot"], it["slot"]), "now": _r(it["slot_w"] * 100),
+            slots.append({"slot": HG.slot_label(P.holdings, it["slot"]), "now": _r(it["slot_w"] * 100),
                           "tgt": _r(it["slot_tgt_w"] * 100), "dev": _r(it["dev"] * 100)})
     st = P.status()
     return {"status": {k: (_r(v) if isinstance(v, float) else v) for k, v in st.items()},
@@ -530,9 +559,19 @@ async def calc(request, aid, P, a):
 @acct_view
 async def dca(request, aid, P, a):
     amt = float(request.query_params.get("amount") or 0)
-    d = P.dca(amt)
-    d["rows"] = [r | {k: _r(r[k]) for k in ("want", "amount")} | {"qty": _r(r["qty"], 4), "w_tgt": _r(r["w_tgt"] * 100),
-                                                                     "x": _r(r["x"] * 100)} for r in d["rows"]]
+    # 场内按现价算份数（溢价 / 折价时净值会算错手数）；取不到行情就退回净值，绝不因此拦单
+    exch = [r["code"] for r in P.plan["rows"] if not HG.is_otc(r["f"])]
+    prices = {}
+    if amt > 0 and exch:
+        try:
+            from allweather import quote as QUOTE
+            prices = {c: q["price"] for c, q in QUOTE.snapshot(exch).items() if q.get("ok") and q.get("price")}
+        except Exception:  # noqa: BLE001
+            prices = {}
+    d = P.dca(amt, prices)
+    d["rows"] = [r | {k: _r(r[k]) for k in ("want", "amount", "fee")} | {"qty": _r(r["qty"], 4), "w_tgt": _r(r["w_tgt"] * 100),
+                                                                            "x": _r(r["x"] * 100), "px": _r(r["px"], 4)}
+                 for r in d["rows"]]
     return J({"account": _acct_info(aid, a), **{k: (_r(v) if isinstance(v, float) else v) for k, v in d.items()}})
 
 
@@ -638,11 +677,10 @@ async def switch_preview(request, aid, P, a):
     to = str(request.query_params.get("to") or "")
     rec = _strategy_rec(to)
     w_to, diag = strategy_weights(to)
-    # 预览必须按「换过去之后」的位置体系算（和 set_strategy 一样先 ensure_slots）：
+    # 预览必须按「换过去之后」的位置体系算（和 set_strategy 同一个 _switch_holdings）：
     # 否则新基金那 30% 会被摊到别的位置上，笔数、卖出金额、清仓名单全跟真下出来的不一样。
-    hs, added = (HG.ensure_slots(a.get("holdings") or {}, ST.fund_map(rec)) if rec
-                 else (a.get("holdings") or {}, []))
-    Q = Portfolio({**a, "holdings": hs}, w_to) if added else _portfolio(aid, target=to)[0]
+    hs, added, opened, closed = _switch_holdings(a, to, P)
+    Q = Portfolio({**a, "holdings": hs}, w_to) if (added or opened or closed) else _portfolio(aid, target=to)[0]
     liq = [o for o in Q.plan["orders"] if o.get("liq")]
     # 目标为 0 的位置 = 换过去以后会被清掉的位置（原来只比内置策略的 assets 列表，
     # 自定义策略没有那张表，直接按算出来的权重看，逻辑反而更准）
@@ -654,6 +692,7 @@ async def switch_preview(request, aid, P, a):
               "buy": _r(Q.plan["buy"]), "sell": _r(Q.plan["sell"]),
               "liq": [{"name": FL.fund_name(o["code"]) or o["code"], "amount": _r(o["shares"] * o["nav"])} for o in liq],
               "zero": zero, "added": added, "diag": diag,
+              "opened": [HG.slot_label(hs, s) for s in opened], "closed": [HG.slot_label(hs, s) for s in closed],
               "unplaced": [{"name": names.get(k) or ETF_META.get(k, {}).get("name", k),
                             "w": _r(float(w_to.get(k, 0)) * 100), "to": v} for k, v in unp.items()]})
 
@@ -661,18 +700,14 @@ async def switch_preview(request, aid, P, a):
 @acct_view
 async def set_strategy(request, aid, P, a):
     to = str((await request.json()).get("to") or "")
-    rec = _strategy_rec(to)
+    hs, added, opened, closed = _switch_holdings(a, to, P)
     a["strategy"] = to
-    added: list[str] = []
-    if rec:
-        # 换到自定义策略时，给它新加的基金补位置（已有位置一律不动）
-        hs, added = HG.ensure_slots(a.get("holdings") or {}, ST.fund_map(rec))
-        if added:
-            a["holdings"] = hs
+    a["holdings"] = hs
     AC.save(aid, a)
     with _LOCK:
         _P.clear()          # 账户文件变了，Portfolio 缓存全作废（含换策略后的旧对象）
-    return J({"ok": True, "to": to, "to_name": _strategy_name(to), "added": added})
+    return J({"ok": True, "to": to, "to_name": _strategy_name(to), "added": added,
+              "opened": opened, "closed": closed})
 
 
 @acct_view
@@ -815,14 +850,23 @@ async def backtest(request: Request):
             base[f"{n} · 我的操作日"] = f"{n} · 月末"
     else:
         panel = load_panel()
-        rets = panel_returns(panel.loc[start:])   # 每个策略在 run_strategy_backtest 里按自己的资产定起点
+        # 全历史跑权重、只在起点切净值（2026-11-14 用户：「2019 起回撤 3.6%、2020 起回撤 9%」）。
+        # 原来先把行情截到起点再跑：30/75 日均线、20 日权重窗口全都从零攒，起点后两三个月过滤不生效，
+        # 2020-01 起正好撞上 3 月疫情，标普 / 有色 / 能化满仓扛跌，风险平价回撤 -3.39% → -9.07%。
+        rets = panel_returns(panel)
+        s0 = pd.Timestamp(start)
+
+        def _cut(r):
+            nv = r.nv.loc[s0:]
+            n_in = int((r.weight_df.index >= nv.index[0]).sum()) if r.weight_df is not None else int(r.n_rebal)
+            return nv / float(nv.iloc[0]), n_in
+
         for n in names:
-            r = run_strategy_backtest(rets, n, cad)
+            r = run_strategy_backtest(rets, n, cad, track_weights=True)
             lbl = n if cad == "monthly" else f"{n} · {dict(biweekly='双周', weekly='每周')[cad]}"
-            out[lbl] = (r.nv, int(r.n_rebal))
+            out[lbl] = _cut(r)
             if cad != "monthly":
-                r0 = run_strategy_backtest(rets, n)
-                out[f"{n} · 月末"] = (r0.nv, int(r0.n_rebal))
+                out[f"{n} · 月末"] = _cut(run_strategy_backtest(rets, n, track_weights=True))
                 base[lbl] = f"{n} · 月末"
     # 真实可用的最早起点，与本次请求的 start 无关。
     # 前端原来拿「本次返回曲线的首日」反推起点选项，一旦选了 2015，返回曲线就从 2015 起，
