@@ -33,9 +33,30 @@ This file provides guidance to Claude Code when working with code in this reposi
 |---|------|------|
 | 1 | 改代码 | `config.py`(常量) → `pipeline.py`(调用) → `strategy_b.py`/`backtest.py`(引擎) |
 | 2 | 全量回测 | `py main.py`，确认无报错并记录指标 |
-| 3 | 更新文档 | `py main.py` 自动同步 `README.md`（编辑文字改 `README.template.md`）、`docs/index.html`、`docs/charts/` |
-| 4 | 更新 Memory | 有新结论或推翻旧结论时才写 |
-| 5 | 提交 | `git add -A && git commit -m "..." && git push` |
+| 3 | **跑自检** | `./myenv/bin/python scripts/check.sh`（单测 + `doctor.py`）。**每一步开发结束都要跑，红的一条都不许留** |
+| 4 | 更新文档 | `py main.py` 自动同步 `README.md`（编辑文字改 `README.template.md`）、`docs/index.html`、`docs/charts/` |
+| 5 | 更新 Memory | 有新结论或推翻旧结论时才写 |
+| 6 | 提交 | `git add -A && git commit -m "..." && git push` |
+
+### 红了必须处理，不许「解释掉」（2026-11-17 用户「你过程中也有检查，并且会报error，但是你没管」）
+
+用户观察到的就是事实：我连着十几轮跑测试都带着 `13 errors`，每次写一句「沙箱问题，与代码无关」就往下走。
+实际上那 13 条是 `tests/conftest.py` 里 10 行就能修的临时目录问题 —— 修完 **362 passed / 0 error**，
+而那一片红长期遮住的正是「这一轮到底有没有真的全过」。
+
+规则：
+- `pytest` 出现 error / failed、`doctor.py` 出现红项、脚本抛异常、pre-push hook 报错 —— **都算未完成**。
+- 要么修掉，要么在回复里写清「是什么、为什么可以不管、谁负责」；**禁止用「环境问题」「不影响」一句话带过**。
+- 判断「不影响」之前必须先看过堆栈、并试着修一次；修不掉才允许降级说明。
+
+### 命令
+```bash
+./myenv/bin/python scripts/check.sh             # 开发结束必跑：单测 + 数据/口径自检，任一失败退出码 1
+./myenv/bin/python scripts/doctor.py            # 只跑自检
+./myenv/bin/python scripts/doctor.py --fix      # 先补净值再查
+./myenv/bin/python scripts/doctor.py --json     # 给程序读；有红项时退出码 1
+```
+
 ## 行为原则
 | # | 原文 | 含义 |
 |---|------|------|

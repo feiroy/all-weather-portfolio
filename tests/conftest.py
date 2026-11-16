@@ -93,3 +93,16 @@ def synthetic_pct(synthetic_prices):
     pb_pct = pd.Series(np.random.uniform(0, 100, n), index=idx)
     pe_pct = pd.Series(np.random.uniform(0, 100, n), index=idx)
     return pb_pct, pe_pct
+
+
+def pytest_configure(config):
+    """给 pytest 的临时目录换一个自己造的位置。
+
+    当前沙箱的文件系统 shim 对「已存在的目录」做 `mkdir(exist_ok=True)` 会抛 FileExistsError，
+    而 pytest 默认的 `/var/folders/.../pytest-of-root` 一旦存在过就再也建不出来 ——
+    13 个用例会直接 error，跑全量永远带一片红。用唯一路径绕开，别的机器上等价于默认行为。
+    """
+    if not getattr(config.option, "basetemp", None):
+        import os
+        import tempfile
+        config.option.basetemp = os.path.join(tempfile.gettempdir(), f"awpytest-{os.getpid()}")
