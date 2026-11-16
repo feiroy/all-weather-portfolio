@@ -1,0 +1,16 @@
+#!/bin/sh
+# 把公司的全局钩子（~/.git-hooks/<名字>）原样转发一次。
+#
+# 本仓库为了跑提交前自检，把 core.hooksPath 指到了 .githooks；不转发就等于把公司的
+# pre-push / commit-msg / post-* 策略钩子关掉了 —— 那属于私自减功能，不做。
+# pre-commit 不转发：公司那个本身只是个「转发到 .git/hooks/pre-commit」的空壳。
+#
+# 用 argv[0] 判断自己在被当成哪个钩子调用（install-hooks.sh 会给每个名字建软链）。
+set -eu
+name=$(basename "$0")
+dir="${AW_UPSTREAM_HOOKS:-$HOME/.git-hooks}"
+target="$dir/$name"
+if [ -x "$target" ]; then
+  exec "$target" "$@"
+fi
+exit 0

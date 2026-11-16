@@ -51,3 +51,6 @@ web/dist/
 
 # 临时输出
 nohup.out
+
+# 由 scripts/install-hooks.sh 生成
+.githooks/

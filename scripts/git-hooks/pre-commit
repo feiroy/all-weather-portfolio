@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# 提交前自检：单测 + 数据/口径自检。
+#
+# 由 scripts/install-hooks.sh 装到 .githooks/pre-commit，并把本仓库的 core.hooksPath 指过去。
+# 为什么不用 .git/hooks：本机 core.hooksPath 已被公司设成 ~/.git-hooks，那个 pre-commit 只是
+# 「转发到 .git/hooks/pre-commit」——而实测在沙箱里它并不会真的调起来（探针写不出日志）。
+# 指到仓库自己的 .githooks 更可靠，也把公司其余钩子用 _chain 原样转发，不减功能。
+#
+# 跳过：AW_SKIP_CHECK=1 git commit -m "..."
+set -uo pipefail
+
+root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+[ -x "$root/scripts/check.sh" ] || exit 0       # 别的仓库 / 还没装脚本，直接放行
+
+if [ "${AW_SKIP_CHECK:-0}" = "1" ]; then
+  echo "已跳过自检（AW_SKIP_CHECK=1）"
+  exit 0
+fi
+
+cd "$root" || exit 0
+if ! ./scripts/check.sh; then
+  cat <<'EOF'
+
+提交已取消：自检没过。
+  确认是环境问题、且清楚风险时可以 AW_SKIP_CHECK=1 git commit -m "..." 放行；
+  但按 CLAUDE.md 的规矩，红项要么修掉，要么在 commit message 里写清是什么、为什么不影响、谁负责。
+EOF
+  exit 1
+fi
