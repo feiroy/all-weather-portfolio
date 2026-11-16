@@ -55,7 +55,17 @@ This file provides guidance to Claude Code when working with code in this reposi
 ./myenv/bin/python scripts/doctor.py            # 只跑自检
 ./myenv/bin/python scripts/doctor.py --fix      # 先补净值再查
 ./myenv/bin/python scripts/doctor.py --json     # 给程序读；有红项时退出码 1
+bash scripts/install-hooks.sh                   # 装提交前自检（新克隆的仓库跑一次）
+AW_SKIP_CHECK=1 git commit -m "..."             # 明确要放行时用，并在 message 里写清原因
 ```
+
+**自检已经挂到 `git commit` 上**（`scripts/git-hooks/pre-commit` → `scripts/check.sh`）：红就取消提交。
+装在仓库自己的 `.githooks/`，用**仓库级** `core.hooksPath` 生效；公司的 `~/.git-hooks` 里的
+pre-push / commit-msg / post-* 由 `.githooks/_chain` 原样转发，不减功能。
+
+为什么不是 `.git/hooks`：本机 `core.hooksPath` 早被公司设成 `~/.git-hooks`，那个 pre-commit 只是个
+「转发到 `.git/hooks/pre-commit`」的空壳；实测在本机沙箱里它并不会真把 `.git/hooks` 的钩子拉起来
+（写探针验证：提交照过、日志没写）。所以走 `.githooks`。
 
 ## 行为原则
 | # | 原文 | 含义 |
