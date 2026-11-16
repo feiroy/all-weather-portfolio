@@ -407,8 +407,34 @@ This file provides guidance to Claude Code when working with code in this reposi
 py main.py                         # 全量回测（自动增量更新数据 + 报告）
 # flags: --force-fetch  --no-excel  --no-markdown
 python -m allweather.rebalance     # 实盘再平衡
+./myenv/bin/python scripts/doctor.py            # 数据与口径自检（见下）
+./myenv/bin/python scripts/doctor.py --fix      # 先补净值再查
+./myenv/bin/python scripts/doctor.py --json     # 给程序读；有红项时退出码 1
 ```
 CI：`.github/workflows/backtest.yml` 跑 `py main.py`，检查 Sharpe/MDD 边界。
+
+### 出问题先跑自检（2026-11-16 用户「怎么bug这么多」之后加的）
+
+「页面上的数不对」这件事反复出现，根因集中在四类，**都能量化检查**，所以别再靠猜：
+
+| 检查 | 抓的是什么 |
+|---|---|
+| 五组数据最新到哪天 | 少扫一组 = 文件更新了但页面不动 |
+| 每只基金净值停在哪天 | 停住会被 ffill 成直线，市值和今日收益全错 |
+| 场内市价到没到、折溢价多大 | 拿不到就退回净值，用户看到的数和券商不一致 |
+| plan.total vs 曲线末端 / 头卡今日 vs 收益日历 / 市值 vs 份额×价 | 三处口径不自洽 |
+| 这份实例是不是市价口径 | 启动瞬间构造的实例是净值口径 |
+
+入口两个，**同一份逻辑**（`allweather/selfcheck.py`）：`scripts/doctor.py`（红/黄/绿）和 `GET /api/selftest`（JSON）。
+账户整个算不出来时（自定义策略抛错），净值/行情那几条照样跑 —— 线索不能丢。
+
+### 「数据变没变」只有一个入口
+
+`allweather/dataversion.py::data_ver()`。行情 CSV、场内净值 `nav_detail`、场外净值 `fund_lookup.NAV_DIR`、
+估值 `data/valuation/**`、策略库 `strategies.json` **五组全算**，缓存 1 秒（`fresh=True` 立即生效）。
+
+**禁止在任何地方另写一份扫描文件判断新旧** —— 2026-11-16 就是因为场外净值不在版本号里，
+净值补上了、`_P` 不失效，出现「研究页曲线正常、详情页一条直线」这种自相矛盾的现象。
 ## 策略目标框架
 所有改动必须满足各策略的目标约束，按通用红线 → 策略专属约束的优先级逐层检查。
 | 指标 | V3-B 保守增强 | V3c 多元 | V3-B 风险平价 |

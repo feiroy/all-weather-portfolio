@@ -81,24 +81,13 @@ def _r(v, d=2):
 
 
 # ------------------------------------------------------------------ 数据与缓存
-def _data_ver() -> float:
-    fs = list(DATA_DIR.glob("*.csv")) + list((DATA_DIR / "nav_detail").glob("*.csv"))
-    # 自定义策略库也算「数据」：改了策略就该重算目标权重，否则要等下一次行情更新才生效
-    st = DATA_DIR / "strategies.json"
-    if st.exists():
-        fs.append(st)
-    # 场外基金的净值缓存（fund_lookup.NAV_DIR，本机可能指向 rebal/nav）也要算进来。
-    # 不算的话：净值文件更新了，但 Portfolio 面板还是构造时那份，`nav_panel` 的 ffill
-    # 会继续把三周前的值平推到今天 —— 2026-11-16 用户「研究页曲线正常、详情页一条直线」，
-    # 就是这个：研究页直读文件，详情页读缓存面板。
-    try:
-        import fund_lookup as FL
-        d = FL.NAV_DIR
-        if d.exists():
-            fs.extend(d.glob("*.csv"))
-    except Exception:  # noqa: BLE001  没有 fund_lookup 就按老口径
-        pass
-    return max((f.stat().st_mtime for f in fs), default=0.0)
+# 版本号的定义搬到了 allweather/dataversion.py：接口层的缓存和 scripts/doctor.py
+# 必须用同一份判断，否则又会出「文件更新了但页面不动」。这里只留一个别名。
+from allweather.dataversion import data_ver  # noqa: E402
+
+
+def _data_ver(fresh: bool = False) -> float:
+    return data_ver(fresh=fresh)
 
 
 def _live() -> dict:
@@ -1306,6 +1295,23 @@ async def export_report(request: Request):
         return J({"error": "没装 openpyxl，只能导出 Markdown"}, 400)
 
 
+async def selftest(request: Request):
+    """自检：把「页面上的数对不对」的硬约束一次查完，给红/黄/绿。
+
+    与 `scripts/doctor.py` 同一份逻辑（`allweather/selfcheck.py`）——
+    页面上觉得不对就先调这个，不用再猜是数据没拉到还是缓存没失效。
+    """
+    from allweather import selfcheck
+
+    aid = request.query_params.get("acct") or AC.last() or "main"
+    a = AC.load(aid) or {}
+    try:
+        P = _portfolio(aid)[0]
+        return J(selfcheck.run(P, a))
+    except Exception as e:  # noqa: BLE001  账户算不出来时也要把净值/行情查完
+        return J(selfcheck.run(None, a, error=str(e)))
+
+
 async def update(request: Request):
     # 看门狗：任务跑在后台线程里，网络挂住时它永远不会走到 finally，running 一直是 True ——
     # 前端那个按钮就会一直转圈、点不动，只能重启服务（2026-11-11 用户遇到的就是这个）。
@@ -1395,6 +1401,7 @@ routes = [
     Route("/api/market/fund/{code}/fee", fund_fee),
     Route("/api/acct/{aid}/export", export_report),
     Route("/api/update", update, methods=["GET", "POST"]),
+    Route("/api/selftest", selftest),
 ]
 if (DIST / "assets").exists():
     routes.append(Mount("/assets", StaticFiles(directory=DIST / "assets"), name="assets"))
