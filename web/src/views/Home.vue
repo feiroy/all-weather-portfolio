@@ -17,7 +17,7 @@
             <div class="col">
               <!-- 资产卡 -->
               <div class="hero">
-                <div class="k">总金额（元）<span class="asof">净值 {{ d.summary.asof.slice(5).replace('-', '/') }}</span></div>
+                <div class="k">总金额（元）<span class="asof">估值 {{ d.summary.asof.slice(5).replace('-', '/') }}</span></div>
                 <div class="total num">{{ money(d.summary.total) }}</div>
                 <div class="grid3">
                   <div><div class="k">今日收益</div>
@@ -68,8 +68,14 @@
                 <van-cell v-for="h in d.holdings" :key="h.code" is-link :to="`/a/${aid}/fund/${h.code}`" class="fund">
                   <template #title>
                     <div class="fn">{{ h.name }}</div>
-                    <div class="fs">{{ h.code }} · {{ h.otc ? '场外' : '场内' }} · {{ h.slot }}
-                      <span v-if="h.why" class="tag gray">{{ h.why }}</span></div>
+                    <!-- 副标题原来是 nowrap + 省略号的单段文字，徽标跟在后面会被一起截掉
+                         （2026-11-16 实测：DOM 里有 .mpx，屏幕上根本看不见）。
+                         拆成「可省略的文字 + 固定宽的徽标」两段，徽标才不会被吃掉 -->
+                    <div class="fs">
+                      <span class="fsx">{{ h.code }} · {{ h.otc ? '场外' : '场内' }} · {{ h.slot }}<span v-if="h.why" class="tag gray"> {{ h.why }}</span></span>
+                      <!-- 市值已经按市价算了（后端 px_now），这里只补一句「市价 vs 净值」的折溢价 -->
+                      <PremiumTag v-if="h.spot && pq[h.code]" :q="pq[h.code]" class="mpx" />
+                    </div>
                   </template>
                   <template #value>
                     <!-- 两行各带小字标签（用户 2026-11-08：「收益和收益率没任何提示就放个数，纯靠猜含义」）。
@@ -104,6 +110,7 @@ import LineChart from '../components/LineChart.vue'
 import { tipRows } from '../utils/chartTheme'
 import { dateText } from '../utils/chartAxis'
 import MacroSeason from '../components/MacroSeason.vue'
+import PremiumTag from '../components/PremiumTag.vue'
 import UpdateBtn from '../components/UpdateBtn.vue'
 
 const route = useRoute()
@@ -113,8 +120,19 @@ const d = ref(peek(url()) || null)
 const refreshing = ref(false)
 const last = a => a[a.length - 1]
 const toneD = v => tone(v)   // 涨红跌绿由 .hero 内的样式统一控制
+// 折溢价徽标用的行情：单独异步取（接口冷启动约 1 秒，不能让首页等它）。
+// 市值 / 收益已经是市价口径（Portfolio.px_now），这里只补「这个价比净值高还是低」。
+const pq = ref({})
+async function loadPrem() {
+  const codes = [...new Set((d.value?.holdings || []).filter(h => h.held && !h.otc).map(h => h.code))]
+  if (!codes.length) return
+  try {
+    const r = await get(`/api/market/premium?codes=${codes.join(',')}`)
+    pq.value = Object.fromEntries((r.rows || []).map(x => [x.code, x]))
+  } catch { /* 行情拿不到就不显示徽标，首页数字不受影响 */ }
+}
 async function load(fresh = false) {
-  try { d.value = await get(url(), { fresh }) } finally { refreshing.value = false }
+  try { d.value = await get(url(), { fresh }); loadPrem() } finally { refreshing.value = false }
 }
 load(); onActivated(() => load()); watch(aid, () => { d.value = peek(url()) || null; load() })
 watch(dataVer, () => load(true))
@@ -189,7 +207,10 @@ const statusLabel = computed(() => {
 .si.orders{ color:var(--brand); }
 .fund :deep(.van-cell__title){ flex:1 1 auto; min-width:0; }
 .fn{ font-size:15px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.fs{ font-size:12px; color:var(--muted); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+/* 文字段负责省略号，徽标 fixed —— 两段分开，徽标才不会被 nowrap 截断吃掉 */
+.fs{ display:flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); margin-top:2px; }
+.fsx{ min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.mpx{ flex:none; }
 /* 数值块：两列 grid（标签 / 数值），标签左列对齐、数值右列右对齐；
    两行分别是「市值」「收益（收益率）」。原来只放「-72 -1.34%」两个裸数字，
    用户 2026-11-08 反馈「纯靠猜含义」。 */

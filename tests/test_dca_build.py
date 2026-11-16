@@ -76,3 +76,48 @@ def test_without_otc_falls_back_to_floor(P):
     assert by["511130"]["qty"] == 200            # 24,000 / 11,042 = 2.17 → 2 手（没有兜底只能向下）
     assert d["buy"] <= 30000
     assert not any(r["step"] == 3 for r in d["rows"])
+
+
+def test_otc_shares_deduct_subscription_fee(P):
+    """场外份数必须扣申购费（2026-11-16）。
+
+    页面给场外的是「实付金额」（含申购费），份额应该是 `金额 × (1-费率) / 净值`。
+    原来直接用 `金额 / 净值`，161119 费率 0.08% 时 10 万建仓多给约 30 份，
+    跟 App 的确认份额对不上，记「记一笔」时会算少。
+    """
+    from allweather import fees as FEES
+
+    d = P.dca(100000, PX)
+    by = {r["code"]: r for r in d["rows"]}
+    for code in ("161119", "007467"):
+        r = by[code]
+        rate = float(FEES.get(code).get("buy_rate") or 0)
+        fee = round(r["amount"] * rate, 2)          # 和 fee_of 一样按分取整
+        assert r["qty"] == pytest.approx((r["amount"] - fee) / r["px"], abs=1e-3), \
+            f"{code} 的份数没扣申购费（费率 {rate}）"
+
+
+def test_total_spend_equals_amount_with_otc_fee(P):
+    """申购费含在买入金额里：总支出仍正好等于投入的钱，不会超。"""
+    d = P.dca(100000, PX)
+    exch = [r for r in d["rows"] if not r["otc"]]
+    otc = [r for r in d["rows"] if r["otc"]]
+    total = sum(r["amount"] + r["fee"] for r in exch) + sum(r["amount"] for r in otc)
+    assert total == pytest.approx(100000, abs=1.0)
+
+
+def test_order_quantity_fee_rate_contract():
+    """`order_quantity` 的费率契约：传了就扣份额，不传保持老行为。"""
+    from allweather.holdings import order_quantity
+
+    otc = {"unit": "份额", "lot": 1, "min_amount": 1}
+    qty, amt = order_quantity(otc, 10000, 2.0, fee_rate=0.0008)
+    assert amt == 10000
+    assert qty == pytest.approx(10000 * (1 - 0.0008) / 2.0)
+
+    qty0, _ = order_quantity(otc, 10000, 2.0)          # 默认不扣，老调用点不变
+    assert qty0 == pytest.approx(5000)
+
+    exch = {"unit": "股", "lot": 100}
+    q1, a1 = order_quantity(exch, 25000, 110.0, fee_rate=0.0008)   # 场内不看费率
+    assert q1 == 200 and a1 == pytest.approx(22000)

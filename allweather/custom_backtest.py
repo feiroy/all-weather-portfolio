@@ -315,7 +315,12 @@ def live_custom_weights(rec: dict, panel: pd.DataFrame | None = None):
         from allweather.backtest import backtest
         r = backtest(fund_rets[keys], **kw)
         if r.weight_df is None or not len(r.weight_df):
-            raise ValueError("策略算不出今天的权重（回测引擎没返回权重表）")
+            # 最常见的原因就是「某只基金净值停在好几周前」：`prepare_funds` 会把它 ffill 成
+            # 一条常数线，波动率 0，风险平价/逆波动率算出来是 NaN，权重表就空了。
+            # 把话说明白，别让用户对着「回测引擎没返回权重表」猜（2026-11-16）。
+            raise ValueError("策略算不出今天的权重（回测引擎没返回权重表）。"
+                             "常见原因是某只基金的净值没更新，曲线末端是一条平线 —— "
+                             "点右上「更新数据」，或到那只基金的详情页看一眼净值停在哪天")
         w = r.weight_df.iloc[-1].astype(float)
     w = w[w > 0]
     total = float(w.sum())

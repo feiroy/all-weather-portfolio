@@ -17,6 +17,7 @@ import re
 import sys
 import threading
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import numpy as np
@@ -86,6 +87,17 @@ def _data_ver() -> float:
     st = DATA_DIR / "strategies.json"
     if st.exists():
         fs.append(st)
+    # 场外基金的净值缓存（fund_lookup.NAV_DIR，本机可能指向 rebal/nav）也要算进来。
+    # 不算的话：净值文件更新了，但 Portfolio 面板还是构造时那份，`nav_panel` 的 ffill
+    # 会继续把三周前的值平推到今天 —— 2026-11-16 用户「研究页曲线正常、详情页一条直线」，
+    # 就是这个：研究页直读文件，详情页读缓存面板。
+    try:
+        import fund_lookup as FL
+        d = FL.NAV_DIR
+        if d.exists():
+            fs.extend(d.glob("*.csv"))
+    except Exception:  # noqa: BLE001  没有 fund_lookup 就按老口径
+        pass
     return max((f.stat().st_mtime for f in fs), default=0.0)
 
 
@@ -145,7 +157,10 @@ def _portfolio(aid: str, target=None) -> tuple[Portfolio, dict]:
     with _LOCK:
         hit = _P.get(key)
     if hit is not None:
-        return hit, a
+        # 构造时行情还没拉回来 → 整份 plan 是净值口径。行情补上以后要重建一次，
+        # 否则页面永远停在净值（2026-11-16 实测：spot=True 但 mv/px 还是净值）。
+        if hit.used_spot or not hit.spot_ready():
+            return hit, a
     # 算权重（自定义策略要跑一遍回测引擎）和建 Portfolio（读几十条净值序列）都是重活，
     # 必须放在锁外面：
     # ① 锁里跑重活会让所有请求串行排队，页面像卡死；
@@ -332,7 +347,14 @@ async def holding(request, aid, P, a):
     if it is None:
         return J({"error": "这只基金不在当前账户里"}, 404)
     nv = P.nav(code)
-    return J({"account": _acct_info(aid, a), "holding": _hj(P.holding(it)),
+    h = P.holding(it)
+    # 有没有「市价走势」页签：ETF_META 里登记过的场内标才有 price_*.csv
+    has_price = any(str(m.get("code")) == str(code) for m in ETF_META.values())
+    # 净值末端停在哪天：场外基金的缓存没人拉就一直停着，面板 ffill 之后是一条直线，
+    # 看着像「净值没了」。落后的顺手在后台补一次，前端据此提示一句。
+    nav_last, nav_stale = HG.nav_freshness(code)
+    return J({"account": _acct_info(aid, a), "holding": _hj(h),
+              "has_price": has_price, "nav_last": nav_last, "nav_stale": nav_stale,
               "nav": {"dates": [f"{d:%Y-%m-%d}" for d in nv.index], "values": [round(float(v), 4) for v in nv]},
               "trades": [{**t, "shares": _r(t["shares"], 4), "nav": _r(t["nav"], 4), "amount": _r(t["amount"])}
                          for t in P.trades_of(code)]})
@@ -419,6 +441,20 @@ async def holding_chart(request, aid, P, a):
         return HTMLResponse(_frame_doc(inner, h + 160))
 
     # 默认「买卖点」
+    if view == "price":
+        # 场内 ETF 的二级市场收盘价（data/price_*.csv）。场外基金没有这个序列 ——
+        # 申购赎回都按净值成交，前端会把这个页签藏掉，走不到这里。
+        px = HG.price_series(code)
+        if len(px) < 2:
+            return HTMLResponse(_frame_notice(
+                "这只基金没有场内市价历史（场外按净值成交），看「净值走势」就行。"))
+        hist = trend_chart_data(px)
+        d = hist["日"]
+        inner = trend_chart_html(d["labels"], d["prices"], d["windows"]["近1月"]["count"],
+                                 rets=d["rets"], histories=hist, trades=trades,
+                                 store="awTrend.fundPx", default_range="近1月", heading="",
+                                 height=440, label="市价")
+        return HTMLResponse(_frame_doc(inner, 700))
     if len(nv) < 2:
         return HTMLResponse(_frame_notice("这只基金还没有净值数据，拉取后才有走势图。"))
     hist = trend_chart_data(nv)
@@ -463,6 +499,22 @@ def _hold_days(a: dict, code: str, day: str) -> int | None:
         return None
 
 
+def _trade_strategy(b: dict, a: dict, skip: int | None = None) -> str:
+    """这笔单是「跟随哪个策略」时下的 —— 换过策略以后还能回答当时的权重依据。
+
+    2026-11-16 踩过的坑：账户只存一个 strategy 字段（当前值），换过策略就查不出
+    之前的成交是按哪套权重下的，只能靠份额反推。所以每笔记一笔都存一份快照。
+    优先级：前端显式传的 > 原来那笔的（编辑时保留，别把历史冲掉）> 账户当前策略。
+    """
+    if b.get("strategy"):
+        return str(b["strategy"])
+    if skip is not None:
+        old = a.get("trades") or []
+        if 0 <= skip < len(old) and old[skip].get("strategy"):
+            return str(old[skip]["strategy"])
+    return str(a.get("strategy") or "")
+
+
 def _trade_from_body(b: dict, a: dict, skip: int | None = None) -> dict:
     """记一笔 / 改一笔的校验，与 Streamlit 版同：金额、单价 > 0，卖出不超过当时持有。"""
     side, code, slot = b.get("side"), str(b.get("code") or ""), str(b.get("slot") or "")
@@ -489,7 +541,8 @@ def _trade_from_body(b: dict, a: dict, skip: int | None = None) -> dict:
         if shares > held + 1e-6:
             raise ValueError(f"卖不了这么多：到 {day} 只持有 {held:,.2f}，这次要卖 {shares:,.2f}。"
                              "改小金额，或先补录这笔之前漏记的买入。")
-    return {"date": day, "side": side, "slot": slot, "code": code, "shares": round(shares, 4), "nav": nav, "fee": fee}
+    return {"date": day, "side": side, "slot": slot, "code": code, "shares": round(shares, 4), "nav": nav, "fee": fee,
+            "strategy": _trade_strategy(b, a, skip)}
 
 
 @acct_view
@@ -522,7 +575,10 @@ async def trades(request, aid, P, a):
     for t in P.trades_of():
         u = "份" if HG.default_unit(t["code"]) == "份额" else "股" if t["code"] else ""
         f = next((x for x in P.slot_options() if x["code"] == t["code"]), None)
-        rows.append({**t, "unit": (f["unit"] if f else u), "close": t["i"] in closed,
+        # strategy 是记这笔时快照下来的（老记录没有，留空让前端显示「未记录」）
+        stg = str((raw[t["i"]] if 0 <= t["i"] < len(raw) else {}).get("strategy") or "")
+        rows.append({**t, "unit": (f["unit"] if f else u), "close": t["i"] in closed, "strategy": stg,
+                     "strategy_name": _strategy_name(stg) if stg else "",
                      "shares": _r(t["shares"], 4), "nav": _r(t["nav"], 4), "amount": _r(t["amount"]), "fee": _r(t["fee"])})
     codes = []
     for r in rows:
@@ -1046,6 +1102,39 @@ _UPD = {"running": False, "errors": [], "finished": 0.0, "started": 0.0}
 UPD_TIMEOUT = 15 * 60
 
 
+def _refresh_fund_nav() -> list[str]:
+    """把账户里**场外**基金的净值缓存补到最新 —— 「更新数据」按钮的另一半。
+
+    `fetch_all` / `update_nav_detail` 管的是行情和场内净值，场外基金的净值（fund_lookup
+    那套 CSV）原来在任何按钮后面都没人拉：用户点无数次「更新数据」，000217 的净值还是
+    三周前那份，图就一直是一条平线（2026-11-16）。有自带 nav_detail 的场内标直接跳过。
+    """
+    try:
+        import fund_lookup as FL
+    except Exception:  # noqa: BLE001
+        return []
+    codes: set[str] = set()
+    for rec in AC.list_accounts():
+        a = AC.load(rec["id"]) or {}
+        codes |= {str(t.get("code") or "") for t in (a.get("trades") or [])}
+        try:
+            codes |= set(HG.all_codes(a.get("holdings") or {}))
+        except Exception:  # noqa: BLE001  配置坏了不影响别的账户
+            pass
+    out, stuck = [], []
+    for code in sorted(codes - {""}):
+        if HG.nav_detail_series(code) is not None:      # 项目自带明细，归 update_nav_detail 管
+            continue
+        try:
+            ok, msg = FL.ensure_fresh(code)
+        except Exception as e:  # noqa: BLE001
+            ok, msg = False, str(e)[:80]
+        if not ok:
+            stuck.append(f"{code} 净值没更新上：{msg[:80]}")
+    out.extend(stuck)
+    return out
+
+
 def _do_update():
     try:
         from allweather.fetch import fetch_all, fetch_prices, update_nav_detail
@@ -1064,7 +1153,9 @@ def _do_update():
             FEES.refresh(force=False)           # 只补缺失 / 超过 30 天的
         except Exception as e:  # noqa: BLE001
             e5 = [f"申购状态 / 费率没更新上：{str(e)[:120]}（不影响行情，下次再点一次）"]
-        _UPD["errors"] = list(e1) + list(e2) + list(e3) + list(e4) + e5
+        # 场外基金净值：上面四步都不碰它，单独一步补
+        e6 = _refresh_fund_nav()
+        _UPD["errors"] = list(e1) + list(e2) + list(e3) + list(e4) + e5 + e6
     except Exception as e:  # noqa: BLE001
         _UPD["errors"] = [f"更新失败：{str(e)[:160]}"]
     finally:
@@ -1308,4 +1399,35 @@ routes = [
 if (DIST / "assets").exists():
     routes.append(Mount("/assets", StaticFiles(directory=DIST / "assets"), name="assets"))
 routes.append(Route("/{path:path}", spa))
-app = Starlette(routes=routes, middleware=[Middleware(Auth)])
+
+
+def _warm_up() -> None:
+    """启动后先在后台把默认账户算一遍。
+
+    ① 策略权重和净值面板首算 2 秒多，不预热就是「刚启动那次打开特别慢」；
+    ② 顺便**同步**拉一次场内现价（2~3 秒）。估值要用市价，而 `spots_now` 是非阻塞的：
+       不先把缓存填上，第一个请求构造出来的 plan 就是净值口径，得等下一次重建才对
+       （2026-11-16 用户「打开页面很慢」+「怎么还是净值」都是这个链条）。
+    """
+    try:
+        aid = AC.last() or "main"
+        a = AC.load(aid) or {}
+        codes = sorted({str(t.get("code") or "") for t in (a.get("trades") or [])} - {""})
+        if codes:
+            try:
+                from allweather import quote as QUOTE
+                QUOTE.snapshot(codes)
+            except Exception:  # noqa: BLE001  行情慢就慢点，不影响账户计算
+                pass
+        _portfolio(aid)
+    except Exception:  # noqa: BLE001  预热失败不影响正事
+        pass
+
+
+@asynccontextmanager
+async def _lifespan(_app):
+    threading.Thread(target=_warm_up, daemon=True, name="aw-warmup").start()
+    yield
+
+
+app = Starlette(routes=routes, middleware=[Middleware(Auth)], lifespan=_lifespan)

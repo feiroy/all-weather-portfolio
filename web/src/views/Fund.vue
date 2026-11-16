@@ -14,22 +14,28 @@
           </div>
           <div class="meta">
             <span v-if="h.slot" class="chipx">{{ h.slot }}</span>
-            <span v-if="h.w_tgt != null" class="chipx">目标占比 {{ h.w_tgt.toFixed(1) }}%</span>
+            <!-- 目标与实际并排才看得出偏了多少，也避免「占账户」单独占一个胶囊、
+               在手机上折行后只剩它一个孤零零挂在第二行 -->
+            <span v-if="h.w_tgt != null" class="chipx">目标 {{ h.w_tgt.toFixed(1) }}%<template v-if="!h.otc"> · 实际 {{ h.w_now }}%</template></span>
             <!-- side/amount 是再平衡算出来的「这一轮该买卖多少」，没执行前台账里是查不到的，
                  所以写「建议」而不是「本轮」——后者会被读成已经成交 -->
             <span v-if="h.side" class="tag" :class="h.side === '买入' ? 'buy' : 'sell'">{{ h.liq ? '建议清仓' : '建议' + h.side }} ¥{{ money(h.amount, 0) }}</span>
             <span v-else-if="h.note" class="chipx">{{ h.note }}</span>
           </div>
-          <div class="mv num">¥{{ money(h.mv) }}</div>
+          <!-- 场内市值按市价算，折溢价就用全站统一的徽标挂在数字边上 ——
+               不另起一行写「净值口径 ¥21,912 / −125.78 / 差的就是折溢价」，
+               那两个价格在下面栅格里并排摆着，多写一行只会把大数字挤散 -->
+          <div class="mv num">¥{{ money(h.mv) }}<PremiumTag v-if="q && !h.otc" :q="q" class="mvpq" /></div>
           <div class="g">
-            <div><span>今日收益</span><b class="num" :class="tone(h.day)">{{ signed(h.day) }}</b></div>
-            <div><span>今日收益率</span><b class="num" :class="tone(h.day_pct)">{{ h.day_pct == null ? '—' : pct(h.day_pct) }}</b></div>
+            <div><span>今日收益</span><b class="num" :class="tone(showDay)">{{ signed(showDay) }}</b></div>
+            <div><span>今日收益率</span><b class="num" :class="tone(showDayPct)">{{ pct(showDayPct) }}</b></div>
             <div><span>持有收益</span><b class="num" :class="tone(h.hold)">{{ signed(h.hold) }}</b></div>
             <div><span>持有收益率</span><b class="num" :class="tone(h.hold_pct)">{{ pct(h.hold_pct) }}</b></div>
-            <div><span>{{ h.otc ? '份额' : '股数' }}</span><b class="num">{{ money(h.shares, h.otc ? 2 : 0) }}</b></div>
+            <div><span>{{ h.otc ? '份额' : '股数' }}</span><b class="num">{{ qty(h.shares, h.unit) }}</b></div>
             <div><span>成本价</span><b class="num">{{ money(h.cost, 4) }}</b></div>
-            <div><span>最新净值</span><b class="num">{{ money(h.px, 4) }}</b></div>
-            <div><span>占账户</span><b class="num">{{ h.w_now }}%</b></div>
+            <div><span>最新净值</span><b class="num">{{ money(h.nav_px, 4) }}</b></div>
+            <div v-if="h.otc"><span>占账户</span><b class="num">{{ h.w_now }}%</b></div>
+            <div v-else><span>场内市价</span><b class="num">{{ h.spot ? money(h.px, 3) : '—' }}</b></div>
           </div>
         </div>
 
@@ -45,7 +51,10 @@
                     :title="`${h ? h.name : ''} ${sub}`" @load="onFrameLoad" />
             <div v-if="frameLoading" class="frame-mask">正在加载走势…</div>
           </div>
-          <div class="chart-note">{{ note }}</div>
+          <div class="chart-note">
+            <b v-if="d?.nav_stale" class="stale-warn">净值只到 {{ (d.nav_last || '').replace(/-/g, '/') }}，后面的还没更新 —— 正在后台补，稍后刷新就有。</b>
+            {{ note }}
+          </div>
         </div>
 
         <div class="sec-t"><span>它的成交 · {{ d.trades.length }} 笔</span></div>
@@ -73,7 +82,8 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { showFailToast } from 'vant'
 import { get, peek } from '../api'
-import { money, signed, pct, tone } from '../fmt'
+import { money, signed, pct, tone, qty } from '../fmt'
+import PremiumTag from '../components/PremiumTag.vue'
 
 const route = useRoute(), router = useRouter()
 const aid = route.params.aid, code = route.params.code
@@ -83,9 +93,27 @@ get(url).then(x => { d.value = x }).catch(e => showFailToast(e.message))
 const h = computed(() => d.value?.holding)
 const back = () => (window.history.state?.back ? router.back() : router.replace(`/a/${aid}`))
 
-const modes = ['净值走势', '累计盈亏'], sub = ref('净值走势')
+// 市值 / 收益 / 收益率都是后端算好的：场内按市价、场外按净值（Portfolio.px_now），
+// 前端不再自己算一遍 —— 两处各算一份，迟早会对不上。
+// 这里只用 q 拿折溢价徽标（那是「现价 vs 净值」的关系，后端不返回）。
+const q = ref(null)
+get(`/api/market/premium?codes=${code}`)
+  .then(r => { q.value = (r.rows || [])[0] || null })
+  .catch(() => { /* 拿不到行情就不显示徽标，数字不受影响 */ })
+// 今日盈亏由后端从收益日历里取（市值变化 − 当日净流入），当天建仓的也有数，
+// 前端不再需要「今天刚买入 → 显示 —」那套特殊处理
+const showDay = computed(() => h.value?.day)
+const showDayPct = computed(() => h.value?.day_pct)
+
+// 场内 ETF 多一个「市价走势」并默认打开（能变现的是市价，用户对着 App 看的就是这条）；
+// 场外申购赎回都按净值成交，没有第二个价，has_price 为假时这个页签直接不出现
+const modes = computed(() => d.value?.has_price
+  ? ['市价走势', '净值走势', '累计盈亏'] : ['净值走势', '累计盈亏'])
+const sub = ref('净值走势')
+watch(() => d.value?.has_price, v => { sub.value = v ? '市价走势' : '净值走势' }, { immediate: true })
+const viewOf = m => (m === '累计盈亏' ? 'pnl' : m === '市价走势' ? 'price' : 'trade')
 const chartSrc = computed(() =>
-  `/api/acct/${aid}/holding/${encodeURIComponent(code)}/chart?view=${sub.value === '累计盈亏' ? 'pnl' : 'trade'}`)
+  `/api/acct/${aid}/holding/${encodeURIComponent(code)}/chart?view=${viewOf(sub.value)}`)
 
 const frame = ref(null), frameLoading = ref(true), frameH = ref(700)
 const onFrameLoad = () => {
@@ -106,10 +134,11 @@ watch(sub, () => {
   frameH.value = sub.value === '累计盈亏' ? 620 : 700
   frameLoading.value = true
 })
-
-const note = computed(() => sub.value === '净值走势'
-  ? '图内可切区间与日/月/年线，拖动平移、⌘/Ctrl 滚轮缩放、双击复位；悬停或点一下净值线能看到每笔的份额与成交净值。'
-  : '累计盈亏 = 手上还拿着的浮盈 + 已经卖出落袋的实盈（买入算手续费、卖出扣手续费），所以卖掉之后曲线不会掉下来。上面的「持有收益」只算手上这一部分，两者差多少，就是已经卖掉的那部分赚到（或亏掉）的钱。图内也可切区间，拖动平移、⌘/Ctrl 滚轮缩放、双击复位。')
+const note = computed(() => sub.value === '累计盈亏'
+  ? '累计盈亏 = 手上还拿着的浮盈 + 已经卖出落袋的实盈（买入算手续费、卖出扣手续费），所以卖掉之后曲线不会掉下来。上面的「持有收益」只算手上这一部分，两者差多少，就是已经卖掉的那部分赚到（或亏掉）的钱。图内也可切区间，拖动平移、⌘/Ctrl 滚轮缩放、双击复位。'
+  : sub.value === '市价走势'
+  ? '场内二级市场的收盘价，跟券商 App 的行情是同一条线；和「净值走势」的差就是折溢价。上面卡片的市值和收益率都按这条线算。图内可切区间与日/月/年线，拖动平移、⌘/Ctrl 滚轮缩放、双击复位。'
+  : '图内可切区间与日/月/年线，拖动平移、⌘/Ctrl 滚轮缩放、双击复位；悬停或点一下净值线能看到每笔的份额与成交净值。')
 </script>
 <style scoped>
 /* 顶栏标题与其它二级页（SubBar）同字号同字重 */
@@ -132,6 +161,9 @@ const note = computed(() => sub.value === '净值走势'
 @media (max-width:420px){ .g span{ font-size:11px; } .g b{ font-size:13.5px; } }
 .g span{ display:block; font-size:12px; color:var(--muted); }
 .g b{ display:block; font-size:14px; font-weight:600; margin-top:3px; }
+/* 折溢价徽标跟在市值大数字后面：28px 字配 11px 胶囊，靠 vertical-align 对上基线 */
+.mvpq{ margin-left:8px; vertical-align:7px; }
+/* 当天买入这类一句话说明：小而轻，别把卡片写成说明书 */
 /* 电脑端卡片 936 宽，若照手机顺序竖排，右半边整片留白 → 标题块和市值左右分列，
    指标栅格仍横跨整行；手机不参与（900 以下沿用上面的纵向顺序） */
 @media (min-width:900px){
@@ -149,6 +181,8 @@ const note = computed(() => sub.value === '净值走势'
 .frame-mask{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
   background:#fff; color:var(--muted); font-size:13px; }
 .chart-note{ margin:8px 0 4px; font-size:11.5px; line-height:1.65; color:var(--muted); }
+/* 净值断档是「数据没到」，不是走平 —— 这句要能被看见，别混进说明小字里 */
+.stale-warn{ display:block; font-weight:650; color:#B45309; }
 .td{ margin-left:8px; font-size:14px; }
 .act{ margin:18px 16px 0; }
 </style>

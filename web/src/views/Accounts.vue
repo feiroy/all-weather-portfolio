@@ -149,6 +149,19 @@ async function doStrategy({ selectedValues }) {
   showStgChange.value = false
   if (!a) return
   if (to === a.strategy) return showFailToast(`已经在跟随「${stgName(to)}」了`)
+  // 一次交易都没记过的账户：换策略不动任何持仓和成交，别再弹那个「0 笔 / 卖 ¥0 / 买 ¥0」
+  // 的确认框。2026-11-16 踩过：全 0 看着像「就是确认一下」，一滑过去策略其实没换，
+  // 后面按旧策略下了一整轮单，账户卡上却显示新策略，查了一晚上。空仓直接切。
+  // 用 === 0 而不是 !a.n_trades：字段缺失（接口异常）时要退回到确认框那条安全路径，
+  // 绝不能把「不知道有没有交易」当成空账户直接切 —— 那会跳过真正的持仓预览。
+  if (a.n_trades === 0) {
+    try {
+      await post(`/api/acct/${a.id}/strategy`, { to })
+      showSuccessToast(`已改为跟随「${stgName(to)}」`)
+      load(true)
+    } catch (e) { showFailToast(e.message) }
+    return
+  }
   let p
   try { p = await get(`/api/acct/${a.id}/switch-preview?to=${to}`, { fresh: true }) }
   catch (e) { return showFailToast(e.message) }

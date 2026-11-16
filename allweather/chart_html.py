@@ -175,7 +175,7 @@ def _chart_head_block(heading: str, icon_path: str) -> str:
 # 中间每个点位相对区间起点的涨跌幅柱，下方单期涨跌幅柱（涨红跌绿）。
 # ---------------------------------------------------------------------------
 def trend_chart_html(labels, values, win, height=540, rets=None, revision=0, histories=None,
-                     trades=None, store=None, default_range="近1月", heading="走势分析"):
+                     trades=None, store=None, default_range="近1月", heading="走势分析", label="净值"):
     """全历史数据 + 有界索引视窗；只绘制可见部分，不创建超宽画布。
 
     trades：历史成交点 [{date:"2026/10/27", side:"买入", label:"1,234.00 份 @ 2.4567"}]，
@@ -196,7 +196,7 @@ def trend_chart_html(labels, values, win, height=540, rets=None, revision=0, his
     payload = json.dumps({
         "histories": histories, "win": int(win), "height": int(height), "revision": revision,
         "trades": trades or [], "store": store or "awTrend.single",
-        "defaultRange": default_range, "heading": heading,
+        "defaultRange": default_range, "heading": heading, "label": label,
     }, ensure_ascii=False, allow_nan=False).replace("<", "\\u003c")
     template = r"""<style>
 __BASE_CSS__
@@ -348,7 +348,7 @@ __RANGE_BTNS__
     const startPx = valid(P.prices[first]) ? P.prices[first] : null;
     const relAt = i => (startPx && startPx > 0 && valid(P.prices[i])) ? (P.prices[i]/startPx - 1) * 100 : null;
     const stepAt = i => P.rets[i];
-    let grid = '', marks = '', ticks = `<text x="${L}" y="18" font-size="12" fill="#475569">净值</text>`;
+    let grid = '', marks = '', ticks = `<text x="${L}" y="18" font-size="12" fill="#475569">${esc(D.label)}</text>`;
     for (let k = 0; k <= 4; k++) {
       const v = lo + (hi - lo) * k / 4, yy = y(v);
       grid += `<line x1="${L}" y1="${yy}" x2="${W-R}" y2="${yy}" stroke="#EEF2F7"/>`;
@@ -442,8 +442,8 @@ __RANGE_BTNS__
       + `<b id="change" data-value="${valid(change) ? change : ''}" style="color:${color(change)}">${pct(change)}</b></div>`
       + `<div class="summary-prices"><span><small>起点价</small><b id="start-price" data-value="${startPx ?? ''}">${price(startPx)}</b></span>`
       + `<span aria-hidden="true">→</span><span><small>终点价</small><b id="end-price" data-value="${P.prices[last] ?? ''}">${price(P.prices[last])}</b></span></div></div>`
-      + `<div class="amp-row"><span>净值区间振幅</span><b id="amplitude" data-value="${valid(amplitude) ? amplitude : ''}">${valid(amplitude) ? amplitude.toFixed(2)+'%' : '—'}</b>`
-      + `<small>最高净值 ÷ 最低净值 − 1 · 当前 ${visibleCount} 期 / 全历史 ${n} 期</small></div>`
+      + `<div class="amp-row"><span>${esc(D.label)}区间振幅</span><b id="amplitude" data-value="${valid(amplitude) ? amplitude : ''}">${valid(amplitude) ? amplitude.toFixed(2)+'%' : '—'}</b>`
+      + `<small>最高${esc(D.label)} ÷ 最低${esc(D.label)} − 1 · 当前 ${visibleCount} 期 / 全历史 ${n} 期</small></div>`
       + ((nBuy || nSell)
          ? `<div class="amp-row" id="trade-row"><span>历史成交</span><b>买 ${nBuy} 笔 · 卖 ${nSell} 笔</b></div>`
          : '');
@@ -458,7 +458,7 @@ __RANGE_BTNS__
     const sp = P.prices[first];
     const rel = valid(px) && valid(sp) && sp !== 0 ? (px/sp - 1) * 100 : null;
     tip.innerHTML = tipHead(P.dates[i])
-      + tipRow('净值', price(px))
+      + tipRow(esc(D.label), price(px))
       + tipRow(`单${period}涨跌幅`, pct(rt), '', color(rt))
       + tipRow('相对起点', pct(rel), '', color(rel))
       + ((tradeAt.get(i) || {list: []}).list.map(t =>

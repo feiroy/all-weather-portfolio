@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import sys
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 import numpy as np
@@ -427,6 +428,66 @@ class Alerts(unittest.TestCase):
                          nav_by_code={"110020": 0.5, "000961": 1.5})
         self.assertTrue(any("110020" in x["text"] and "浮亏" in x["text"] for x in out["体检"]))
         self.assertFalse(any("000961" in x["text"] for x in out["体检"]))
+
+
+class NavFreshness(unittest.TestCase):
+    """净值断档要报出来。
+
+    场外基金的净值缓存是「拉一次存一份」的，没人拉就停在最后那天，而 `nav_panel` 会
+    一路 ffill 到今天 —— 图上是一条毫无波动的直线。2026-11-16 用户
+    「黄金的净值怎么都没了呢」，就是 000217 的缓存停在 10-23 被平推到 11-16。
+    """
+
+    def _stub(self, last: str):
+        idx = pd.date_range("2026-10-01", last, freq="B")
+        s = pd.Series(np.linspace(1.0, 1.1, len(idx)), index=idx)
+
+        class FakeFL:
+            @staticmethod
+            def expected_nav_date():
+                return pd.Timestamp("2026-11-16")
+
+            @staticmethod
+            def ensure_fresh(code):
+                return True, "ok"
+
+        return s, FakeFL
+
+    def test_stale_nav_is_flagged_and_kicked(self):
+        s, fake = self._stub("2026-10-23")
+        kicked = []
+        with patch.object(HG, "nav_series", lambda c, ensure=False: s), \
+             patch.object(HG, "nav_detail_series", lambda c, detail_dir=None: None), \
+             patch.object(HG, "_fl", lambda: fake), \
+             patch.object(HG, "_kick_nav", lambda c: kicked.append(c)):
+            stamp, stale = HG.nav_freshness("000217")
+        self.assertEqual(stamp, "2026-10-23")
+        self.assertTrue(stale, "停在 10-23 的净值必须报落后，不能画一条平线了事")
+        self.assertEqual(kicked, ["000217"], "落后要在后台补一次")
+
+    def test_fresh_nav_is_silent(self):
+        s, fake = self._stub("2026-11-16")
+        kicked = []
+        with patch.object(HG, "nav_series", lambda c, ensure=False: s), \
+             patch.object(HG, "nav_detail_series", lambda c, detail_dir=None: None), \
+             patch.object(HG, "_fl", lambda: fake), \
+             patch.object(HG, "_kick_nav", lambda c: kicked.append(c)):
+            stamp, stale = HG.nav_freshness("000217")
+        self.assertEqual(stamp, "2026-11-16")
+        self.assertFalse(stale)
+        self.assertEqual(kicked, [])
+
+    def test_own_detail_series_never_goes_online(self):
+        """场内 ETF 走项目自带的 nav_detail，不该因为「比应公布日晚」就去联网。"""
+        s, fake = self._stub("2026-10-23")
+        kicked = []
+        with patch.object(HG, "nav_series", lambda c, ensure=False: s), \
+             patch.object(HG, "nav_detail_series", lambda c, detail_dir=None: s), \
+             patch.object(HG, "_fl", lambda: fake), \
+             patch.object(HG, "_kick_nav", lambda c: kicked.append(c)):
+            _, stale = HG.nav_freshness("511130")
+        self.assertFalse(stale)
+        self.assertEqual(kicked, [])
 
 
 if __name__ == "__main__":

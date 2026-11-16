@@ -48,3 +48,6 @@ data/accounts/*.bak-*
 # H5 前端
 web/node_modules/
 web/dist/
+
+# 临时输出
+nohup.out

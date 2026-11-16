@@ -13,6 +13,7 @@
           <div><span>卖出</span><b class="num down">¥{{ money(tot.sell, 0) }}</b><small>{{ tot.ns }} 笔</small></div>
           <div><span>净投入</span><b class="num">¥{{ money(tot.net, 0) }}</b><small>还在基金里</small></div>
         </div>
+        <p class="follow">跟随「{{ d.account.strategy_name }}」<template v-if="oldTrades"> · 其中 {{ oldTrades }} 笔是换策略前记的</template></p>
         <div class="card exec" v-if="plan.length">
           <div class="ch"><b>本轮执行进度</b><span class="num">{{ matched }} / {{ plan.length }} 笔</span></div>
           <div class="bar"><i :style="{ width: (plan.length ? matched / plan.length * 100 : 0) + '%' }"></i></div>
@@ -37,7 +38,7 @@
                   <div class="t1"><span class="tag" :class="cls(t.side)">{{ t.side }}</span>
                     <span v-if="t.close" class="tag liq">清仓</span>
                     <span class="tn">{{ t.name }}</span></div>
-                  <div class="t2 num" v-if="t.code">{{ t.code }} · {{ money(t.shares, t.unit === '股' ? 0 : 2) }} {{ t.unit }} × {{ money(t.nav, 4) }}<template v-if="t.fee"> · 费 {{ money(t.fee) }}</template></div>
+                  <div class="t2 num" v-if="t.code">{{ t.code }} · {{ qty(t.shares, t.unit) }} {{ t.unit }} × {{ money(t.nav, 4) }}<template v-if="t.fee"> · 费 {{ money(t.fee) }}</template><template v-if="t.strategy && t.strategy !== d.account.strategy"> · 当时跟「{{ short(t.strategy_name) }}」</template></div>
                 </template>
                 <template #value><b class="num ta" :class="{ 买入: 'up', 卖出: 'down' }[t.side] || ''">¥{{ money(t.amount) }}</b></template>
               </van-cell>
@@ -60,7 +61,7 @@ import { computed, ref, onActivated, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { showConfirmDialog, showSuccessToast, showFailToast } from 'vant'
 import { get, peek, del, dataVer } from '../api'
-import { money } from '../fmt'
+import { money, qty } from '../fmt'
 import TabBar from '../components/TabBar.vue'
 
 const route = useRoute(), router = useRouter()
@@ -105,6 +106,8 @@ const tot = computed(() => {
   return { buy, nb: s('买入').length, sell, ns: s('卖出').length, net: buy - sell }
 })
 const cls = s => (s === '买入' ? 'buy' : s === '卖出' ? 'sell' : 'gray')
+// 换过策略以后，哪些笔是按旧策略下的单（2026-11-16 那次只能靠份额反推，现在每笔都有快照）
+const oldTrades = computed(() => rows.value.filter(t => t.strategy && t.strategy !== d.value?.account?.strategy).length)
 // 金额只显示绝对值：方向由「买入 / 卖出」标签 + 涨红跌绿表达，不再叠 +/- 号
 const short = n => (n.length > 9 ? n.slice(0, 9) + '…' : n)
 const wk = s => '周' + '日一二三四五六'[new Date(s).getDay()]
@@ -131,6 +134,7 @@ async function remove(t) {
 .sum > div{ min-width:0; text-align:center; }
 .sum span{ display:block; font-size:12px; color:var(--muted); } .sum b{ display:block; font-size:16px; margin-top:4px; }
 .sum small{ font-size:11px; color:var(--muted); }
+.follow{ margin:8px 14px 0; padding:0 2px; font-size:12px; color:var(--muted); }
 .filt{ margin-top:12px; padding:0 12px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .fsel{ display:inline-flex; align-items:center; gap:5px; max-width:180px; padding:5px 10px;
   border:1px solid var(--line); border-radius:16px; background:#fff; color:var(--sub); font-size:12.5px; }

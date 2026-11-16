@@ -27,6 +27,8 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -297,6 +299,29 @@ def reset_to_default() -> dict:
     return h
 
 
+def price_series(code: str) -> pd.Series:
+    """场内 ETF 的二级市场收盘价序列（data/price_{资产}.csv）。
+
+    只有 ETF_META 里登记过的场内标的才有：场外基金申购赎回都按净值成交，没有第二个价，
+    这里返回空 Series，调用方据此隐藏「市价走势」。
+
+    文件名不是 asset 名的一律照抄：短融那只的历史文件叫 ``price_bond_short_etf.csv``。
+    """
+    asset = next((s for s, m in ETF_META.items() if str(m.get("code")) == str(code)), None)
+    if not asset:
+        return pd.Series(dtype=float)
+    fname = {"bond_short": "bond_short_etf"}.get(asset, asset)
+    fp = DATA_DIR / f"price_{fname}.csv"
+    if not fp.exists():
+        return pd.Series(dtype=float)
+    try:
+        d = pd.read_csv(fp, parse_dates=["date"]).dropna(subset=["close"]).set_index("date").sort_index()
+        s = pd.to_numeric(d["close"], errors="coerce").dropna()
+        return s[s > 0].rename(code)
+    except Exception:  # noqa: BLE001  格式不对就当没有，别让详情页整个挂掉
+        return pd.Series(dtype=float)
+
+
 def nav_detail_series(code: str, detail_dir: Path | None = None) -> pd.Series | None:
     """项目自带的净值明细（data/nav_detail/{asset}.csv）→ 复权单位净值。
 
@@ -362,6 +387,65 @@ def nav_series(code: str, ensure=False) -> pd.Series:
     except Exception as exc:  # noqa: BLE001
         print(f"[holdings] nav_series({code}) 失败: {type(exc).__name__}: {exc}")
         return pd.Series(dtype=float)
+
+
+# ---------------------------------------------------------------- 净值新鲜度
+_NAV_KICK: dict[str, float] = {}
+_NAV_KICK_GAP = 1800.0        # 同一只基金半小时内不重复联网补
+
+
+def _fl():
+    """fund_lookup 只在 Streamlit/接口进程里有（streamlit_app 在 sys.path 上）。"""
+    try:
+        import importlib
+        return importlib.import_module("fund_lookup")
+    except ImportError:  # pragma: no cover - 纯计算环境
+        return None
+
+
+def nav_freshness(code: str) -> tuple[str | None, bool]:
+    """(末端净值日, 是否落后于应公布日)。落后就在后台补一次，绝不阻塞请求。
+
+    场外基金的净值是「拉一次存一份」的：没人拉就永远停在最后那天，而面板会把它
+    ffill 到今天 —— 画出来是一条毫无波动的直线。2026-11-16 用户
+    「黄金的净值怎么都没了呢」，其实是 000217 的本地缓存停在 10-23，
+    10-23 的 2.9019 被一路平推到 11-16，看着像净值断了。
+
+    场内 ETF 走项目自带的 data/nav_detail（由数据更新脚本维护），这里不联网。
+    """
+    s = nav_series(code)
+    if not len(s):
+        return None, False
+    last = s.index[-1]
+    stamp = f"{last:%Y-%m-%d}"
+    if nav_detail_series(code) is not None:     # 自带明细，不归这里管
+        return stamp, False
+    FL = _fl()
+    if FL is None:
+        return stamp, False
+    try:
+        behind = last < FL.expected_nav_date()
+    except Exception:  # noqa: BLE001  判断不了就当新鲜，别乱报警
+        return stamp, False
+    if behind:
+        _kick_nav(code)
+    return stamp, bool(behind)
+
+
+def _kick_nav(code: str) -> None:
+    now = time.time()
+    if now - _NAV_KICK.get(code, 0.0) < _NAV_KICK_GAP:
+        return
+    _NAV_KICK[code] = now
+
+    def run() -> None:
+        FL = _fl()
+        try:
+            FL.ensure_fresh(code)
+        except Exception:  # noqa: BLE001  断网/该基金没净值，下次再说
+            pass
+
+    threading.Thread(target=run, daemon=True, name="aw-nav").start()
 
 
 def nav_panel(holdings: dict, ensure=False) -> pd.DataFrame:
@@ -543,18 +627,22 @@ def plan_invest(slots: list[dict], amount: float) -> list[dict]:
     return out
 
 
-def order_quantity(h: dict, amount: float, nav: float) -> tuple[float, float]:
+def order_quantity(h: dict, amount: float, nav: float, fee_rate: float = 0.0) -> tuple[float, float]:
     """把目标金额换成可下单的数量与实际金额。
 
     场内：按 100 股取整；场外：按元，受最小申购金额限制（默认 1 元）。
     返回 (数量, 实际金额)；净值为 0/缺失时返回 (0, 0)。
+
+    场外的 `amount` 是**实付金额**（含申购费），份额要扣掉费再除净值 —— 和
+    `_trade_from_body` 的 `shares = (amount - fee) / nav` 同一口径。不传 `fee_rate`
+    时按 0 处理，即「金额全用于买份额」（老调用点的行为不变）。
     """
     if not nav or nav <= 0 or amount <= 0:
         return 0.0, 0.0
     if is_otc(h):
         min_amt = float(h.get("min_amount") or 1.0)
         amt = amount if amount >= min_amt else (min_amt if amount > 0 else 0.0)
-        return amt / nav, amt
+        return (amt * (1.0 - float(fee_rate or 0.0))) / nav, amt
     lot = int(h.get("lot") or 100)
     shares = int(amount / nav / lot) * lot
     return float(shares), shares * nav

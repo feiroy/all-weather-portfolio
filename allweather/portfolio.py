@@ -7,11 +7,13 @@ H5 前端（api/server.py）和 Streamlit 版（streamlit_app/app.py）共用这
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 import pandas as pd
 
 from . import holdings as HG
+from . import fees as FEES
 from .config import ETF_META
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "streamlit_app"))
@@ -25,8 +27,15 @@ MONEY_OUT = ("转出", "出金")
 LEGACY_MONEY = MONEY_IN + MONEY_OUT
 
 
-def min_order(tgt_amt: float) -> float:
-    """单只基金值不值得单独下一笔：目标金额的 5%，至少 1 元（见 app.py 同名函数的说明）。"""
+def min_order(tgt_amt: float, asset: float = 0.0) -> float:
+    """单只基金值不值得单独下一笔。
+
+    门槛按**账户规模**的 0.5% 定，不是按这一只的目标金额 —— 后者对重仓惩罚过重：
+    161119 目标 6.7 万，5% 就是 3,377 元，欠配 2,500 也不提示（2026-11-16 用户：
+    「怎么不提示我买入 161119」）。传了 asset 用前者，没传退回旧口径（兼容 streamlit）。
+    """
+    if asset > 0:
+        return max(100.0, abs(asset) * 0.005)
     return max(1.0, abs(tgt_amt) * 0.05)
 
 
@@ -53,14 +62,84 @@ class Portfolio:
             c = str(t.get("code") or "")
             if c and (c not in self.first_trade or d < self.first_trade[c]):
                 self.first_trade[c] = d
+        # 场内实时价：估值口径要跟券商 App 一致（能变现的是市价，不是净值）。
+        # 放在重放之前取，重放最后一天才能直接用市价算市值 —— 这样曲线终点、头卡总资产、
+        # 收益日历三者是同一口径，不会各差一个折溢价。失败就空着退回净值。
+        self._trade_codes = sorted({str(t.get("code") or "") for t in self.trades} - {""})
+        self._spot: dict[str, dict] = {}
+        self._spot_at = 0.0
         self.daily, self.pos, self.cost, self.cash, self.units = self._replay()
         self.last = self.panel.index[-1] if len(self.panel) else pd.Timestamp.today().normalize()
         self.slot_w = HG.slot_weights(target_w, self.holdings)
         self.active_codes = {c for s in HG.active(self.holdings) for c in HG.codes(self.holdings[s])}
         self.cfg_codes = set(HG.all_codes(self.holdings))
         self.plan = self._plan()
+        self.used_spot = bool(self._spot)        # 这份 plan 是不是市价口径（见 api 层的缓存判断）
+
+    def spot_ready(self) -> bool:
+        """行情现在到位了没有（会触发一次 2 秒节流的取数）。"""
+        return bool(self.spot)
+
 
     # ------------------------------------------------------------ 净值
+    def _spot_prices(self) -> dict[str, dict]:
+        """场内 ETF 的二级市场价（券商口径）。取不到的代码不会出现在结果里。
+
+        **不阻塞**：缓存里有就用，没有就先按净值算一遍、后台去补（`quote.spots_now`）。
+        这个函数在每次构造 Portfolio 时都会跑，同步等行情会把整个服务拖住。
+        """
+        if not self._trade_codes:
+            return {}
+        try:
+            from . import quote as QUOTE
+            return QUOTE.spots_now(self._trade_codes)
+        except Exception:  # noqa: BLE001  —— 行情挂了就退回净值，绝不让页面 500
+            return {}
+
+    @property
+    def spot(self) -> dict[str, dict]:
+        """行情快照。**每次都问一遍**，不把构造时那一份存死。
+
+        api 层会把 Portfolio 实例缓存好几分钟（`_P`），构造时行情可能还没拉回来 ——
+        存死就等于市价永远不生效（2026-11-16 实测：接口里 spot=False、页面上净值口径）。
+        底层是内存字典查询，2 秒节流一次，代价可以忽略。
+        """
+        now = time.time()
+        if now - self._spot_at > 2.0:
+            self._spot_at, self._spot = now, self._spot_prices()
+        return self._spot
+
+    def px_now(self, code: str, col: pd.Series) -> tuple[float, float]:
+        """(当前价, 昨日同口径价)。场内取市价，场外/取不到取净值。
+
+        两个价格必须同口径：拿市价配净值算「今日收益」，会把折溢价当成当天涨跌。
+        所以市价那条用行情给的当日涨跌幅反推昨收。
+        """
+        nav_px = float(col.iloc[-1]) if len(col) else 0.0
+        nav_prev = float(col.iloc[-2]) if len(col) > 1 else nav_px
+        if self._is_otc(code):
+            return nav_px, nav_prev
+        q = self.spot.get(str(code))
+        if not q or nav_px <= 0:
+            return nav_px, nav_prev
+        px = float(q["price"])
+        chg = q.get("chg")
+        try:
+            chg = float(chg) if chg is not None else None
+        except (TypeError, ValueError):
+            chg = None
+        prev = (px / (1.0 + chg)) if (chg is not None and chg > -1) else nav_prev
+        return px, prev
+
+    def _is_otc(self, code: str) -> bool:
+        """本账户里是不是**场外**持有 —— 看配置的买卖单位，不看有没有场内行情。
+
+        161119 是 LOF，场内有报价，但用户是场外申购的、赎回也按净值。拿它的市价估值
+        会凭空多出一个折价（2026-11-16 实测 -0.09%，账户级差 57 元）。
+        """
+        meta = HG.fund_meta(self.holdings, code)[1]
+        return HG.is_otc(meta) if meta else HG.default_unit(code) == "份额"
+
     def nav(self, code: str) -> pd.Series:
         if code in self.panel.columns:
             col = self.panel[code].dropna()
@@ -142,7 +221,25 @@ class Portfolio:
                         pos.pop(code, None)
                         cost.pop(code, None)
                 # 历史台账里遗留的「转入 / 转出」：本模型没有资金进出，直接忽略
-            cur_mv = {c: sh * v for c, sh in pos.items() if (v := self.nav_on(c, d))}
+            # 最后一天（也就是「今天」）用市价估：场内 ETF 能变现的是二级市场价。
+            # 前面的历史只有净值存档，只能按净值算 —— 这是当时唯一有的口径。
+            is_last = d == idx[-1]
+            if is_last:
+                # 昨收也得换成同口径，否则「市价今收 − 净值昨收」会把折溢价的变化
+                # 当成当天涨跌记进收益日历。只调昨天就持有、今天没动过的那部分：
+                # 今天新买的要靠 flow 抵消，换了会把本金也算成收益。
+                for c in list(prev_mv):
+                    if prev_mv[c] <= 0 or self._is_otc(c):
+                        continue
+                    nv = self.nav(c)
+                    nav_prev = float(nv.iloc[-2]) if len(nv) > 1 else 0.0
+                    if nav_prev > 0:
+                        prev_mv[c] = (prev_mv[c] / nav_prev) * self.px_now(c, nv)[1]   # 昨日份额 × 市价昨收
+            cur_mv: dict[str, float] = {}
+            for c, sh in pos.items():
+                v = self.px_now(c, self.nav(c))[0] if is_last else self.nav_on(c, d)
+                if v:
+                    cur_mv[c] = sh * v
             mv = sum(cur_mv.values())
             day = {}
             for code in set(prev_mv) | set(cur_mv) | set(flow):
@@ -214,6 +311,13 @@ class Portfolio:
 
     # ------------------------------------------------------------ 今日（app.py::_held_day）
     def held_day(self, code, shares, px, px_prev, prev_day=None) -> tuple[float, float | None]:
+        """老持仓的当日价差盈亏。**当天新买的这里返 0**，别拿它做「今日收益」。
+
+        它算的是 (今价 − 昨收) × 份额，前提是「昨天就有这些份额」。今天才建仓的
+        没有这一段，所以只能给 0 —— 于是页面会显示「今日收益 —、今日收益率 —」，
+        看着像没算出来（2026-11-16 用户：「这个为啥展示不出来」）。
+        当天买入的真实盈亏是「今市值 − 买入金额」，见 `_today_total` / `by_day`。
+        """
         shares, px, px_prev = float(shares or 0), float(px or 0), float(px_prev or 0)
         if shares <= 0 or px <= 0:
             return 0.0, None
@@ -221,6 +325,14 @@ class Portfolio:
         if f is not None and prev_day is not None and f > pd.Timestamp(prev_day):
             return 0.0, None
         return (px - px_prev) * shares, ((px / px_prev - 1) * 100 if px_prev > 0 else None)
+
+    def _today_total(self) -> float:
+        """整个账户今天的盈亏 = 市值变化 − 当日净流入（= 收益日历里那一格）。
+
+        这个口径对「今天刚建仓」也成立：昨市值 0、流入 = 买入金额，
+        今日盈亏 = 今市值 − 买入金额 = 建仓后的浮动盈亏，和券商 App 一致。
+        """
+        return float(sum(r[0] for r in self.by_day.get(self.last, {}).values()))
 
     # ------------------------------------------------------------ 调仓计划（app.py::_hg_plan）
     def _plan(self, slot_w: dict | None = None) -> dict:
@@ -238,13 +350,13 @@ class Portfolio:
                     continue
                 col = self.panel[code].dropna()
                 if len(col):
-                    v += sh * float(col.iloc[-1])
+                    v += sh * self.px_now(code, col)[0]
                     seen.add(code)
             if v > 0:
                 mv_by_slot[s] = v
         asset = float(sum(mv_by_slot.values())) + cash
         rows, orders, by_code = [], [], {}
-        buy_total = sell_total = mv_total = today = 0.0
+        buy_total = sell_total = mv_total = 0.0
         counted: dict[str, str] = {}
         for s in HG.active(h):
             funds = HG.funds(h[s])
@@ -256,19 +368,17 @@ class Portfolio:
             for f, x in zip(funds, HG.share_of(h[s])):
                 code = f["code"]
                 col = self.panel[code].dropna() if code in self.panel.columns else pd.Series(dtype=float)
-                px = float(col.iloc[-1]) if len(col) else 0.0
-                px_prev = float(col.iloc[-2]) if len(col) > 1 else px
+                px, px_prev = self.px_now(code, col)
                 sh = float(self.pos.get(code, 0) or 0)
                 cst = float(self.cost.get(code, 0) or 0)
                 items.append({"f": f, "x": float(x), "code": code, "px": px, "px_prev": px_prev,
+                              "nav_px": (float(col.iloc[-1]) if len(col) else 0.0),
                               "px_prev_day": (col.index[-2] if len(col) > 1 else None),
                               "shares": sh, "cost": cst, "mv": sh * px, "dup": counted.get(code),
                               "pl": ((px / cst - 1) if (cst > 0 and px > 0) else None)})
                 counted.setdefault(code, s)
             slot_mv = sum(it["mv"] for it in items if not it["dup"])
             mv_total += slot_mv
-            today += sum(self.held_day(it["code"], it["shares"], it["px"], it["px_prev"],
-                                       it["px_prev_day"])[0] for it in items if not it["dup"])
             slot_w = (slot_mv / asset) if asset else 0.0
             moved = abs(tgt - slot_mv) >= max(1.0, asset * 0.005)
             for i, it in enumerate(items):
@@ -279,10 +389,13 @@ class Portfolio:
                     note = "缺净值"
                 elif it["dup"]:
                     note = f'已在「{HG.slot_label(h, it["dup"])}」计入'
-                elif not moved or abs(diff) < min_order(tgt * it["x"]):
+                elif not moved or abs(diff) < min_order(tgt * it["x"], asset):
                     note = ""
                 else:
-                    qty, amt = HG.order_quantity(f, abs(diff), it["px"])
+                    # 场外买入：diff 是实付金额，份额要扣掉申购费；卖出是赎回费，不在这里扣
+                    qty, amt = HG.order_quantity(
+                        f, abs(diff), it["px"],
+                        float(FEES.get(it["code"]).get("buy_rate") or 0.0) if diff > 0 else 0.0)
                     if qty <= 0:
                         note = "不足一手"
                     elif diff > 0:
@@ -300,21 +413,15 @@ class Portfolio:
                                    "amount": amt, "liq": liq})
                     by_code[it["code"]] = {"side": side, "amount": amt, "qty": qty}
                 rows.append(it)
-        other_mv = {c: sh * float(self.nav_on(c, self.last) or 0)
+        other_mv = {c: sh * self.px_now(c, self.nav(c))[0]
                     for c, sh in self.pos.items() if sh > 0 and c not in self.active_codes}
         other = [{"code": c, "mv": v, "in_cfg": c in self.cfg_codes} for c, v in other_mv.items() if v > 0]
-        for c, sh in self.pos.items():
-            if float(sh or 0) <= 0 or c in self.active_codes:
-                continue
-            nv = self.nav(c)
-            if len(nv) > 1:
-                today += self.held_day(c, float(sh), float(nv.iloc[-1]), float(nv.iloc[-2]), nv.index[-2])[0]
         total = mv_total + sum(o["mv"] for o in other) + cash
         base = self.invested_now()
         return {"asset": asset, "cash": cash, "mv": mv_total, "mv_all": mv_total + sum(o["mv"] for o in other),
                 "total": total, "other": other, "rows": rows, "orders": orders, "by_code": by_code,
                 "has_acct": self.has_acct,
-                "buy": buy_total, "sell": sell_total, "today": today,
+                "buy": buy_total, "sell": sell_total, "today": self._today_total(),
                 "pnl": (total - base) if base > 0 else 0.0,
                 "pnl_pct": ((total / base - 1) if base > 0 else 0.0)}
 
@@ -337,11 +444,11 @@ class Portfolio:
     # ------------------------------------------------------------ 给前端的结构
     def other_item(self, code: str, why: str) -> dict:
         nv = self.nav(code)
-        px = float(nv.iloc[-1]) if len(nv) else 0.0
-        px_prev = float(nv.iloc[-2]) if len(nv) > 1 else px
+        px, px_prev = self.px_now(code, nv)
         sh, cst = float(self.pos.get(code, 0) or 0), float(self.cost.get(code, 0) or 0)
         meta = HG.fund_meta(self.holdings, code)[1] or {}
         return {"code": code, "f": meta, "slot": why, "x": 1.0, "slot_n": 1, "px": px, "px_prev": px_prev,
+                "nav_px": (float(nv.iloc[-1]) if len(nv) else 0.0),
                 "px_prev_day": (nv.index[-2] if len(nv) > 1 else None), "shares": sh, "cost": cst, "mv": sh * px,
                 "pl": ((px / cst - 1) if (cst > 0 and px > 0) else None),
                 "otc": HG.is_otc(meta) if meta else (HG.default_unit(code) == "份额"),
@@ -358,12 +465,19 @@ class Portfolio:
         """一只基金 → 前端行（数值不格式化，前端自己排版）。"""
         code = it["code"]
         held = it["shares"] > 0
-        day, day_pct = self.held_day(code, it["shares"], it["px"], it["px_prev"], it.get("px_prev_day"))
+        # 今日盈亏取收益日历里今天那一格（市值变化 − 当日净流入）。
+        # 不用 held_day：那条公式要「昨天就有这些份额」，当天建仓的只能给 0，
+        # 页面就成了「今日收益 —、今日收益率 —」，用户以为算不出来。
+        row = self.by_day.get(self.last, {}).get(str(code))
+        day, day_pct = (row[0], row[1]) if row else (None, None)
         hold = it["mv"] - it["shares"] * it["cost"]
         return {"code": code, "name": str(it["f"].get("name") or FL.fund_name(code) or code),
                 "slot": HG.slot_label(self.holdings, it["slot"]), "otc": bool(it["otc"]),
                 "unit": "份" if it["otc"] else "股", "slot_n": it.get("slot_n", 1), "x": it.get("x", 1.0),
                 "dup": bool(it.get("dup")), "held": held, "shares": it["shares"], "px": it["px"],
+                # px 是估值用的价（场内=市价），nav_px 是基金净值 —— 两个都要给前端：
+                # 「最新净值」那格显示 nav_px，「场内市价」显示 px，不能互相顶替
+                "nav_px": it.get("nav_px"), "spot": bool(code in self.spot and not it["otc"]),
                 "cost": it["cost"], "mv": it["mv"], "day": day if held else None,
                 "day_pct": day_pct if held else None, "hold": hold if held else None,
                 "hold_pct": (it["pl"] * 100 if (held and it["pl"] is not None) else None),
@@ -445,7 +559,6 @@ class Portfolio:
           没有场外可兜底时退回向下取整，剩下的钱如实写进「剩下」；
         - 每行带 ``step``（①场内 ②场外 ③兜底）和 ``how``（怎么下这一笔），整体给 ``steps``。
         """
-        from . import fees as FEES  # noqa: PLC0415
         prices = prices or {}
         slots, meta, dead = {}, {}, []
         for it in self.plan["rows"]:
@@ -465,6 +578,10 @@ class Portfolio:
             r = FEES.get(code).get("buy_rate") or 0.0
             return round(amt * r, 2)
 
+        def rate_of(code: str) -> float:
+            """场外申购费率：份额要按「金额扣掉费」算，不能拿实付金额直接除净值。"""
+            return float(FEES.get(code).get("buy_rate") or 0.0)
+
         items = []
         for a in HG.plan_invest(list(slots.values()), float(amount)):
             m = meta.get(a["code"])
@@ -483,7 +600,8 @@ class Portfolio:
             lots = int(round(it["want"] / unit)) if absorb else int(it["want"] / unit)
             it["qty"], it["amt"] = float(lots * it["lot"]), lots * unit
         for it in otcs[1:]:
-            it["qty"], it["amt"] = HG.order_quantity(it["m"]["f"], it["want"], it["px"])
+            it["qty"], it["amt"] = HG.order_quantity(it["m"]["f"], it["want"], it["px"],
+                                                     rate_of(it["m"]["code"]))
         if absorb:
             floor_amt = float(absorb["m"]["f"].get("min_amount") or 1.0)
 
@@ -496,7 +614,11 @@ class Portfolio:
                 worst["qty"] -= worst["lot"]
                 worst["amt"] = worst["qty"] * worst["px"]
             absorb["amt"] = max(0.0, round(rest(), 2))
-            absorb["qty"] = absorb["amt"] / absorb["px"] if absorb["px"] > 0 else 0.0
+            # 兜底这笔的 amt 是「付出去多少钱」（含申购费），份额得扣掉费再除净值 ——
+            # 和 `_trade_from_body` 的 shares = (amount - fee) / nav 同一口径，
+            # 否则页面给的份数比 App 确认的多（161119 费率 0.08%，10 万建仓会多出 30 份）
+            absorb["qty"] = ((absorb["amt"] - fee_of(True, absorb["m"]["code"], absorb["amt"]))
+                             / absorb["px"] if absorb["px"] > 0 else 0.0)
 
         rows, buy, lost, fee_tot = [], 0.0, 0.0, 0.0
         gap = sum(i["amt"] - i["want"] for i in exch)          # 场内取整差（正 = 多买）
@@ -607,6 +729,12 @@ class Portfolio:
                 out.append([c, round(float(pnl), 2), None if pct is None else round(float(pct), 4), state, act])
             if out:
                 detail[f"{dt:%Y-%m-%d}"] = sorted(out, key=lambda r: -r[1])
+        # 最后一天是市价口径（见 _replay），而 equity 的前一天还是净值 —— 直接相减会把
+        # 折溢价的变化算成当天涨跌。用当日明细合计盖掉，跟用户点开格子看到的数一致。
+        if len(day) > 1:
+            rows = detail.get(f"{d.index[-1]:%Y-%m-%d}")
+            if rows:
+                day.iloc[-1] = sum(r[1] for r in rows)
         return {"dates": [f"{x:%Y-%m-%d}" for x in d.index],
                 "nav": [round(float(v), 6) for v in d["nav"]],
                 "pnl": [round(float(v), 2) for v in d["pnl"]],

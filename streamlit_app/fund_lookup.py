@@ -227,16 +227,29 @@ def expected_nav_date(now: pd.Timestamp | None = None) -> pd.Timestamp:
 
 
 def is_stale(code: str) -> bool:
-    """缓存是否落后：最后一条净值早于应公布日，且距上次拉取已超过 1 小时（节假日/QDII 晚一天公布时不反复请求）。"""
+    """缓存是否落后：最后一条净值早于应公布日，且过了宽限期（免得反复请求接口）。
+
+    宽限期分两档，因为「落后」有两种完全不同的成因：
+
+    - 落后 7 天以内：今天净值还没公布 / QDII 晚一天，属正常。宽限 1 小时，切页不重复打接口。
+    - 落后超过 7 天：缓存真的断了，直接判落后、不再看 mtime —— 这时候的宽限期只会帮倒忙：
+      文件刚被别处写过一次（哪怕是写坏的短文件），mtime 是新的，就会被当成「刚拉过」而不补。
+      2026-11-16 实测：截断到 10-23 的 000217，「更新数据」点了十几次都没反应。
+    """
     p = NAV_DIR / f"{code}.csv"
     if not p.exists():
         return True
     d = load_cached(code)
     if d is None or d.empty:
         return True
-    if d.index[-1] >= expected_nav_date():
+    expect = expected_nav_date()
+    if d.index[-1] >= expect:
         return False
-    return (pd.Timestamp.now() - pd.Timestamp.fromtimestamp(p.stat().st_mtime)) > pd.Timedelta(hours=1)
+    gap = (expect - d.index[-1]).days
+    if gap > 7:
+        return True                      # 断档了，别管刚才是谁写的文件，直接补
+    age = pd.Timestamp.now() - pd.Timestamp.fromtimestamp(p.stat().st_mtime)
+    return age > pd.Timedelta(hours=1)
 
 
 def ensure_fresh(code: str) -> tuple[bool, str]:

@@ -15,6 +15,7 @@
 - 净值：``api.fund.eastmoney.com/f10/lsjz``，一页 20 条按日期倒序，取第一条的 DWJZ。
 
 缓存：现价 30 秒、净值 10 分钟、取失败 5 分钟（失败也要缓存，否则断网时每次切页都卡超时）。
+例外是估值口径的 `spots_now`：过期也返回（最多 6 小时），只在后台补新的 —— 见该函数注释。
 """
 from __future__ import annotations
 
@@ -37,6 +38,7 @@ _EM_NAV = "https://api.fund.eastmoney.com/f10/lsjz"
 SPOT_TTL = 30.0      # 现价：秒级够用，切页不重复打接口
 NAV_TTL = 600.0      # 净值：一天一个，10 分钟刷一次不影响判断
 FAIL_TTL = 300.0     # 失败也别立刻重试，断网时不能把页面拖住
+STALE_MAX = 6 * 3600.0   # 估值用的老价最多认这么久（跨交易日还挂昨天的价才会误导）
 
 # 溢价分档：阈值从高到低排，(下限, key, 文案)。用于「买入提示」的颜色与阻断级别。
 BANDS = (
@@ -216,3 +218,60 @@ def premium_of(code: str) -> dict | None:
     """单只的溢价信息，取不到返回 None（页面据此决定是否显示这一行）。"""
     r = snapshot([code]).get(str(code))
     return r if r and r.get("ok") else None
+
+
+# ---------------------------------------------------------------- 非阻塞现价（估值用）
+_fetching: set[str] = set()
+
+
+def spots_now(codes: list[str]) -> dict[str, dict]:
+    """**不等待**的现价：缓存里有就立刻给（过期也给），缺的在后台补。
+
+    账户估值只需要现价（净值从本地 CSV 读），而东财现价一个请求就要 2~3 秒
+    （本机走代理）。同步等它会把整个接口一起拖住 —— 2026-11-16 用户
+    「现在打开页面很慢」，就是 `Portfolio` 构造时同步拉行情拖的，连图表 iframe 都卡住。
+
+    **过期也要返回**：这里给的是估值口径，不是下单报价。只认 30 秒内的价会让
+    `Portfolio.spot` 在 30 秒后变空 —— 折溢价徽标消失、重建的 plan 又退回净值，
+    同一页面两次刷新两个数（2026-11-16 实测 `px=109.3` 但 `spot=False`）。
+    旧价 + 后台刷新，比口径来回翻要稳得多。
+    """
+    codes = [str(c) for c in dict.fromkeys(codes) if c]
+    now, out, miss = time.time(), {}, []
+    with _lock:
+        for c in codes:
+            stamp, val = _spot.get(c, (0.0, None))
+            if val and now - stamp < STALE_MAX:
+                out[c] = val
+            # 有过价就按 SPOT_TTL 刷；从来没取到过按 FAIL_TTL 退避，别每次请求都重试
+            if now - stamp >= (SPOT_TTL if val else FAIL_TTL):
+                miss.append(c)
+    if miss:
+        _kick(miss)
+    return out
+
+
+def _kick(codes: list[str]) -> None:
+    """后台线程去拉这批现价。同一批正在拉就不重复打（页面切来切去很频繁）。"""
+    with _lock:
+        todo = [c for c in codes if c not in _fetching]
+        _fetching.update(todo)
+    if not todo:
+        return
+
+    def run() -> None:
+        try:
+            got = _spots(todo)
+        except Exception:  # noqa: BLE001
+            got = {}
+        with _lock:
+            stamp = time.time()
+            for c in todo:
+                v = got.get(c)
+                # 刷新失败要保留上一次的价（老价好过没有），但时间戳照样往前走，
+                # 否则每个请求都会再踢一次后台线程、东财会被打成筛子
+                old = (_spot.get(c) or (0.0, None))[1]
+                _spot[c] = (stamp, v or old)
+            _fetching.difference_update(todo)
+
+    threading.Thread(target=run, daemon=True, name="aw-spot").start()
