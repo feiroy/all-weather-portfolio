@@ -407,12 +407,40 @@ class Portfolio:
                            "otc": HG.is_otc(f), "w_now": (0.0 if it["dup"] else it["mv"] / asset) if asset else 0.0,
                            "w_tgt": tgt_w * it["x"], "dev": ((slot_w - tgt_w) if i == 0 else 0.0),
                            "slot_w": slot_w, "slot_tgt_w": tgt_w, "slot_first": i == 0, "slot_n": len(items)})
-                if side:
-                    orders.append({"date": f"{self.last:%Y-%m-%d}", "slot": s, "code": it["code"], "side": side,
-                                   "shares": round(float(qty), 4), "nav": round(it["px"], 4), "fee": 0.0,
-                                   "amount": amt, "liq": liq})
-                    by_code[it["code"]] = {"side": side, "amount": amt, "qty": qty}
                 rows.append(it)
+        # 账户不留现金：买入只能由「卖出到账 + 现金」支付。
+        # 原来不校验：卖出 0、现金 0 时照样给出「买入 ¥1,967」，钱没有出处 ——
+        # 用户只能理解成「系统又要我加钱」，或者怀疑比例算错了。2026-11-17 用户：
+        # 「昨天买的时候是按推荐比例买的，怎么又要买 1960」。
+        # 缺口按「能用的钱」等比缩减，缩到不足一手 / 低于最低申购的直接不下单，行上写明原因。
+        avail = sell_total + cash
+        need = max(0.0, buy_total - avail)
+        if need > 0.005:
+            k = (avail / buy_total) if buy_total > 0 else 0.0
+            for it in [x for x in rows if x["side"] == "买入"]:
+                rate = float(FEES.get(it["code"]).get("buy_rate") or 0.0)
+                qty, amt = HG.order_quantity(it["f"], it["amount"] * k, it["px"], rate)
+                if qty <= 0 or amt <= 0:
+                    it.update({"side": "", "qty": 0.0, "amount": 0.0,
+                               "note": f"这轮没钱买（卖出 {sell_total:,.0f} + 现金 {cash:,.0f} 不够）"})
+                else:
+                    it.update({"qty": qty, "amount": amt,
+                               "note": f"钱只够买这么多（总缺口 ¥{need:,.0f}，要补走「新钱怎么分」）"})
+        # 下单行与买卖合计从 rows 重建（上面可能刚缩减过）
+        orders, by_code, buy_total, sell_total = [], {}, 0.0, 0.0
+        for it in rows:
+            if not it["side"]:
+                continue
+            it["liq"] = bool(it["liq"]) if it["side"] == "卖出" else False
+            orders.append({"date": f"{self.last:%Y-%m-%d}", "slot": it["slot"], "code": it["code"],
+                           "side": it["side"], "shares": round(float(it["qty"]), 4),
+                           "nav": round(it["px"], 4), "fee": 0.0, "amount": float(it["amount"]),
+                           "liq": it["liq"]})
+            by_code[it["code"]] = {"side": it["side"], "amount": float(it["amount"]), "qty": float(it["qty"])}
+            if it["side"] == "买入":
+                buy_total += float(it["amount"])
+            else:
+                sell_total += float(it["amount"])
         other_mv = {c: sh * self.px_now(c, self.nav(c))[0]
                     for c, sh in self.pos.items() if sh > 0 and c not in self.active_codes}
         other = [{"code": c, "mv": v, "in_cfg": c in self.cfg_codes} for c, v in other_mv.items() if v > 0]
@@ -420,7 +448,7 @@ class Portfolio:
         base = self.invested_now()
         return {"asset": asset, "cash": cash, "mv": mv_total, "mv_all": mv_total + sum(o["mv"] for o in other),
                 "total": total, "other": other, "rows": rows, "orders": orders, "by_code": by_code,
-                "has_acct": self.has_acct,
+                "has_acct": self.has_acct, "need": need,
                 "buy": buy_total, "sell": sell_total, "today": self._today_total(),
                 "pnl": (total - base) if base > 0 else 0.0,
                 "pnl_pct": ((total / base - 1) if base > 0 else 0.0)}
@@ -439,6 +467,7 @@ class Portfolio:
         w = over[0]
         return {"kind": "stuck", "n": len(over), "max_dev": abs(w["dev"]), "slots": [it["slot"] for it in over],
                 "gap": abs(w["dev"]) * p["asset"], "lot": w["px"] * int(w["f"].get("lot") or 100),
+                "need": float(p.get("need") or 0.0),
                 "note": w.get("note") or ""}
 
     # ------------------------------------------------------------ 给前端的结构

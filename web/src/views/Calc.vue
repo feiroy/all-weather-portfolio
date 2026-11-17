@@ -21,7 +21,7 @@
               <div class="vs" v-if="d.status.kind === 'orders'">
                 卖出 <b class="num down">¥{{ money(d.sell, 0) }}</b>　买入 <b class="num up">¥{{ money(d.buy, 0) }}</b>
               </div>
-              <div class="vs" v-else>{{ d.status.kind === 'stuck' ? '有位置偏离超过 0.5%，但缺口不够一手，先不动' : '每个位置都在目标 ±0.5% 以内，不折腾省手续费' }}</div>
+              <div class="vs" v-else>{{ d.status.kind === 'stuck' ? stuckText : '每个位置都在目标 ±0.5% 以内，不折腾省手续费' }}</div>
             </div>
           </div>
           <div class="calc-sub">
@@ -135,6 +135,20 @@ const title = computed(() => {
   return s.kind === 'orders' ? `该动手了 · ${s.n} 笔${s.liq ? `（含 ${s.liq} 笔清仓）` : ''}` : s.kind === 'stuck' ? '偏离超标，但这一轮买不进' : '这一轮不用动'
 })
 const empty = computed(() => !(Number(d.value?.asset) > 0))
+// 「买不进」要说清为什么：是整手卖不掉，还是这轮根本没卖出钱、缺口得靠新钱。
+// 2026-11-17 用户：「昨天买的时候是按推荐比例买的，怎么又要买 1960」——
+// 就是这句没写清楚：账户不留现金，买入只能由卖出到账支付，缺口属于「要加钱」的范畴。
+const stuckText = computed(() => {
+  const s = d.value?.status || {}
+  const big = [...(d.value?.slots || [])].sort((a, b) => Math.abs(b.dev) - Math.abs(a.dev))[0]
+  const who = big ? `「${big.slot}」偏离 ${big.dev > 0 ? '+' : ''}${Number(big.dev).toFixed(2)}pp` : '有位置偏离超过 0.5%'
+  const need = Math.round(Number(s.need || 0))
+  if (s.note === '不足一手' && need >= 1) {
+    return `${who}，但一手就 ¥${Math.round(Number(s.lot || 0)).toLocaleString()}、卖不动；其余位置要补回目标还差 ¥${need.toLocaleString()}，想补就从「新钱怎么分」进`
+  }
+  if (need >= 1) return `${who}；这一轮没有卖出、账户也不留现金，要补回目标还差 ¥${need.toLocaleString()}（从「新钱怎么分」进）`
+  return `${who}，缺口不到一手，先不动`
+})
 const shown = computed(() => {
   const o = [...d.value.orders].sort((a, b) => (a.side === b.side ? b.amount - a.amount : a.side === '卖出' ? -1 : 1))
   return filt.value === '全部' ? o : o.filter(x => x.side === filt.value)
