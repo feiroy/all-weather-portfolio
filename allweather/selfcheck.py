@@ -159,6 +159,66 @@ def cache_checks(P) -> list[dict]:
     return out
 
 
+# ------------------------------------------------------------------ 策略权重用的是谁的基金
+def strategy_checks(acct: dict) -> list[dict]:
+    """内置策略的目标权重，是不是拿**我实际持有的基金**算的。
+
+    2026-11-16 用户：「我要买场内和场外基金混合验证，如果我不问，都不知道你里面的算法策略
+    都没适配」。这条检查把「哪几个位置已经换成你的基金算、哪几个没换成、为什么」摊开，
+    免得又出现「换了 3 只基金，权重却和原来一样」这种没人能看出来的静默。
+
+    相关性那一条是防「位置挂错」：把黄金联接放进 A股 位置，权重照样算得出来，
+    但算的不是用户以为的那个策略。相关性低就点名，不算红（配置是用户自己定的）。
+    """
+    from . import holdings as HG
+    from .config import ETF_META
+    from .pipeline import LIVE_STRATEGY, STRATEGY_ASSETS
+    import pandas as pd
+
+    hs = acct.get("holdings") or {}
+    stg = str(acct.get("strategy") or "B-Con")
+    if stg.startswith("custom:"):
+        return [_c("stg.custom", OK, "跟随自定义策略",
+                   "自定义策略的权重本来就按策略里那几只基金算，不涉及适配")]
+    name = LIVE_STRATEGY.get(stg, stg)
+    assets = set(STRATEGY_ASSETS.get(name, []))
+    used, skipped, odd = [], [], []
+    for slot in HG.active(hs):
+        if slot not in assets:
+            continue
+        blend, info = HG.slot_returns(hs, slot)
+        label = HG.SLOT_LABEL.get(slot, slot)
+        if blend is None:
+            if info.get("kind") != "default":
+                skipped.append(f"{label}（{info.get('why')}）")
+            continue
+        codes = "/".join(info["codes"])
+        used.append(f"{label}→{codes}")
+        dflt = str(ETF_META.get(slot, {}).get("code") or "")
+        if dflt:
+            ref = HG.nav_series(dflt)
+            if len(ref) > 60:
+                pair = pd.DataFrame({"a": blend, "b": ref.pct_change(fill_method=None)}).dropna()
+                if len(pair) > 60:
+                    corr = float(pair["a"].corr(pair["b"]))
+                    if corr < 0.5:
+                        odd.append(f"{label} 挂的 {codes} 和 {dflt} 日收益相关性只有 {corr:.2f}")
+    out = []
+    out.append(_c("stg.basis", OK if used else WARN,
+                  f"{name} 的目标权重按你的 {len(used)} 个位置算" if used
+                  else f"{name} 的目标权重按项目默认标的算（你没有换过基金）",
+                  "；".join(used),
+                  "" if used else "想按自己买的基金算，在「选基配置」里把位置换成你那只"))
+    if skipped:
+        out.append(_c("stg.skip", WARN, "这几个位置仍按项目默认标的算：" + "；".join(skipped),
+                      "净值缺失或历史太短时不能替换，否则波动率会算成 0",
+                      "点右上「更新数据」把净值补齐，或换一只历史够长的基金"))
+    if odd:
+        out.append(_c("stg.role", WARN, "位置里挂的基金和这个资产角色不太像", "；".join(odd),
+                      "权重照样算得出来，但算的不是你以为的那个策略；确认一下是不是放错了位置"))
+    return out
+
+
 # ------------------------------------------------------------------ 汇总
 def run(P=None, acct: dict | None = None, blocking_quotes: bool = False,
         error: str | None = None) -> dict:
@@ -172,6 +232,7 @@ def run(P=None, acct: dict | None = None, blocking_quotes: bool = False,
     checks += data_checks()
     checks += nav_checks(acct)
     checks += quote_checks(acct, blocking=blocking_quotes)
+    checks += strategy_checks(acct)
     if P is not None:
         checks += value_checks(P)
         checks += cache_checks(P)

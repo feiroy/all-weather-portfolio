@@ -50,6 +50,7 @@ BENCH_COL = {"B-RP": "V3-B 风险平价(20d)_100% RP", "B-Con": "V3-B 保守增�
 _W: dict = {}
 _P: dict = {}
 _SW: dict = {}          # 自定义策略的目标权重缓存：(策略key, 数据版本) → (权重, 诊断)
+_WF: dict = {}          # 按账户持仓算的内置策略权重：(策略key, 持仓指纹, 数据版本) → (权重, 原始权重, 诊断)
 # 用可重入锁：`_live()` / `strategy_weights()` / `_portfolio()` 之间会互相调用，
 # 普通 Lock 一旦有人在持锁时调了另一个（2026-11-12 就这么挂过一次），
 # 同一线程重入会**永久阻塞**，整个事件循环跟着死，所有接口都不响应。
@@ -91,7 +92,11 @@ def _data_ver(fresh: bool = False) -> float:
 
 
 def _live() -> dict:
-    """三个内置策略的目标权重（含趋势过滤）与原始权重 + 行情面板 —— 按数据版本缓存一份。"""
+    """三个内置策略的目标权重（含趋势过滤）与原始权重 + 行情面板 —— 按数据版本缓存。
+
+    这里的权重是**项目默认标的**口径（live["w"] / live["w0"]），只当基准对照用；
+    账户实际下单的权重走 `_w_full()`，那一个按账户的选基配置算。
+    """
     ver = _data_ver()
     with _LOCK:
         if _W.get("ver") != ver:
@@ -104,19 +109,58 @@ def _live() -> dict:
                        "w0": {k: v[1] for k, v in ws.items()}})
             _P.clear()
             _SW.clear()
+            _WF.clear()
         return _W
 
 
-def strategy_weights(key: str | None) -> tuple[dict, dict]:
+def _hold_sig(hs: dict | None) -> str:
+    """选基配置指纹。定义在 holdings 里，Streamlit 和接口层共用同一份。"""
+    return HG.holdings_sig(hs)
+
+
+def _w_full(key: str, a: dict | None) -> tuple[dict, dict, dict]:
+    """内置策略 → (目标权重, 趋势过滤前的原始权重, 诊断)，**按账户实际持有的基金算**。
+
+    2026-11-16 用户：「我要买场内和场外基金混合验证，如果我不问，都不知道你里面的算法策略
+    都没适配」。原来三个内置策略一律用项目默认的 8 只 ETF 序列算权重，用户拿 006131 /
+    161119 / 000217 去买，波动率和均线都不一样，分到的钱自然对不上。
+
+    结果按 (策略, 选基配置指纹, 数据版本) 缓存：算一次要跑两遍回测引擎（约 0.2 秒），
+    每次切页都重算没必要。
+    """
+    live = _live()
+    hs = (a or {}).get("holdings") or {}
+    if not hs:
+        return (live["w"].get(key, live["w"]["B-Con"]),
+                live["w0"].get(key, live["w0"]["B-Con"]), {"used": [], "skipped": []})
+    ck = (key, _hold_sig(hs), live["ver"])
+    with _LOCK:
+        hit = _WF.get(ck)
+    if hit is not None:
+        return hit
+    from allweather.pipeline import live_target_weights
+    info: dict = {}
+    w, w0 = live_target_weights(key, live["panel"], holdings=hs, info=info)
+    val = (w, w0, info)
+    with _LOCK:
+        if len(_WF) > 64:
+            _WF.clear()
+        _WF[ck] = val
+    return val
+
+
+def strategy_weights(key: str | None, a: dict | None = None) -> tuple[dict, dict]:
     """策略 key → (目标权重, 诊断)。内置三策略走 pipeline，`custom:<id>` 走策略库 + 回测引擎。
 
+    传了账户（`a`）就按**这个账户实际持有的基金**算内置策略的权重；不传就是项目默认标的口径。
     自定义策略按 (key, 数据版本) 缓存：它的权重靠跑一遍回测引擎算（约 0.2~2 秒），
     每次切页都重算没必要；改了策略文件或行情，_data_ver() 会变，缓存自然失效。
     """
     live = _live()
     key = str(key or "B-Con")
     if not key.startswith("custom:"):
-        return live["w"].get(key, live["w"]["B-Con"]), {}
+        w, _w0, info = _w_full(key if key in live["w"] else "B-Con", a)
+        return w, info
     ck = (key, live["ver"])
     with _LOCK:
         hit = _SW.get(ck)
@@ -157,7 +201,7 @@ def _portfolio(aid: str, target=None) -> tuple[Portfolio, dict]:
     #    2026-11-12 就是上一版把它挪进 `with _LOCK` 里，导致服务整整卡住一小时。
     # 先算权重再建 Portfolio 的顺序仍然保留：算权重时会把新基金的净值拉进本地缓存，
     # Portfolio 建面板才读得到它（否则新加的第 10 只基金定不出价）。
-    w = strategy_weights(stg)[0]
+    w = strategy_weights(stg, a)[0]
     P = Portfolio(a, w)
     with _LOCK:
         for k in [k for k in _P if k[0] == aid and k[3] == stg]:
@@ -686,9 +730,8 @@ async def health(request, aid, P, a):
 
 
 # ------------------------------------------------------------------ 选基配置 / 换策略
-def _note(k: str, asset: str) -> str:
-    live = _live()
-    b, f = float(live["w0"][k].get(asset, 0) or 0), float(live["w"][k].get(asset, 0) or 0)
+def _note(w0: dict, w: dict, asset: str) -> str:
+    b, f = float(w0.get(asset, 0) or 0), float(w.get(asset, 0) or 0)
     if b > 0 and f <= 1e-9:
         return "趋势过滤 → 0"
     if f > b * 1.05 + 1e-4:
@@ -701,12 +744,22 @@ async def weights(request, aid, P, a):
     from allweather.rebalance import STRATEGIES
     live = _live()
     act = set(HG.active(P.holdings))
+    # 三个内置策略的权重都按**这个账户实际持有的基金**算，同时把项目默认标的的权重一起给出来，
+    # 页面才能回答「换了 3 只基金以后权重到底差在哪」。
+    ws, w0s, infos = {}, {}, {}
+    for k in KEYS:
+        w, w0, info = _w_full(k, a)
+        ws[k], w0s[k], infos[k] = w, w0, info
+    stg = a.get("strategy") or "B-Con"
+    sub = infos.get(stg) or infos.get("B-Con") or {}
     assets = [x for x in ETF_META if any(x in STRATEGIES[k]["assets"] for k in KEYS)]
     rows = [{"asset": x, "name": ETF_META[x]["name"], "code": ETF_META[x]["code"],
              "mine": HG.SLOT_LABEL.get(x, "") if x in act else "",
-             "w": {k: (None if x not in STRATEGIES[k]["assets"] else _r(float(live["w"][k].get(x, 0)) * 100))
+             "w": {k: (None if x not in STRATEGIES[k]["assets"] else _r(float(ws[k].get(x, 0)) * 100))
                    for k in KEYS},
-             "note": {k: _note(k, x) for k in KEYS}} for x in assets]
+             "base": {k: (None if x not in STRATEGIES[k]["assets"] else _r(float(live["w"][k].get(x, 0)) * 100))
+                      for k in KEYS},
+             "note": {k: _note(w0s[k], ws[k], x) for k in KEYS}} for x in assets]
     slots = []
     for s in HG.slots_of(P.holdings):
         h = P.holdings.get(s, {})
@@ -714,17 +767,21 @@ async def weights(request, aid, P, a):
                       "funds": [{"code": f["code"], "name": f.get("name") or FL.fund_name(f["code"]) or f["code"],
                                  "unit": f.get("unit"), "share": _r(f.get("share") or 0, 4)} for f in HG.funds(h)]})
     return J({"account": _acct_info(aid, a), "strategies": [{"key": k, "name": STRAT_NAME[k]} for k in KEYS],
-              "rows": rows, "slots": slots})
+              "rows": rows, "slots": slots,
+              # 当前策略的目标权重是拿哪些基金算的：used = 已按我的基金算，skipped = 仍用项目默认
+              "sub": {"used": sub.get("used") or [], "skipped": sub.get("skipped") or []}})
 
 
 @acct_view
 async def switch_preview(request, aid, P, a):
     to = str(request.query_params.get("to") or "")
     rec = _strategy_rec(to)
-    w_to, diag = strategy_weights(to)
     # 预览必须按「换过去之后」的位置体系算（和 set_strategy 同一个 _switch_holdings）：
     # 否则新基金那 30% 会被摊到别的位置上，笔数、卖出金额、清仓名单全跟真下出来的不一样。
     hs, added, opened, closed = _switch_holdings(a, to, P)
+    # 权重也按「换过去之后的选基配置」算：内置策略的目标权重是拿我这个位置挂的基金序列算的，
+    # 换策略会开关位置，用换之前的配置算出来的权重和真下出来的对不上。
+    w_to, diag = strategy_weights(to, {**a, "holdings": hs})
     Q = Portfolio({**a, "holdings": hs}, w_to) if (added or opened or closed) else _portfolio(aid, target=to)[0]
     liq = [o for o in Q.plan["orders"] if o.get("liq")]
     # 目标为 0 的位置 = 换过去以后会被清掉的位置（原来只比内置策略的 assets 列表，

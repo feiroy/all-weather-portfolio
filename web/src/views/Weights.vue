@@ -10,6 +10,40 @@
           <p>策略决定每个资产该占多少；这一页只管<b>每个位置用哪只基金去买</b>。要换策略，到入口页账户卡片上点「换策略」，会先给预览再确认。</p>
           <router-link to="/" class="go">去账户页 <van-icon name="arrow" /></router-link>
         </div>
+
+        <!-- 目标权重拿谁的净值算：内置策略原来是拿项目默认的 8 只 ETF 算的，
+             换成场外联接以后波动率、均线都变了，权重当然不一样。这里把口径摊开。 -->
+        <div class="card basis">
+          <div class="cl" v-if="isCustom">自定义策略的权重，本来就是按<b>策略里那几只基金</b>算的</div>
+          <div class="cl" v-else>目标权重是按<b>{{ basisTitle }}</b>算的</div>
+          <ul v-if="!isCustom && subUsed.length" class="bl">
+            <li v-for="u in subUsed" :key="u.slot">
+              <b>{{ u.label }}</b><span :title="u.codes.join(' / ')">{{ codeText(u) }}</span>
+              <small>{{ fmtDay(u.since) }} 起</small>
+            </li>
+          </ul>
+          <p v-if="!isCustom && !subUsed.length" class="bn">你还没换过基金，权重就是项目默认那几只算的。</p>
+          <p v-if="subSkipped.length" class="warn">
+            这几个位置仍按项目默认标的算：{{ subSkipped.map(x => x.label + '（' + x.why + '）').join('；') }}
+          </p>
+          <p v-if="!isCustom" class="bn">换基金以后波动率和均线都变了，风险平价 / 逆波动率分给它的钱也会跟着变 —— 这是算对了，不是 bug。</p>
+        </div>
+
+        <template v-if="!isCustom">
+          <div class="sec-t"><span>目标权重 · 按我的基金 vs 项目默认</span><span>{{ d.account.strategy_name }}</span></div>
+          <div class="card diff">
+            <div class="dh"><span>资产</span><span>我的基金</span><span>项目默认</span><span>差</span></div>
+            <div v-for="r in wDiff" :key="r.asset" class="dr">
+              <span class="dn">{{ r.name }}<small v-if="r.mine">{{ r.mine }}</small></span>
+              <span>{{ r.mine_w == null ? '—' : r.mine_w.toFixed(2) + '%' }}</span>
+              <span class="muted">{{ r.base_w == null ? '—' : r.base_w.toFixed(2) + '%' }}</span>
+              <span :class="['dv', r.d > 0.005 ? 'up' : r.d < -0.005 ? 'down' : '']">
+                {{ r.d == null ? '—' : (r.d > 0 ? '+' : '') + r.d.toFixed(2) + 'pp' }}
+              </span>
+            </div>
+          </div>
+        </template>
+
         <div class="sec-t"><span>我的位置 · 每个位置买哪几只</span><span>{{ d.slots.length }} 个位置</span></div>
         <div class="slot-grid">
           <div v-for="s in d.slots" :key="s.slot" class="card slot" :class="{ off: !s.on }">
@@ -51,7 +85,7 @@
   </div>
 </template>
 <script setup>
-import { ref, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { showConfirmDialog, showSuccessToast, showFailToast } from 'vant'
 import { get, peek, post, dataVer } from '../api'
@@ -61,6 +95,27 @@ import PremiumTag from '../components/PremiumTag.vue'
 const aid = useRoute().params.aid
 const url = `/api/acct/${aid}/weights`
 const d = ref(peek(url) || null)
+
+// 当前策略的目标权重是拿哪些基金算的 / 跟项目默认标的差多少。
+// 自定义策略的权重本来就是按策略里那几只基金算的，不涉及适配，两栏都不显示。
+const isCustom = computed(() => String(d.value?.account?.strategy || '').startsWith('custom:'))
+const subUsed = computed(() => d.value?.sub?.used || [])
+const subSkipped = computed(() => (d.value?.sub?.skipped || []).filter(x => x.kind !== 'default'))
+const basisTitle = computed(() => (subUsed.value.length ? '你实际持有的基金' : '项目默认标的'))
+const fmtDay = s => (s || '').replace(/-/g, '/')
+// 一个位置挂很多只时（有的人一个位置塞了 8 只），列表里只列前两只 + 共几只，全量放 title
+const codeText = u => {
+  const cs = u.codes || []
+  return cs.length > 3 ? `${cs.slice(0, 2).join(' / ')} 等 ${cs.length} 只` : cs.join(' / ')
+}
+const wDiff = computed(() => {
+  const stg = d.value?.account?.strategy || 'B-Con'
+  return (d.value?.rows || []).map(r => {
+    const mine_w = r.w?.[stg] ?? null, base_w = r.base?.[stg] ?? null
+    return { asset: r.asset, name: r.name, mine: r.mine, mine_w, base_w,
+             d: mine_w == null || base_w == null ? null : mine_w - base_w }
+  }).filter(r => r.mine_w != null || r.base_w != null)
+})
 // 场内那几只的现价与溢价率（场外按净值申购，没有溢价）。取不到就整块不显示。
 const pq = ref({})
 async function loadPrem() {
@@ -151,6 +206,29 @@ async function add(r) {
 .cur .cl{ font-size:15px; } .cur .cl b{ color:var(--brand); }
 .cur p{ font-size:12.5px; color:var(--sub); line-height:1.7; margin:6px 0 0; }
 .cur .go{ display:inline-flex; align-items:center; gap:3px; font-size:12.5px; color:var(--brand); margin-top:8px; text-decoration:none; }
+/* 权重口径卡片：换了哪几只基金、哪几只没换成 */
+.basis{ padding:14px 16px; }
+.basis .cl{ font-size:14px; } .basis .cl b{ color:var(--brand); }
+.basis .bl{ list-style:none; margin:8px 0 0; padding:0; }
+.basis .bl li{ display:flex; align-items:baseline; gap:6px; flex-wrap:wrap; padding:5px 0; border-top:1px solid var(--line); font-size:12.5px; }
+.basis .bl li b{ font-weight:550; }
+.basis .bl li span{ color:var(--sub); }
+.basis .bl li small{ margin-left:auto; color:var(--muted); font-size:11.5px; }
+.basis .bn{ font-size:12px; color:var(--muted); line-height:1.7; margin:8px 0 0; }
+.basis .warn{ font-size:12px; color:#B45309; line-height:1.7; margin:8px 0 0; }
+/* 权重对照：数值不加红绿（红绿是涨跌语义，权重差不是涨跌）。
+   列宽必须 minmax(0,1fr)：1fr 的最小宽度是内容宽度，资产全称一长整张表就横向溢出，
+   手机上「差」那一列直接被挤出屏幕（2026-11-17 截图验证）。 */
+.diff{ padding:10px 14px; }
+.dh, .dr{ display:grid; grid-template-columns:minmax(0,1.5fr) minmax(0,1fr) minmax(0,1fr) minmax(0,0.9fr); gap:6px; align-items:baseline; }
+.dh{ font-size:11.5px; color:var(--muted); padding:4px 0 8px; border-bottom:1px solid var(--line); text-align:right; }
+.dh span:first-child{ text-align:left; }
+.dr{ padding:7px 0; border-bottom:1px solid var(--line); font-size:13px; text-align:right; }
+.dr:last-child{ border-bottom:0; }
+.dr > span{ min-width:0; overflow-wrap:anywhere; }
+.dr .dn{ text-align:left; font-size:12.5px; } .dr .dn small{ display:block; font-size:11px; color:var(--muted); }
+.dr .muted{ color:var(--muted); }
+.dr .dv{ color:var(--muted); } .dr .dv.up{ color:var(--brand); font-weight:600; } .dr .dv.down{ color:var(--sub); }
 /* 双列时同一行两张卡等高（2026-11-14 用户「页面咋空隙不一样大」）：原来 align-items:start，
    场内卡多一行「现价 / 溢价」、关掉的卡只有一行说明，矮的那张下面空出一截，看起来卡间距忽大忽小。
    现在 stretch 等高，操作行 margin-top:auto 贴底，左右两张的「加一只」在同一水平线上。 */

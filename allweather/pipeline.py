@@ -113,12 +113,21 @@ _NO_FILTERS = dict(nonferr_trend_window=0, wti_trend_window=0, gold_trend_filter
                    equity_trend_assets=None, equity_trend_windows=None)
 
 
-def live_target_weights(key: str, panel: pd.DataFrame | None = None) -> tuple[pd.Series, pd.Series]:
+def live_target_weights(key: str, panel: pd.DataFrame | None = None,
+                        holdings: dict | None = None,
+                        info: dict | None = None) -> tuple[pd.Series, pd.Series]:
     """实盘目标权重 = 回测引擎「假如在面板最后一天调仓」算出来的那一行。
 
     原来实盘另有一套 compute_target_weights + apply_signal_overrides，规则和回测各写一份，
     已经对不上：风险平价漏了沪深300 30 日趋势过滤（2026-11-04 跌破，回测 0%、实盘 13.1%），
     三个策略都漏了原油 75 日趋势过滤，权重窗口也错开一天。现在只有回测引擎这一份规则。
+
+    Args:
+        holdings: 我的选基配置。给了就**按我实际持有的基金序列算**（006131 替 hs300、
+            161119 替 credit…），而不是一律用项目默认的 8 只 ETF —— 换了联接基金以后
+            波动率和均线都变了，权重本来就该跟着变（2026-11-16 用户要求「场内场外混合验证」）。
+        info: 传一个 dict 进来，会被填上 ``{"used": [...], "skipped": [...]}``，
+            说明哪几个位置换了、哪几个没换成、为什么。
 
     返回 (目标权重, 趋势过滤前的原始权重)，都已归一到 1（风险平价波动率超标时引擎会留现金，
     实盘不留现金，按比例摊回去）。原始权重只用来标注「哪个被过滤了、谁接收了」。
@@ -126,6 +135,11 @@ def live_target_weights(key: str, panel: pd.DataFrame | None = None) -> tuple[pd
     if panel is None:
         panel = load_panel(end=pd.Timestamp.today().strftime("%Y-%m-%d"))
     rets = panel_returns(panel)
+    if holdings:
+        from .holdings import substitute_returns
+        rets, sub = substitute_returns(rets, holdings)
+        if info is not None:
+            info.update(sub)
     last = [rets.index[-1]]
 
     def _one(**extra):

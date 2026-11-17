@@ -1861,9 +1861,11 @@ SIGNAL_ACTIONS = [
     {
         "key": "wti_below_sma75",
         "sell_slot": "wti", "buy_slot": "credit",
-        "desc": f"{ETF_META['wti']['name']} ({ETF_META['wti']['code']}) 跌破 SMA75",
+        # 原来的 WTI 原油 LOF(501018) 已换成能源化工 ETF(159981)，ETF_META 里没有 wti 了；
+        # 信号 key 为了兼容历史日志仍叫 wti_below_sma75，展示名走 ene（2026-11-17 修 KeyError）
+        "desc": f"{ETF_META['ene']['name']} ({ETF_META['ene']['code']}) 跌破 SMA75",
         "condition": lambda s: s.get("wti_below_sma75", False),
-        "sell": f"{ETF_META['wti']['name']} ({ETF_META['wti']['code']})",
+        "sell": f"{ETF_META['ene']['name']} ({ETF_META['ene']['code']})",
         "buy": _cr,
         "strategies": ["B-Con", "B-RP", "V3c"],
         "type": "趋势过滤",
@@ -2341,25 +2343,6 @@ if _aid is None:
 cash_ratio = 0.0
 
 # ============================================================
-# 计算权重
-# ============================================================
-# 三个策略一次算完：账户只用其中一个，但「选基配置」的目标权重表、换策略预览、
-# 「市场 · 策略信号」都是三个并排看。目标权重由回测引擎「假如今天调仓」算出（pipeline.live_target_weights），
-# 实盘和回测只有这一份规则；_W0_ALL 是趋势过滤前的原始权重，只用来标注谁被过滤、谁接收了。
-@st.cache_data(ttl=300, show_spinner=False)
-def _live_weights(_asof: str):
-    from allweather.data import load_panel
-    from allweather.pipeline import live_target_weights
-    _pn = load_panel(end=pd.Timestamp.today().strftime("%Y-%m-%d"))
-    _out = {k: live_target_weights(k, _pn) for k in _STRAT_KEYS}
-    return {k: v[0] for k, v in _out.items()}, {k: v[1] for k, v in _out.items()}
-
-
-_W_ALL, _W0_ALL = _live_weights(last_date)
-w0 = _W0_ALL[strat_key]
-w = _W_ALL[strat_key]
-cfg = STRATEGIES[strat_key]
-
 # ============================================================
 # 我的持仓（策略位置 → 我实际买的基金）+ 按份额记账的账户重放
 # ============================================================
@@ -2370,6 +2353,31 @@ from allweather import benchmark as BM         # noqa: E402
 # 选基配置跟着账户走；账户里还没有（新建时没给）就用项目默认那 8 只
 holdings = ({s: HG._norm_slot(v) for s, v in acct["holdings"].items()}
             if acct and acct.get("holdings") else HG._default_holdings())
+
+
+# ============================================================
+# 计算权重
+# ============================================================
+# 三个策略一次算完：账户只用其中一个，但「选基配置」的目标权重表、换策略预览、
+# 「市场 · 策略信号」都是三个并排看。目标权重由回测引擎「假如今天调仓」算出（pipeline.live_target_weights），
+# 实盘和回测只有这一份规则；_W0_ALL 是趋势过滤前的原始权重，只用来标注谁被过滤、谁接收了。
+# holdings 必须传进去：内置策略的目标权重按「我实际持有的基金」算（006131 替 hs300、161119 替 credit …），
+# 否则同一个账户，Streamlit 和 H5 会算出两份不同的权重（2026-11-17）。
+@st.cache_data(ttl=300, show_spinner=False)
+def _live_weights(asof: str, hs: dict):
+    # 参数名不能带下划线前缀：Streamlit 会跳过以 `_` 开头的参数不参与哈希，
+    # 那样改了选基配置缓存也不会失效（权重还是旧的）。asof 只用来做日期维度的失效。
+    from allweather.data import load_panel
+    from allweather.pipeline import live_target_weights
+    _pn = load_panel(end=pd.Timestamp.today().strftime("%Y-%m-%d"))
+    _out = {k: live_target_weights(k, _pn, holdings=hs) for k in _STRAT_KEYS}
+    return {k: v[0] for k, v in _out.items()}, {k: v[1] for k, v in _out.items()}
+
+
+_W_ALL, _W0_ALL = _live_weights(last_date, holdings)
+w0 = _W0_ALL[strat_key]
+w = _W_ALL[strat_key]
+cfg = STRATEGIES[strat_key]
 
 
 def _save_holdings(new: dict) -> None:

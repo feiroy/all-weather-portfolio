@@ -463,6 +463,131 @@ def nav_panel(holdings: dict, ensure=False) -> pd.DataFrame:
     return pd.DataFrame(cols).sort_index().ffill()
 
 
+# ---------------------------------------------------------------- 按我的基金算策略权重
+# 2026-11-16 用户：「我要买场内和场外基金混合验证，如果我不问，都不知道你里面的算法策略都没适配」。
+#
+# 内置三策略（B-Con / B-RP / V3c）的目标权重原来是拿项目默认的 8 只 ETF 序列算的：
+# 波动率、相关系数、75 日均线全在 510300 / 511220 / 518850 上算，然后把权重发给我用
+# 006131 / 161119 / 000217 去买。换成场外联接以后波动率变了（CSI300 联接 16.2% vs ETF 17.1%），
+# 风险平价分给它的钱自然不一样 —— 不是 bug，是「策略算的是别人的基金」。
+#
+# 这里补上适配：一个位置挂了几只基金，就按位置内占比把它们各自的日收益加权合成一条，
+# 从「这几只都有数据」那天起替换掉面板对应列；更早的段落仍用项目默认标的（拼接，
+# 不缩短回测区间）。趋势均线只看最近 75 个交易日，拼接点远在窗口外，不影响判断。
+
+_SUB_MIN_OBS = 130          # 少于这么多交易日，权重窗口 / 均线攒不满，宁可沿用默认标的
+_SUB_MAX_GAP = 7            # 净值停在这么多天前 → 尾部是平线，波动率会算成 0
+
+
+def slot_returns(holdings: dict, slot: str, min_obs: int = _SUB_MIN_OBS,
+                 max_gap_days: int = _SUB_MAX_GAP, end=None) -> tuple[pd.Series | None, dict]:
+    """一个位置上「我挂的这几只基金」合成的日收益 + 说明。
+
+    多只时按位置内占比加权：某天只有部分基金有净值，就只在有净值的那几只里加权，
+    不会因为缺一天把收益摊薄成一半。
+
+    Returns:
+        (日收益 Series, 说明 dict)。该位置不该替换时返回 (None, 说明)，
+        说明里 ``kind`` = ``"default"`` 表示「挂的就是项目默认那只」（不算问题）。
+    """
+    end = pd.Timestamp(end) if end is not None else pd.Timestamp.today()
+    fs, sh = funds(holdings.get(slot, {})), share_of(holdings.get(slot, {}))
+    if not fs:
+        return None, {"slot": slot, "kind": "empty", "why": "这个位置没挂基金"}
+    dflt = str(ETF_META.get(slot, {}).get("code") or "")
+    if len(fs) == 1 and fs[0]["code"] == dflt:
+        return None, {"slot": slot, "kind": "default", "why": "就是项目默认标的"}
+    cols: dict[str, pd.Series] = {}
+    wts: dict[str, float] = {}
+    for f, w in zip(fs, sh):
+        code = f["code"]
+        if float(w) <= 0:
+            continue
+        s = nav_series(code)
+        if len(s) < 2:
+            return None, {"slot": slot, "code": code, "kind": "error",
+                          "why": f"{code} 一条净值都取不到"}
+        gap = (end - s.index[-1]).days
+        if gap > max_gap_days:
+            return None, {"slot": slot, "code": code, "kind": "error",
+                          "why": f"{code} 净值只到 {s.index[-1]:%Y/%m/%d}（落后 {gap} 天）"}
+        if len(s) < min_obs:
+            return None, {"slot": slot, "code": code, "kind": "error",
+                          "why": f"{code} 只有 {len(s)} 个交易日净值，攒不满权重窗口"}
+        cols[code] = s.pct_change(fill_method=None).iloc[1:]
+        wts[code] = float(w)
+    if not cols:
+        return None, {"slot": slot, "kind": "empty", "why": "位置内没有可用的基金"}
+    R = pd.DataFrame(cols)
+    wv = pd.Series(wts).reindex(R.columns).astype(float)
+    tot = R.notna().astype(float).mul(wv, axis=1).sum(axis=1)
+    blend = R.fillna(0.0).mul(wv, axis=1).sum(axis=1) / tot.where(tot > 0)
+    start = max(R[c].first_valid_index() for c in R.columns)
+    if start is None:
+        return None, {"slot": slot, "kind": "error", "why": "净值全空"}
+    blend = blend.where(blend.index >= start)
+    names = {}
+    for c in cols:
+        try:
+            import importlib
+            names[c] = importlib.import_module("fund_lookup").fund_name(c) or c
+        except Exception:  # noqa: BLE001
+            names[c] = c
+    return blend, {"slot": slot, "kind": "used", "codes": list(cols),
+                   "names": names, "since": f"{start:%Y-%m-%d}",
+                   "shares": {c: round(float(wts[c]), 4) for c in cols}}
+
+
+def substitute_returns(rets: pd.DataFrame, holdings: dict,
+                       min_obs: int = _SUB_MIN_OBS,
+                       max_gap_days: int = _SUB_MAX_GAP) -> tuple[pd.DataFrame, dict]:
+    """把面板里「项目默认标的」的收益列，换成我实际持有的基金。
+
+    Returns:
+        (新收益面板, ``{"used": [...], "skipped": [...]}``)。
+        used/skipped 是给页面和自检看的：换了哪几只、哪几只没换成、为什么。
+
+    ``corr`` = 我的基金和项目默认标的的日收益相关系数。偏低（<0.5）说明这个位置上放的
+    基金和这个资产角色不是一回事（比如把黄金联接放在 A股位置），权重算出来不是用户想要的，
+    自检会给黄项点名。
+    """
+    out = rets.copy()
+    used: list[dict] = []
+    skipped: list[dict] = []
+    end = rets.index[-1] if len(rets) else None
+    for slot in active(holdings):
+        if slot not in rets.columns:
+            continue
+        blend, info = slot_returns(holdings, slot, min_obs, max_gap_days, end)
+        info["label"] = slot_label(holdings, slot)
+        if blend is None:
+            if info.get("kind") != "default":
+                skipped.append(info)
+            continue
+        b = blend.reindex(rets.index)
+        base = rets[slot]
+        pair = pd.DataFrame({"a": b, "b": base}).dropna()
+        if len(pair) > 60:
+            info["corr"] = round(float(pair["a"].corr(pair["b"])), 3)
+        used.append(info)
+        out[slot] = base.where(b.isna(), b)
+    return out, {"used": used, "skipped": skipped}
+
+
+def holdings_sig(hs: dict | None) -> str:
+    """选基配置指纹：位置开关 + 每只基金的代码和位置内占比。
+
+    用来给「按持仓算出来的策略权重」做缓存键：改了哪只基金就换指纹，缓存自动失效。
+    接口层和 Streamlit 必须用同一个算法，否则一边刷新一边还拿旧权重。
+    """
+    out = []
+    for s in sorted(hs or {}):
+        h = hs[s] if isinstance(hs.get(s), dict) else {}
+        out.append(f'{s}:{int(bool(h.get("on", True)))}:' + ",".join(
+            f"{c}={x:.4f}" for c, x in zip(codes(h), share_of(h))))
+    return ";".join(out)
+
+
 def slot_weights(w: dict, holdings: dict) -> dict[str, float]:
     """策略权重（按资产 key）→ 落到我启用的位置上，合计 1。
 
