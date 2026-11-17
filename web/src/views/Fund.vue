@@ -63,10 +63,13 @@
         <!-- 每日明细：把收益日历里这只基金的每一格摊开。用户要「对照验证计算」，
              所以价格（净值 + 市价）、份额、收益、收益率、费用一字排开 —— 手算
              `份额 ×（今日价 − 昨日价）− 费用` 能直接对上，不用再去点收益日历。
-             场内按市价、场外按净值（后端 px_kind 已标明），周/月/年按区间汇总。 -->
-        <div class="card day-card" v-if="sub === '净值走势' && daily.length">
+             场内按市价、场外按净值（后端 px_kind 已标明），周/月/年按区间汇总。
+             **和上面那张图无关，三个页签下都显示** —— 场内基金默认停在「市价走势」，
+             只挂在「净值走势」下的话，30 年国债这类根本看不到（2026-11-17 用户：
+             「每日盈亏所有基金都有吗，我怎么看的30年国债没有呢」）。 -->
+        <div class="card day-card" v-if="daily.length">
           <div class="ch">
-            <div class="st">每日收益</div>
+            <div class="st">{{ dpTitle }}</div>
             <span class="seg2" role="group" aria-label="时间粒度">
               <button v-for="p in PERIODS" :key="p.k" :class="{ on: dp === p.k }"
                       :aria-pressed="dp === p.k" @click="setPeriod(p.k)">{{ p.t }}</button>
@@ -152,6 +155,8 @@ get(`/api/market/premium?codes=${code}`)
 // 周/月/年由后端按 `period` 聚合：收益、费用求和，收益率用期初投入的钱重算。
 const PERIODS = [{ k: 'day', t: '日' }, { k: 'week', t: '周' }, { k: 'month', t: '月' }, { k: 'year', t: '年' }]
 const dp = ref('day')
+// 标题跟着粒度走：「每日收益」切到月要变「每月收益」，否则一眼看不出表里是什么周期
+const dpTitle = computed(() => ({ day: '每日收益', week: '每周收益', month: '每月收益', year: '每年收益' }[dp.value]))
 const daily = ref([])
 const feeTotal = ref(0)
 const feeKind = ref({})
