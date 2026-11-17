@@ -383,11 +383,15 @@ async def holding(request, aid, P, a):
     h = P.holding(it)
     # 有没有「市价走势」页签：ETF_META 里登记过的场内标才有 price_*.csv
     has_price = any(str(m.get("code")) == str(code) for m in ETF_META.values())
+    # 「累计盈亏」只在真的卖出过之后才有信息量：没卖过时它和「持有收益」是同一个数
+    # （市值 − 买入总额），多一个页签只会让人问「这个是干啥的」（2026-11-17 用户）。
+    has_sell = any(t.get("side") == "卖出" for t in P.trades_of(code))
     # 净值末端停在哪天：场外基金的缓存没人拉就一直停着，面板 ffill 之后是一条直线，
     # 看着像「净值没了」。落后的顺手在后台补一次，前端据此提示一句。
     nav_last, nav_stale = HG.nav_freshness(code)
     return J({"account": _acct_info(aid, a), "holding": _hj(h),
-              "has_price": has_price, "nav_last": nav_last, "nav_stale": nav_stale,
+              "has_price": has_price, "has_sell": has_sell,
+              "nav_last": nav_last, "nav_stale": nav_stale,
               "nav": {"dates": [f"{d:%Y-%m-%d}" for d in nv.index], "values": [round(float(v), 4) for v in nv]},
               "trades": [{**t, "shares": _r(t["shares"], 4), "nav": _r(t["nav"], 4), "amount": _r(t["amount"])}
                          for t in P.trades_of(code)]})
@@ -1049,11 +1053,45 @@ async def valuation_hist(request: Request):
               "pb": [_r(v, 4) if pd.notna(v) and v > 0 else None for v in h.get("pb", pd.Series(index=h.index))]})
 
 
-async def etf_premium(request: Request):
-    """场内 ETF 的现价 / 最新净值 / 溢价率（估算）。codes 逗号分隔，不传就查默认那 9 只。
+def _same_day_premium(code: str) -> dict:
+    """同一天口径的折溢价：最近一个有收盘价的交易日，收盘价 ÷ 同日净值 − 1。
 
-    溢价率一律用**小数**返回（0.1146 = 11.46%），与 /calc 里挂的 quote 同一口径，
-    格式化交给前端，免得两边一个百分数一个小数。
+    数据不全就返回空 dict，调用方保留 `quote.snapshot` 那份（页面照常显示，不空着）。
+    """
+    from allweather import quote as QUOTE
+
+    try:
+        px, nv = HG.price_series(code), HG.nav_series(code)
+        if not len(px) or not len(nv):
+            return {}
+        px = px[~px.index.duplicated(keep="last")]
+        nv = nv[~nv.index.duplicated(keep="last")]
+        nv = nv.reindex(px.index).dropna()
+        if not len(nv):
+            return {}
+        d = nv.index[-1]
+        p, n = float(px.loc[d]), float(nv.loc[d])
+        if p <= 0 or n <= 0:
+            return {}
+        prem = p / n - 1
+        level, text = QUOTE.band(prem)
+        return {"premium": round(prem, 5), "premium_date": f"{d:%Y-%m-%d}",
+                "premium_price": round(p, 4), "premium_base": round(n, 4),
+                "level": level, "level_text": text}
+    except Exception:  # noqa: BLE001  算不出就退回实时价口径，不拦页面
+        return {}
+
+
+async def etf_premium(request: Request):
+    """场内 ETF 的现价 / 最新净值 / 折溢价。codes 逗号分隔，不传就查默认那 9 只。
+
+    溢价率一律用**小数**返回（0.1146 = 11.46%），格式化交给前端。
+
+    **折溢价必须用同一天的两个价**：`snapshot` 里是「实时价 ÷ 最新净值」，而最新净值
+    是上一交易日的（今天 21:00 后才出），于是今天的涨跌全被算进溢价 —— 511130 在
+    11/17 盘中显示「溢价 +0.50%」，实际 11/16 收盘价 109.30 对净值 109.6706 是**折价
+    0.34%**，差了 0.84pp（2026-11-17 用户截图里的徽标）。这里改用「最近同日收盘价 vs
+    同日净值」：没有实时 IOPV 的情况下，这才是折溢价本身，不是「折溢价 + 今日涨跌」。
     """
     from allweather import quote as QUOTE
     codes = [c.strip() for c in (request.query_params.get("codes") or "").split(",") if c.strip()]
@@ -1061,8 +1099,11 @@ async def etf_premium(request: Request):
         codes = [m["code"] for m in ETF_META.values()]
     rows = []
     for r in QUOTE.snapshot(codes).values():
-        rows.append({**r, "price": _r(r["price"], 4), "nav": _r(r["nav"], 4),
-                     "chg": _r(r["chg"], 5), "premium": _r(r["premium"], 5)})
+        row = {**r, "price": _r(r["price"], 4), "nav": _r(r["nav"], 4),
+               "chg": _r(r["chg"], 5), "premium": _r(r["premium"], 5)}
+        for k, v in _same_day_premium(r["code"]).items():
+            row[k] = v
+        rows.append(row)
     return J({"asof": f"{pd.Timestamp.now():%Y-%m-%d}", "rows": rows})
 
 

@@ -40,11 +40,6 @@
             <div v-if="h.otc"><span>占账户</span><b class="num">{{ h.w_now }}%</b></div>
             <div v-else><span>场内市价</span><b class="num">{{ h.spot ? money(h.px, 3) : '—' }}</b><i class="qd num" v-if="h.quote_at">{{ h.quote_at }}</i></div>
           </div>
-          <!-- 「今日」在两类基金上不是同一时点：场内是实时市价、场外要等当天净值公布。
-               一句话点出来，省得用户拿这里的收益率去对首页的「数据截至」 -->
-          <p class="day-note" v-if="h.spot && h.quote_at">
-            场内按 {{ h.quote_at }} 的市价估，场外基金的当天净值 21:00 后才公布 —— 「今日」对两类基金不是同一个时点。
-          </p>
         </div>
 
         <!-- 与 Python 版持仓详情同源：子页签切「净值走势 / 累计盈亏」，两张图都是完整 iframe 组件，
@@ -120,9 +115,16 @@ const navDay = computed(() => {
 })
 
 // 场内 ETF 多一个「市价走势」并默认打开（能变现的是市价，用户对着 App 看的就是这条）；
-// 场外申购赎回都按净值成交，没有第二个价，has_price 为假时这个页签直接不出现
-const modes = computed(() => d.value?.has_price
-  ? ['市价走势', '净值走势', '累计盈亏'] : ['净值走势', '累计盈亏'])
+// 场外申购赎回都按净值成交，没有第二个价，has_price 为假时这个页签直接不出现。
+// 「累计盈亏」只在卖出过之后才加：没卖过时它就是「持有收益」，两个数一模一样，
+// 摆在那里只会让人问「这个页面是干啥的」（2026-11-17 用户原话）。
+const modes = computed(() => {
+  const out = []
+  if (d.value?.has_price) out.push('市价走势')
+  out.push('净值走势')
+  if (d.value?.has_sell) out.push('累计盈亏')
+  return out
+})
 const sub = ref('净值走势')
 watch(() => d.value?.has_price, v => { sub.value = v ? '市价走势' : '净值走势' }, { immediate: true })
 const viewOf = m => (m === '累计盈亏' ? 'pnl' : m === '市价走势' ? 'price' : 'trade')
@@ -178,8 +180,6 @@ const note = computed(() => sub.value === '累计盈亏'
 /* 净值日 / 行情时间：格子底下一行更小的灰字，把「两个价不同日」写清楚 */
 .g .qd{ display:block; margin-top:1px; font-size:10.5px; font-style:normal; line-height:1.3;
   color:var(--muted); opacity:.9; letter-spacing:-.2px; white-space:nowrap; }
-/* 口径说明：只在有场内实时价时出现，一行灰字，不占视觉重量 */
-.day-note{ margin:10px 0 0; font-size:11.5px; line-height:1.6; color:var(--muted); }
 /* 折溢价徽标跟在市值大数字后面：28px 字配 11px 胶囊，靠 vertical-align 对上基线 */
 .mvpq{ margin-left:8px; vertical-align:7px; }
 /* 当天买入这类一句话说明：小而轻，别把卡片写成说明书 */
