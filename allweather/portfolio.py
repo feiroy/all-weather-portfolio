@@ -64,6 +64,7 @@ class Portfolio:
         self.panel = HG.nav_panel(self.holdings)
         self._navcache: dict[str, pd.Series] = {}
         self._rawcache: dict[str, pd.DatetimeIndex] = {}
+        self._priceraw: dict[str, pd.DatetimeIndex] = {}
         self.first_trade: dict[str, pd.Timestamp] = {}
         for t in self.trades:
             if t.get("side") not in ("买入", "卖出"):
@@ -197,6 +198,40 @@ class Portfolio:
         sub = col.loc[:pd.Timestamp(day)]
         return float(sub.iloc[-1]) if len(sub) else None
 
+    def px_on(self, code: str, day) -> float | None:
+        """某个交易日的**估值价**：场内取当日收盘市价，场外取净值。
+
+        历史点原来一律按净值估（`nav_on`），于是同一条曲线里「今天按市价、昨天以前按
+        净值」，折溢价的变化被算成当天涨跌。用户拿市价手算就会对不上 —— 2026-11-17：
+        「把市价也填进去，我计算的时候需要用市值计算，因为场内用的是市价计算的收益」。
+        场内 `data/price_*.csv` 本来就有历史收盘价，没有理由历史用另一个口径。
+        """
+        if self._is_otc(code):
+            return self.nav_on(code, day)
+        try:
+            p = HG.price_series(code)
+            if len(p):
+                sub = p.loc[:pd.Timestamp(day)]
+                if len(sub):
+                    v = float(sub.iloc[-1])
+                    if v > 0:
+                        return v
+        except Exception:  # noqa: BLE001  取不到就退回净值，绝不因此让整个账户算不出来
+            pass
+        return self.nav_on(code, day)
+
+    def price_dates(self, code: str) -> pd.DatetimeIndex:
+        """真正有收盘价的日子（场内）；场外返回净值日期。`state` 用它判断当天有没有价。"""
+        if self._is_otc(code):
+            return self.raw_dates(code)
+        if code not in self._priceraw:
+            try:
+                s = HG.price_series(code)
+                self._priceraw[code] = pd.DatetimeIndex(s.dropna().index) if len(s) else pd.DatetimeIndex([])
+            except Exception:  # noqa: BLE001
+                self._priceraw[code] = pd.DatetimeIndex([])
+        return self._priceraw[code]
+
     # ------------------------------------------------------------ 重放（app.py::_replay_holdings）
     def _replay(self):
         created = self.acct.get("created")
@@ -252,23 +287,13 @@ class Portfolio:
                         pos.pop(code, None)
                         cost.pop(code, None)
                 # 历史台账里遗留的「转入 / 转出」：本模型没有资金进出，直接忽略
-            # 最后一天（也就是「今天」）用市价估：场内 ETF 能变现的是二级市场价。
-            # 前面的历史只有净值存档，只能按净值算 —— 这是当时唯一有的口径。
+            # 最后一天（也就是「今天」）用实时市价：场内 ETF 能变现的是二级市场价。
+            # 更早的日子用当日收盘价（`px_on`）—— 和最后一天同一个口径，否则曲线里
+            # 「昨天以前按净值、今天按市价」，折溢价的变化会被算成某一天的涨跌。
             is_last = d == idx[-1]
-            if is_last:
-                # 昨收也得换成同口径，否则「市价今收 − 净值昨收」会把折溢价的变化
-                # 当成当天涨跌记进收益日历。只调昨天就持有、今天没动过的那部分：
-                # 今天新买的要靠 flow 抵消，换了会把本金也算成收益。
-                for c in list(prev_mv):
-                    if prev_mv[c] <= 0 or self._is_otc(c):
-                        continue
-                    nv = self.nav(c)
-                    nav_prev = float(nv.iloc[-2]) if len(nv) > 1 else 0.0
-                    if nav_prev > 0:
-                        prev_mv[c] = (prev_mv[c] / nav_prev) * self.px_now(c, nv)[1]   # 昨日份额 × 市价昨收
             cur_mv: dict[str, float] = {}
             for c, sh in pos.items():
-                v = self.px_now(c, self.nav(c))[0] if is_last else self.nav_on(c, d)
+                v = self.px_now(c, self.nav(c))[0] if is_last else self.px_on(c, d)
                 if v:
                     cur_mv[c] = sh * v
             mv = sum(cur_mv.values())
@@ -278,7 +303,7 @@ class Portfolio:
                     continue
                 a, b, f = prev_mv.get(code, 0.0), cur_mv.get(code, 0.0), flow.get(code, 0.0)
                 pnl, base = b - a - f, a + max(f, 0.0)
-                raw = self.raw_dates(code)
+                raw = self.price_dates(code)
                 act = "" if abs(f) < 1e-9 else ("买入" if f > 0 else ("清仓" if code not in pos else "卖出"))
                 state = "" if (act or d in raw) else ("待更新" if (not len(raw) or d > raw[-1]) else "无净值")
                 day[code] = (pnl, (pnl / base * 100) if base > 0 else None, state, act)

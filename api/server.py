@@ -393,38 +393,121 @@ async def holding(request, aid, P, a):
                          for t in P.trades_of(code)]})
 
 
+def _bucket(day: pd.Timestamp, period: str) -> tuple[tuple, str]:
+    """日期 → (排序键, 显示标签)。日/周/月/年四种粒度。"""
+    if period == "week":
+        iso = day.isocalendar()
+        return (int(iso[0]), int(iso[1])), f"{int(iso[0])}年第{int(iso[1])}周"
+    if period == "month":
+        return (day.year, day.month), f"{day.year}年{day.month}月"
+    if period == "year":
+        return (day.year,), f"{day.year}年"
+    return (day,), f"{day:%Y/%m/%d}"
+
+
 @acct_view
 async def holding_daily(request, aid, P, a):
-    """这只基金逐日的持仓盈亏明细 —— 给用户「拿净值手算一遍」用的。
+    """这只基金逐日（可聚合到周/月/年）的持仓盈亏明细 —— 给用户手算核对用的。
 
     用户 2026-11-17：「把每一天的收益值、收益率直接展示到净值走势下面，方便我对照
-    验证计算，现在这样我很难检查你这个程序是否有 bug」。所以这里不给任何加工值，
-    就是收益日历里那一格的原样导出：
+    验证计算」→「把市价也填进去，我计算的时候需要用市值计算，因为场内用的是市价
+    计算的收益，并且把手续费也显示出来，各种费用都显示出来，并且需要考虑按照日、
+    周、月、年显示」。
 
-    - 收益 = 当日市值变化 − 当日净流入（买入不会把本金算成收益，卖出也不会算成亏损）
+    每行都是收益日历里那一格的原样导出，不另算一套：
+
+    - 市值 = 份额 × **估值价**（场内当日收盘市价 / 最后一天实时价，场外净值）
+    - 收益 = 市值变化 − 当日净流入（买入不会把本金算成收益，卖出也不会算成亏损）
     - 收益率 = 收益 ÷ (昨市值 + 当日买入额)
-    - 净值是**当天面板上的净值**，份额是截至当天的持有份额，两者在手算时对得上
+    - 费用 = 台账里这一天这笔交易的费用（场外申购/赎回费、场内佣金），聚合时求和
 
-    按日期**正序**返回（和净值走势图同方向），从建仓那天往下核对。
+    `period=day|week|month|year`；聚合行的收益率按「区间收益 ÷ 区间占用资金」算，
+    不是把每日收益率加总（那样会随天数虚增）。
     """
     code = request.path_params["code"]
     it = next((x for x in P.items() if x["code"] == code and not x.get("dup")), None)
     if it is None:
         return J({"error": "这只基金不在当前账户里"}, 404)
 
-    rows = []
+    period = (request.query_params.get("period") or "day").lower()
+    if period not in ("day", "week", "month", "year"):
+        period = "day"
+
+    otc = bool(it["otc"])
+    live_px = float(it["px"] or 0)          # plan 里那个价（场内=实时市价）
+    has_live = bool(it.get("spot"))          # 真有行情才叫「市价」，否则是净值
+
+    # 台账：按日汇总费用与净流入（买入 +，卖出 −），与 _replay 的 flow 同口径
+    fee_of: dict[str, float] = {}
+    flow_of: dict[str, float] = {}
+    fee_kind: dict[str, float] = {}
+    for t in P.trades_of(code):
+        side, ds = t.get("side"), str(t.get("date") or "")
+        if side not in ("买入", "卖出") or not ds:
+            continue
+        amt, fee = float(t.get("amount") or 0), float(t.get("fee") or 0)
+        flow_of[ds] = flow_of.get(ds, 0.0) + (amt if side == "买入" else -amt)
+        fee_of[ds] = fee_of.get(ds, 0.0) + fee
+        kind = ("佣金" if not otc else ("申购费" if side == "买入" else "赎回费"))
+        fee_kind[kind] = fee_kind.get(kind, 0.0) + fee
+
+    rows, prev_mv = [], 0.0
     for d in sorted(P.by_day):
         r = P.by_day[d].get(str(code))
         if not r:
             continue
         pnl, pct, state, act = r
-        rows.append({"date": f"{d:%Y-%m-%d}",
-                     "nav": _r(P.nav_on(code, d), 4),
-                     "shares": _r(P.held_on(code, d), 4),
+        ds = f"{d:%Y-%m-%d}"
+        sh = float(P.held_on(code, d) or 0)
+        # 最后一天用 plan 的实时价（和头卡同一个数），更早的用当日收盘价
+        px = live_px if (d == P.last and live_px > 0) else (P.px_on(code, d) or 0)
+        mv = sh * px
+        flow = flow_of.get(ds, 0.0)
+        base = prev_mv + max(flow, 0.0)
+        key, label = _bucket(d, period)
+        rows.append({"date": ds, "label": label, "nav": _r(P.nav_on(code, d), 4), "px": _r(px, 4),
+                     "px_kind": "市价" if (not otc and has_live) else "净值",
+                     "shares": _r(sh, 4), "mv": _r(mv), "base": _r(base),
                      "pnl": _r(pnl), "pct": (None if pct is None else _r(pct, 4)),
-                     "state": state, "act": act})
+                     "fee": _r(fee_of.get(ds, 0.0)), "act": act, "state": state,
+                     "_key": key})
+        prev_mv = mv
 
-    return J({"code": code, "rows": rows, "unit": P.holding(it).get("unit") or "份"})
+    if period != "day":
+        rows = _collapse(rows)
+
+    for r in rows:
+        r.pop("_key", None)
+
+    return J({"code": code, "rows": rows, "period": period,
+              "unit": P.holding(it).get("unit") or "份",
+              "fee_total": _r(sum(fee_of.values())), "fee_kind": {k: _r(v) for k, v in fee_kind.items() if v},
+              "px_date": (P.quote_at() or None) if has_live else None})
+
+
+def _collapse(rows: list[dict]) -> list[dict]:
+    """按 `_key` 把逐日行折成周/月/年：收益与费用求和，收益率用**期初占用资金**重算。
+
+    - 分母取这一期**第一天**的 base（= 上期末市值 + 当天买入额），不是把每天的分母
+      加起来 —— 那是「资金 × 天数」，会把一周的收益率摊成五分之一的日收益。
+    - 期末状态取这一期最后一天的份额 / 净值 / 市价，否则「这周结束时手上多少」读不出来。
+    """
+    out: list[dict] = []
+    for r in rows:
+        if out and out[-1]["_key"] == r["_key"]:
+            g = out[-1]
+            g["pnl"] = round(float(g["pnl"] or 0) + float(r["pnl"] or 0), 2)
+            g["fee"] = round(float(g["fee"] or 0) + float(r["fee"] or 0), 2)
+            g["shares"], g["nav"], g["px"], g["mv"] = r["shares"], r["nav"], r["px"], r["mv"]
+            g["date"] = r["date"]
+            if r["act"]:
+                g["act"] = r["act"] if g["act"] in ("", r["act"]) else f"{g['act']}/{r['act']}"
+        else:
+            out.append(dict(r))
+    for g in out:
+        b = float(g.get("base") or 0)
+        g["pct"] = round(float(g["pnl"]) / b * 100, 4) if b > 0 else None
+    return out
 
 
 # ------------------------------------------------------------------ 持仓详情内嵌图表（iframe）

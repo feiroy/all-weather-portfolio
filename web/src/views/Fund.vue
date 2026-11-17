@@ -61,27 +61,43 @@
         </div>
 
         <!-- 每日明细：把收益日历里这只基金的每一格摊开。用户要「对照验证计算」，
-             所以日期 / 净值 / 收益 / 收益率一字排开 —— 手算 `份额 ×（今日净值 − 昨日净值）`
-             能直接对上，不用再去点收益日历。只在「净值走势」下显示，跟着这张图看。 -->
+             所以价格（净值 + 市价）、份额、收益、收益率、费用一字排开 —— 手算
+             `份额 ×（今日价 − 昨日价）− 费用` 能直接对上，不用再去点收益日历。
+             场内按市价、场外按净值（后端 px_kind 已标明），周/月/年按区间汇总。 -->
         <div class="card day-card" v-if="sub === '净值走势' && daily.length">
           <div class="ch">
             <div class="st">每日收益</div>
-            <span class="cnt num">{{ daily.length }} 个交易日</span>
+            <span class="seg2" role="group" aria-label="时间粒度">
+              <button v-for="p in PERIODS" :key="p.k" :class="{ on: dp === p.k }"
+                      :aria-pressed="dp === p.k" @click="setPeriod(p.k)">{{ p.t }}</button>
+            </span>
           </div>
           <table class="day-list">
-            <thead><tr><th>日期</th><th>净值</th><th>收益</th><th>收益率</th></tr></thead>
+            <thead><tr>
+              <th>期间</th>
+              <th class="c-nv">净值</th>
+              <th class="c-px">市价</th>
+              <th class="c-sh">份额</th>
+              <th>收益</th>
+              <th>收益率</th>
+              <th class="c-fee">费用</th>
+            </tr></thead>
             <tbody>
               <tr v-for="r in dailyShown" :key="r.date">
-                <td class="d">{{ r.date.replace(/-/g, '/') }}<span v-if="r.act" class="mark">{{ r.act }}</span></td>
-                <td>{{ r.nav == null ? '—' : r.nav.toFixed(4) }}</td>
+                <td class="d">{{ r.label }}<span v-if="r.act" class="mark">{{ r.act }}</span></td>
+                <td class="c-nv">{{ r.nav == null ? '—' : r.nav.toFixed(4) }}</td>
+                <td class="c-px">{{ r.px == null ? '—' : r.px.toFixed(3) }}</td>
+                <td class="c-sh">{{ qty(r.shares, h.unit) }}</td>
                 <td :class="tone(r.pnl)">{{ r.state || signed(r.pnl) }}</td>
                 <td :class="tone(r.pct)">{{ r.state ? '—' : pct(r.pct) }}</td>
+                <td class="c-fee fee">{{ r.fee ? money(r.fee) : '—' }}</td>
               </tr>
             </tbody>
           </table>
-          <div class="more" v-if="daily.length > LIMIT">
-            <button type="button" @click="allDays = !allDays">
-              {{ allDays ? '只看最近 ' + LIMIT + ' 天' : '展开全部 ' + daily.length + ' 天' }}
+          <div class="foot">
+            <span class="fee-sum">累计费用 <b class="num">{{ money(feeTotal) }}</b><template v-if="feeKindText">（{{ feeKindText }}）</template></span>
+            <button v-if="daily.length > LIMIT" type="button" class="more-btn" @click="allDays = !allDays">
+              {{ allDays ? '收起' : '展开全部 ' + daily.length + ' 期' }}
             </button>
           </div>
         </div>
@@ -131,16 +147,35 @@ get(`/api/market/premium?codes=${code}`)
   .catch(() => { /* 拿不到行情就不显示徽标，数字不受影响 */ })
 // 今日盈亏由后端从收益日历里取（市值变化 − 当日净流入），当天建仓的也有数，
 // 前端不再需要「今天刚买入 → 显示 —」那套特殊处理
-// 每日明细：收益日历里这只基金每一天那一格，按日期正序（和图同方向）。
-// 手算核对：收益 = 份额 ×（今日净值 − 昨日净值）；有买卖的日期带「买入/卖出」标记，
-// 那天的收益已经扣掉当日净流入，不是把本金/赎回额算成盈亏。
+// 每日明细：收益日历里这只基金每一期的原始数据，按日期正序（和图同方向）。
+// 价格给两个：净值（场外按它算收益）和市价（场内按它算）—— 用户核对时要拿市价×份额。
+// 周/月/年由后端按 `period` 聚合：收益、费用求和，收益率用期初投入的钱重算。
+const PERIODS = [{ k: 'day', t: '日' }, { k: 'week', t: '周' }, { k: 'month', t: '月' }, { k: 'year', t: '年' }]
+const dp = ref('day')
 const daily = ref([])
+const feeTotal = ref(0)
+const feeKind = ref({})
 const LIMIT = 40
 const allDays = ref(false)
 const dailyShown = computed(() => (allDays.value ? daily.value : daily.value.slice(-LIMIT)))
-get(`/api/acct/${aid}/holding/${encodeURIComponent(code)}/daily`)
-  .then(r => { daily.value = r.rows || [] })
-  .catch(() => { /* 明细拿不到不影响其它内容 */ })
+const feeKindText = computed(() =>
+  Object.entries(feeKind.value).map(([k, v]) => `${k} ${money(v)}`).join(' · '))
+function loadDaily() {
+  get(`/api/acct/${aid}/holding/${encodeURIComponent(code)}/daily?period=${dp.value}`)
+    .then(r => {
+      daily.value = r.rows || []
+      feeTotal.value = r.fee_total || 0
+      feeKind.value = r.fee_kind || {}
+    })
+    .catch(() => { /* 明细拿不到不影响其它内容 */ })
+}
+loadDaily()
+function setPeriod(k) {
+  if (dp.value === k) return
+  dp.value = k
+  allDays.value = false
+  loadDaily()
+}
 
 const showDay = computed(() => h.value?.day)
 const showDayPct = computed(() => h.value?.day_pct)
@@ -228,24 +263,30 @@ const note = computed(() => sub.value === '累计盈亏'
   .g{ grid-column:1 / -1; grid-row:3; margin-top:16px; }
 }
 .chart-card{ padding-bottom:6px; }
-/* 每日明细：日期左对齐、数字右对齐，每行压薄 —— 几十行要能一眼扫完；
-   表格不横向滚动，4 列在 375px 下刚好放得下（2026/11/17 严格按日期格式，不简写） */
+/* 每日明细：日期左对齐、数字右对齐，每行压薄 —— 几十行要能一眼扫完。
+   7 列只在宽屏全开；手机收起「净值 / 份额」（那是核对用的辅助列，收益和市价才是主数），
+   剩下 5 列在 375px 下放得下。日期严格写 2026/11/16，不简写。 */
 .day-card{ padding-bottom:8px; }
-.day-card .ch{ display:flex; align-items:baseline; justify-content:space-between; margin-bottom:9px; }
+.day-card .ch{ display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
 .day-card .ch .st{ font-size:14px; font-weight:600; color:var(--ink); }
-.day-card .cnt{ font-size:11.5px; color:var(--muted); font-variant-numeric:tabular-nums; }
 .day-list{ width:100%; border-collapse:collapse; font-size:12.5px; }
-.day-list th{ padding:0 0 6px; font-size:11px; font-weight:500; color:var(--muted); text-align:right; }
+.day-list th{ padding:0 0 6px; font-size:11px; font-weight:500; color:var(--muted); text-align:right; white-space:nowrap; }
 .day-list th:first-child{ text-align:left; }
 .day-list td{ padding:6px 0; border-bottom:1px solid var(--line); text-align:right;
-  font-weight:600; font-variant-numeric:tabular-nums; }
+  font-weight:600; font-variant-numeric:tabular-nums; white-space:nowrap; }
 .day-list td.d{ text-align:left; font-weight:400; color:var(--muted); }
 .day-list tr:last-child td{ border-bottom:none; }
 .day-list .mark{ margin-left:5px; padding:0 4px; border-radius:4px; font-size:10px; font-weight:500;
   color:var(--brand); background:var(--brand-soft); }
-.day-card .more{ text-align:center; margin:10px 0 2px; }
-.day-card .more button{ border:0; background:none; padding:4px 12px; font-size:12px;
-  color:var(--brand); cursor:pointer; }
+.day-list td.fee{ color:var(--muted); font-weight:400; }
+.day-card .foot{ display:flex; align-items:center; justify-content:space-between; gap:10px;
+  margin:10px 0 2px; font-size:11.5px; color:var(--muted); }
+.day-card .fee-sum b{ color:var(--ink); font-weight:600; }
+.day-card .more-btn{ border:0; background:none; padding:4px 0; font-size:12px; color:var(--brand); cursor:pointer; }
+@media (max-width: 700px){
+  .day-list .c-nv, .day-list .c-sh{ display:none; }
+  .day-list .mark{ display:block; margin:1px 0 0; padding:0 3px; width:fit-content; }
+}
 /* 视觉定义在 style.css 的 .mode-seg（与 .seg2 同一套），这里只管外边距 */
 .mode-seg{ margin:2px 0 4px; }
 .frame-box{ position:relative; width:100%; margin:6px 0 0; transition:height .15s ease; }

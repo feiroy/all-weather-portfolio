@@ -23,9 +23,9 @@ AID = "sim-c01062"
 
 
 class _Req:
-    def __init__(self, code: str, aid: str = AID):
+    def __init__(self, code: str, aid: str = AID, period: str | None = None):
         self.path_params = {"aid": aid, "code": code}
-        self.query_params = {}
+        self.query_params = {"period": period} if period else {}
 
 
 def _payload(code: str) -> dict:
@@ -35,6 +35,13 @@ def _payload(code: str) -> dict:
     if not a:
         pytest.skip(f"没有 {AID} 账户")
     resp = asyncio.run(S.holding_daily(_Req(code)))
+    return json.loads(resp.body)
+
+
+def _payload_period(code: str, period: str, aid: str = AID) -> dict:
+    from api import server as S
+
+    resp = asyncio.run(S.holding_daily(_Req(code, aid=aid, period=period)))
     return json.loads(resp.body)
 
 
@@ -99,3 +106,89 @@ def test_unknown_code_is_404():
 
     resp = asyncio.run(S.holding_daily(_Req("999999")))
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------- 市价 / 费用 / 粒度
+def test_rows_carry_price_fee_and_market_value():
+    """每行要给齐核对需要的东西：净值、市价、份额、市值、费用。"""
+    p = _portfolio()
+    code = next((x["code"] for x in p.items() if x.get("shares", 0) > 0), None)
+    if code is None:
+        pytest.skip("账户没有持仓")
+    rows = _payload(code)["rows"]
+    for r in rows:
+        for k in ("label", "nav", "px", "px_kind", "shares", "mv", "pnl", "pct", "fee"):
+            assert k in r, f"缺字段 {k}"
+        assert r["px_kind"] in ("市价", "净值")
+        # 市值 = 份额 × 估值价（容差放到分）
+        if r["px"] and r["shares"]:
+            assert r["mv"] == pytest.approx(r["shares"] * r["px"], abs=0.05)
+
+
+def test_fee_total_matches_trades():
+    """费用列与台账里的手续费一致，合计等于各笔之和。"""
+    p = _portfolio()
+    code = next((x["code"] for x in p.items() if x.get("shares", 0) > 0), None)
+    if code is None:
+        pytest.skip("账户没有持仓")
+    body = _payload(code)
+    want = sum(float(t.get("fee") or 0) for t in p.trades_of(code)
+               if t.get("side") in ("买入", "卖出"))
+    assert body["fee_total"] == pytest.approx(round(want, 2), abs=0.02)
+    assert sum(r["fee"] or 0 for r in body["rows"]) == pytest.approx(body["fee_total"], abs=0.02)
+
+
+@pytest.mark.parametrize("period", ["week", "month", "year"])
+def test_collapse_keeps_profit_and_fee(period):
+    """聚合只是把日期折叠，收益/费用必须一分不差地并起来。"""
+    p = _portfolio()
+    code = next((x["code"] for x in p.items() if x.get("shares", 0) > 0), None)
+    if code is None:
+        pytest.skip("账户没有持仓")
+    day = _payload(code)
+    agg = _payload_period(code, period)
+    assert agg["period"] == period
+    assert sum(r["pnl"] or 0 for r in agg["rows"]) == pytest.approx(
+        sum(r["pnl"] or 0 for r in day["rows"]), abs=0.05)
+    assert sum(r["fee"] or 0 for r in agg["rows"]) == pytest.approx(
+        sum(r["fee"] or 0 for r in day["rows"]), abs=0.02)
+    assert len(agg["rows"]) <= len(day["rows"])
+
+
+def test_collapse_rate_uses_period_opening_money():
+    """聚合收益率的分母是期初投入的钱，不是「资金 × 天数」的累加。"""
+    p = _portfolio()
+    code = next((x["code"] for x in p.items() if x.get("shares", 0) > 0), None)
+    if code is None:
+        pytest.skip("账户没有持仓")
+    agg = _payload_period(code, "month")
+    for r in agg["rows"]:
+        if not r["base"]:
+            assert r["pct"] is None
+            continue
+        assert r["pct"] == pytest.approx(r["pnl"] / r["base"] * 100, abs=0.01)
+
+
+@pytest.mark.parametrize("aid", [AID, "main"])
+def test_historical_rows_use_same_day_close(aid):
+    """场内历史行按**当日收盘价**算市值，不是净值 —— 否则拿市价手算永远对不上。"""
+    import api.server as S
+    from allweather import holdings as HG
+
+    if not AC.load(aid):
+        pytest.skip(f"没有 {aid} 账户")
+    p = S._portfolio(aid)[0]
+    code = next((x["code"] for x in p.items()
+                 if not x["otc"] and x.get("shares", 0) > 0 and len(HG.price_series(x["code"]))), None)
+    if code is None:
+        pytest.skip("账户没有场内持仓")
+    rows = _payload_period(code, "day", aid)["rows"]
+    hist = [r for r in rows if r["date"] != f"{p.last:%Y-%m-%d}"]
+    if not hist:
+        pytest.skip("这只场内基金只有建仓那一天")
+    px = HG.price_series(code)
+    for r in hist:
+        sub = px.loc[:r["date"]]
+        if len(sub):
+            assert r["px"] == pytest.approx(round(float(sub.iloc[-1]), 3), abs=1e-3), \
+                f"{r['date']} 的市价不是当日收盘价"
