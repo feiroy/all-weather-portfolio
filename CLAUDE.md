@@ -82,6 +82,8 @@ pre-push / commit-msg / post-* 由 `.githooks/_chain` 原样转发，不减功�
 | 10 | **Long-running operations need checkpoints** | 每步检查点，一步错不丢全部进度 |
 | 11 | **Convention beats novelty** | 匹配既有模式，两个模式比一个坏模式更糟 |
 | 12 | **Fail visibly, not silently** | 出问题大声说，沉默隐藏 bug |
+| 13 | **用户问「这个是干啥的」= 要解释，不是要删** | 他看不懂某个板块时，第一反应必须是「说清它是啥」，不是「那就别显示了」。2026-11-17 我把「累计盈亏」按「没卖出就藏起来」处理，用户当场：「怎么累计收入都没了」。功能先留着，用一句话讲清用途；确实该合并再问一句 |
+
 ## Streamlit 版本（已冻结 · 2026-11-07 用户明确要求）
 用户原话：**「后面不在修改 Streamlit 版本」**。这条是硬约束，先读再动手。
 

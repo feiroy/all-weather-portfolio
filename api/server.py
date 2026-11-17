@@ -383,15 +383,11 @@ async def holding(request, aid, P, a):
     h = P.holding(it)
     # 有没有「市价走势」页签：ETF_META 里登记过的场内标才有 price_*.csv
     has_price = any(str(m.get("code")) == str(code) for m in ETF_META.values())
-    # 「累计盈亏」只在真的卖出过之后才有信息量：没卖过时它和「持有收益」是同一个数
-    # （市值 − 买入总额），多一个页签只会让人问「这个是干啥的」（2026-11-17 用户）。
-    has_sell = any(t.get("side") == "卖出" for t in P.trades_of(code))
     # 净值末端停在哪天：场外基金的缓存没人拉就一直停着，面板 ffill 之后是一条直线，
     # 看着像「净值没了」。落后的顺手在后台补一次，前端据此提示一句。
     nav_last, nav_stale = HG.nav_freshness(code)
     return J({"account": _acct_info(aid, a), "holding": _hj(h),
-              "has_price": has_price, "has_sell": has_sell,
-              "nav_last": nav_last, "nav_stale": nav_stale,
+              "has_price": has_price, "nav_last": nav_last, "nav_stale": nav_stale,
               "nav": {"dates": [f"{d:%Y-%m-%d}" for d in nv.index], "values": [round(float(v), 4) for v in nv]},
               "trades": [{**t, "shares": _r(t["shares"], 4), "nav": _r(t["nav"], 4), "amount": _r(t["amount"])}
                          for t in P.trades_of(code)]})
