@@ -393,6 +393,40 @@ async def holding(request, aid, P, a):
                          for t in P.trades_of(code)]})
 
 
+@acct_view
+async def holding_daily(request, aid, P, a):
+    """这只基金逐日的持仓盈亏明细 —— 给用户「拿净值手算一遍」用的。
+
+    用户 2026-11-17：「把每一天的收益值、收益率直接展示到净值走势下面，方便我对照
+    验证计算，现在这样我很难检查你这个程序是否有 bug」。所以这里不给任何加工值，
+    就是收益日历里那一格的原样导出：
+
+    - 收益 = 当日市值变化 − 当日净流入（买入不会把本金算成收益，卖出也不会算成亏损）
+    - 收益率 = 收益 ÷ (昨市值 + 当日买入额)
+    - 净值是**当天面板上的净值**，份额是截至当天的持有份额，两者在手算时对得上
+
+    按日期**正序**返回（和净值走势图同方向），从建仓那天往下核对。
+    """
+    code = request.path_params["code"]
+    it = next((x for x in P.items() if x["code"] == code and not x.get("dup")), None)
+    if it is None:
+        return J({"error": "这只基金不在当前账户里"}, 404)
+
+    rows = []
+    for d in sorted(P.by_day):
+        r = P.by_day[d].get(str(code))
+        if not r:
+            continue
+        pnl, pct, state, act = r
+        rows.append({"date": f"{d:%Y-%m-%d}",
+                     "nav": _r(P.nav_on(code, d), 4),
+                     "shares": _r(P.held_on(code, d), 4),
+                     "pnl": _r(pnl), "pct": (None if pct is None else _r(pct, 4)),
+                     "state": state, "act": act})
+
+    return J({"code": code, "rows": rows, "unit": P.holding(it).get("unit") or "份"})
+
+
 # ------------------------------------------------------------------ 持仓详情内嵌图表（iframe）
 def _frame_doc(inner: str, height: int) -> str:
     """把组件 HTML 包成完整文档；body 上带 data-frame-height 供父页面自适应 iframe 高度。
@@ -1465,6 +1499,7 @@ routes = [
     Route("/api/trash/{file}", trash_purge, methods=["DELETE"]),
     Route("/api/acct/{aid}/home", home),
     Route("/api/acct/{aid}/holding/{code}", holding),
+    Route("/api/acct/{aid}/holding/{code}/daily", holding_daily),
     Route("/api/acct/{aid}/holding/{code}/chart", holding_chart),
     Route("/api/acct/{aid}/record-options", record_options),
     Route("/api/acct/{aid}/nav/{code}", nav_on),

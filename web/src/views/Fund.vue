@@ -60,6 +60,32 @@
           </div>
         </div>
 
+        <!-- 每日明细：把收益日历里这只基金的每一格摊开。用户要「对照验证计算」，
+             所以日期 / 净值 / 收益 / 收益率一字排开 —— 手算 `份额 ×（今日净值 − 昨日净值）`
+             能直接对上，不用再去点收益日历。只在「净值走势」下显示，跟着这张图看。 -->
+        <div class="card day-card" v-if="sub === '净值走势' && daily.length">
+          <div class="ch">
+            <div class="st">每日收益</div>
+            <span class="cnt num">{{ daily.length }} 个交易日</span>
+          </div>
+          <table class="day-list">
+            <thead><tr><th>日期</th><th>净值</th><th>收益</th><th>收益率</th></tr></thead>
+            <tbody>
+              <tr v-for="r in dailyShown" :key="r.date">
+                <td class="d">{{ r.date.replace(/-/g, '/') }}<span v-if="r.act" class="mark">{{ r.act }}</span></td>
+                <td>{{ r.nav == null ? '—' : r.nav.toFixed(4) }}</td>
+                <td :class="tone(r.pnl)">{{ r.state || signed(r.pnl) }}</td>
+                <td :class="tone(r.pct)">{{ r.state ? '—' : pct(r.pct) }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="more" v-if="daily.length > LIMIT">
+            <button type="button" @click="allDays = !allDays">
+              {{ allDays ? '只看最近 ' + LIMIT + ' 天' : '展开全部 ' + daily.length + ' 天' }}
+            </button>
+          </div>
+        </div>
+
         <div class="sec-t"><span>它的成交 · {{ d.trades.length }} 笔</span></div>
         <van-cell-group inset>
           <van-cell v-for="t in d.trades" :key="t.i">
@@ -105,6 +131,17 @@ get(`/api/market/premium?codes=${code}`)
   .catch(() => { /* 拿不到行情就不显示徽标，数字不受影响 */ })
 // 今日盈亏由后端从收益日历里取（市值变化 − 当日净流入），当天建仓的也有数，
 // 前端不再需要「今天刚买入 → 显示 —」那套特殊处理
+// 每日明细：收益日历里这只基金每一天那一格，按日期正序（和图同方向）。
+// 手算核对：收益 = 份额 ×（今日净值 − 昨日净值）；有买卖的日期带「买入/卖出」标记，
+// 那天的收益已经扣掉当日净流入，不是把本金/赎回额算成盈亏。
+const daily = ref([])
+const LIMIT = 40
+const allDays = ref(false)
+const dailyShown = computed(() => (allDays.value ? daily.value : daily.value.slice(-LIMIT)))
+get(`/api/acct/${aid}/holding/${encodeURIComponent(code)}/daily`)
+  .then(r => { daily.value = r.rows || [] })
+  .catch(() => { /* 明细拿不到不影响其它内容 */ })
+
 const showDay = computed(() => h.value?.day)
 const showDayPct = computed(() => h.value?.day_pct)
 // 净值日（11/16）—— 「最新净值」那格底下的日期。行情时间是后端给的 quote_at，
@@ -191,6 +228,24 @@ const note = computed(() => sub.value === '累计盈亏'
   .g{ grid-column:1 / -1; grid-row:3; margin-top:16px; }
 }
 .chart-card{ padding-bottom:6px; }
+/* 每日明细：日期左对齐、数字右对齐，每行压薄 —— 几十行要能一眼扫完；
+   表格不横向滚动，4 列在 375px 下刚好放得下（2026/11/17 严格按日期格式，不简写） */
+.day-card{ padding-bottom:8px; }
+.day-card .ch{ display:flex; align-items:baseline; justify-content:space-between; margin-bottom:9px; }
+.day-card .ch .st{ font-size:14px; font-weight:600; color:var(--ink); }
+.day-card .cnt{ font-size:11.5px; color:var(--muted); font-variant-numeric:tabular-nums; }
+.day-list{ width:100%; border-collapse:collapse; font-size:12.5px; }
+.day-list th{ padding:0 0 6px; font-size:11px; font-weight:500; color:var(--muted); text-align:right; }
+.day-list th:first-child{ text-align:left; }
+.day-list td{ padding:6px 0; border-bottom:1px solid var(--line); text-align:right;
+  font-weight:600; font-variant-numeric:tabular-nums; }
+.day-list td.d{ text-align:left; font-weight:400; color:var(--muted); }
+.day-list tr:last-child td{ border-bottom:none; }
+.day-list .mark{ margin-left:5px; padding:0 4px; border-radius:4px; font-size:10px; font-weight:500;
+  color:var(--brand); background:var(--brand-soft); }
+.day-card .more{ text-align:center; margin:10px 0 2px; }
+.day-card .more button{ border:0; background:none; padding:4px 12px; font-size:12px;
+  color:var(--brand); cursor:pointer; }
 /* 视觉定义在 style.css 的 .mode-seg（与 .seg2 同一套），这里只管外边距 */
 .mode-seg{ margin:2px 0 4px; }
 .frame-box{ position:relative; width:100%; margin:6px 0 0; transition:height .15s ease; }
