@@ -242,7 +242,10 @@ def spots_now(codes: list[str]) -> dict[str, dict]:
         for c in codes:
             stamp, val = _spot.get(c, (0.0, None))
             if val and now - stamp < STALE_MAX:
-                out[c] = val
+                # 带上 `at`（这个价是什么时候取的）：估值用的是场内实时价，而净值面板
+                # 最后一天可能是昨天 —— 页面上这两个日期必须分开标，否则「收益率是今天的、
+                # 数据却写 11/16」看起来就像算错了（2026-11-17 用户原话）。
+                out[c] = {**val, "at": stamp}
             # 有过价就按 SPOT_TTL 刷；从来没取到过按 FAIL_TTL 退避，别每次请求都重试
             if now - stamp >= (SPOT_TTL if val else FAIL_TTL):
                 miss.append(c)

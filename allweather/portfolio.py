@@ -27,6 +27,19 @@ MONEY_OUT = ("转出", "出金")
 LEGACY_MONEY = MONEY_IN + MONEY_OUT
 
 
+def _at_ts(stamp) -> float:
+    try:
+        return float(stamp or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _at_text(stamp) -> str:
+    """行情取数时间戳 → `11/17 13:02`（页面用它区分「净值日」和「行情时间」）。"""
+    v = _at_ts(stamp)
+    return time.strftime("%m/%d %H:%M", time.localtime(v)) if v > 0 else ""
+
+
 def min_order(tgt_amt: float, asset: float = 0.0) -> float:
     """单只基金值不值得单独下一笔。
 
@@ -130,6 +143,24 @@ class Portfolio:
             chg = None
         prev = (px / (1.0 + chg)) if (chg is not None and chg > -1) else nav_prev
         return px, prev
+
+    def quote_at(self, code: str | None = None) -> str:
+        """场内实时价是什么时候取的（`11/17 13:02`）；没有实时价就返回空串。
+
+        **为什么页面上要有两个日期**：`asof` 是净值面板的最后一天（场外基金当天的
+        净值 21:00 后才公布），而场内 ETF 的市值 / 收益率是按二级市场实时价算的。
+        同一个「今日收益」里，场内那部分已经是今天的行情、场外那部分还停在上一净值日，
+        只写一个日期就会像算错了 —— 2026-11-17 用户：「30 年国债 ETF 这个收益率是
+        今天的，为啥数据展示还是 16 号」。
+
+        取的是**这份 plan 算价时用的那一份行情**（item 上的 `spot_at`），不是「现在几点」：
+        接口层会把 Portfolio 缓存几分钟，拿当前时间去配几分钟前的价，就又对不上了。
+        """
+        rows = [x for x in self.plan["rows"] if x.get("spot")] if code is None else \
+               [x for x in self.items() if x["code"] == code and x.get("spot")]
+        stamps = [_at_ts(x.get("spot_at")) for x in rows]
+        stamps = [s for s in stamps if s > 0]
+        return _at_text(max(stamps)) if stamps else ""
 
     def _is_otc(self, code: str) -> bool:
         """本账户里是不是**场外**持有 —— 看配置的买卖单位，不看有没有场内行情。
@@ -339,6 +370,10 @@ class Portfolio:
         """slot_w：换一套位置目标权重算（「换策略」前的预览）；缺省用账户跟随的策略。"""
         sw = self.slot_w if slot_w is None else slot_w
         h, cash = self.holdings, float(self.cash or 0)
+        # 这一轮估值用的是哪份行情：`px_now` 内部拿的是同一份（`spot` 有 2 秒节流），
+        # 所有行的 `spot_at` 因此和页面上的价严格对应 —— 显示「行情 11/17 13:02」
+        # 就必须真的是 13:02 那个价算出来的数，不能拿「现在几点」糊上去。
+        sp = self.spot
         mv_by_slot, seen = {}, set()
         for s in HG.active(h):
             v = 0.0
@@ -373,6 +408,8 @@ class Portfolio:
                 cst = float(self.cost.get(code, 0) or 0)
                 items.append({"f": f, "x": float(x), "code": code, "px": px, "px_prev": px_prev,
                               "nav_px": (float(col.iloc[-1]) if len(col) else 0.0),
+                              "spot": bool(not self._is_otc(code) and (sp.get(code) or {}).get("price")),
+                              "spot_at": ((sp.get(code) or {}).get("at") if not self._is_otc(code) else None),
                               "px_prev_day": (col.index[-2] if len(col) > 1 else None),
                               "shares": sh, "cost": cst, "mv": sh * px, "dup": counted.get(code),
                               "pl": ((px / cst - 1) if (cst > 0 and px > 0) else None)})
@@ -476,8 +513,11 @@ class Portfolio:
         px, px_prev = self.px_now(code, nv)
         sh, cst = float(self.pos.get(code, 0) or 0), float(self.cost.get(code, 0) or 0)
         meta = HG.fund_meta(self.holdings, code)[1] or {}
+        sp = self.spot
+        q = None if self._is_otc(code) else (sp.get(code) or {})
         return {"code": code, "f": meta, "slot": why, "x": 1.0, "slot_n": 1, "px": px, "px_prev": px_prev,
                 "nav_px": (float(nv.iloc[-1]) if len(nv) else 0.0),
+                "spot": bool(q and q.get("price")), "spot_at": (q or {}).get("at"),
                 "px_prev_day": (nv.index[-2] if len(nv) > 1 else None), "shares": sh, "cost": cst, "mv": sh * px,
                 "pl": ((px / cst - 1) if (cst > 0 and px > 0) else None),
                 "otc": HG.is_otc(meta) if meta else (HG.default_unit(code) == "份额"),
@@ -506,10 +546,14 @@ class Portfolio:
                 "dup": bool(it.get("dup")), "held": held, "shares": it["shares"], "px": it["px"],
                 # px 是估值用的价（场内=市价），nav_px 是基金净值 —— 两个都要给前端：
                 # 「最新净值」那格显示 nav_px，「场内市价」显示 px，不能互相顶替
-                "nav_px": it.get("nav_px"), "spot": bool(code in self.spot and not it["otc"]),
+                "nav_px": it.get("nav_px"), "spot": bool(it.get("spot")),
                 "cost": it["cost"], "mv": it["mv"], "day": day if held else None,
                 "day_pct": day_pct if held else None, "hold": hold if held else None,
                 "hold_pct": (it["pl"] * 100 if (held and it["pl"] is not None) else None),
+                # 场内那几格的数字是按实时市价算的，日期得跟着一起给：页面写「最新净值
+                # 109.6706」是 11/16 的，「场内市价 110.11」是 11/17 13:02 的，两个价
+                # 不同日却很近，不标日期就会被读成同一个时点。
+                "quote_at": (_at_text(it.get("spot_at")) if it.get("spot") else ""),
                 "w_now": it["w_now"], "w_tgt": it.get("w_tgt"), "why": it.get("why", ""),
                 "side": it.get("side", ""), "amount": it.get("amount", 0.0), "qty": it.get("qty", 0.0),
                 "liq": bool(it.get("liq")), "note": it.get("note", "")}
@@ -533,6 +577,9 @@ class Portfolio:
         return {"total": p["total"], "today": p["today"], "today_pct": (p["today"] / prev * 100) if prev > 0 else 0.0,
                 "pnl": p["pnl"], "pnl_pct": p["pnl_pct"] * 100, "cash": p["cash"],
                 "asof": f"{self.last:%Y-%m-%d}", "created": self.acct.get("created"),
+                # asof 是净值日，quote_at 是场内实时价的取数时间 —— 两者不是一天，
+                # 页面必须分开写（见 quote_at 的说明）
+                "quote_at": self.quote_at(),
                 "n_funds": len({r["code"] for r in p["rows"] if r["shares"] > 0}) + len(p["other"])}
 
     def slot_options(self) -> list[dict]:

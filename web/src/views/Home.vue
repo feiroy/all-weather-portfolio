@@ -17,7 +17,9 @@
             <div class="col">
               <!-- 资产卡 -->
               <div class="hero">
-                <div class="k">总金额（元）<span class="asof">估值 {{ d.summary.asof.slice(5).replace('-', '/') }}</span></div>
+                <!-- 两个日期分开写：净值截至 11/16（场外当天净值 21:00 后才出），
+                     场内 ETF 按实时市价估 —— 只写一个，用户会以为其中一个数算错了 -->
+                <div class="k">总金额（元）<span class="asof">净值 {{ d.summary.asof.slice(5).replace('-', '/') }}<template v-if="d.summary.quote_at"> · 场内 {{ d.summary.quote_at }}</template></span></div>
                 <div class="total num">{{ money(d.summary.total) }}</div>
                 <div class="grid3">
                   <div><div class="k">今日收益</div>
