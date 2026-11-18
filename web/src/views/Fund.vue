@@ -129,32 +129,39 @@
               </div>
             </van-popup>
           </template>
-          <!-- 周 / 月 / 年：期数少，仍是表格式，一次 12 期、不够再往回翻 -->
-          <table v-else class="day-list">
-            <thead><tr>
-              <th>期间</th>
-              <th class="c-nv">净值</th>
-              <th class="c-px">市价</th>
-              <th class="c-sh">份额</th>
-              <th>收益</th>
-              <th>收益率</th>
-              <th class="c-fee">费用</th>
-            </tr></thead>
-            <tbody>
-              <tr v-for="r in dailyShown" :key="r.date">
-                <td class="d">{{ r.label }}<span v-if="r.act" class="mark">{{ r.act }}</span></td>
-                <td class="c-nv">{{ r.nav == null ? '—' : r.nav.toFixed(4) }}</td>
-                <td class="c-px">{{ r.px == null ? '—' : r.px.toFixed(3) }}</td>
-                <td class="c-sh">{{ qty(r.shares, h.unit) }}</td>
-                <td :class="tone(r.pnl)">{{ r.state || signed(r.pnl) }}</td>
-                <td :class="tone(r.pct)">{{ r.state ? '—' : pct(r.pct) }}</td>
-                <td class="c-fee fee">{{ r.fee ? money(r.fee) : '—' }}</td>
-              </tr>
-            </tbody>
-          </table>
+          <!-- 周 / 月 / 年：与日视图同一套格子语言（期间 + 收益 + 收益率），不退回 7 列表格。
+               表格在窄屏要么被挤扁、要么把「费用」列裁在卡片外；格子点开就是同一张明细条。 -->
+          <template v-else>
+            <div class="pgrid" :class="dp === 'week' ? 'g4' : 'g3'">
+              <div v-for="r in dailyShown" :key="r.date" class="pcell"
+                   :class="[mvCls(r.pnl), { sel: r.date === selDate }]" @click="selDate = r.date">
+                <span v-if="r.act" class="dot" :title="`这一期有${r.act}`"></span>
+                <span class="pd">{{ r.label }}</span>
+                <b class="pv num">{{ r.state || signed(r.pnl) }}</b>
+                <span class="pp num">{{ (r.state || r.pct == null) ? '' : pct(r.pct) }}</span>
+              </div>
+            </div>
+            <div class="sel-day" v-if="selRow">
+              <div class="sd-h">
+                <span class="sd-date num">{{ selRow.label }}</span>
+                <span v-if="selRow.act" class="mark">{{ selRow.act }}</span>
+                <span class="sd-pnl">
+                  <span class="k">收益</span>
+                  <b class="num" :class="tone(selRow.pnl)">{{ selRow.state || signed(selRow.pnl) }}</b>
+                  <b class="num" :class="tone(selRow.pct)">{{ (selRow.state || selRow.pct == null) ? '' : `（${pct(selRow.pct)}）` }}</b>
+                </span>
+              </div>
+              <div class="sd-g">
+                <div><span>净值</span><b class="num">{{ selRow.nav == null ? '—' : selRow.nav.toFixed(4) }}</b></div>
+                <div><span>市价</span><b class="num">{{ selRow.px == null ? '—' : selRow.px.toFixed(3) }}</b></div>
+                <div><span>份额</span><b class="num">{{ qty(selRow.shares, h.unit) }}</b></div>
+                <div><span>费用</span><b class="num">{{ selRow.fee ? money(selRow.fee) : '—' }}</b></div>
+              </div>
+            </div>
+          </template>
           <div class="foot">
             <span class="fee-sum">累计费用 <b class="num">{{ money(feeTotal) }}</b><template v-if="feeKindText">（{{ feeKindText }}）</template></span>
-            <button v-if="dp !== 'day' && daily.length > dailyShown.length" ref="moreRef"
+            <button v-if="dp !== 'day' && daily.length > dailyShown.length"
                     type="button" class="more-btn" @click="morePeriod">
               看更早的 {{ Math.min(LIMIT, daily.length - dailyShown.length) }} 期
             </button>
@@ -182,7 +189,7 @@
   </div>
 </template>
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { showFailToast, showToast } from 'vant'
 import { get, peek } from '../api'
@@ -219,8 +226,9 @@ const feeKind = ref({})
 // 周/月/年一次给多少期（日视图是日历，用不到这个窗口）
 const LIMIT = 12
 const pages = ref(1)
-const dailyShown = computed(() => daily.value.slice(-LIMIT * pages.value))
-const moreRef = ref(null)
+// 周/月/年倒序：最近的一期在最上面（和日历「最近的日子最显眼」一致），
+// 「看更早的 N 期」往**下**追加，所以不需要再补偿滚动位置。
+const dailyShown = computed(() => daily.value.slice(-LIMIT * pages.value).reverse())
 
 // ---- 日视图：一个月一屏的日历 ----
 // 逐日台账只增不减，平铺列表跑一年 250 行；日历永远只有 5~6 行格子。
@@ -249,7 +257,8 @@ const calCells = computed(() => {
   return cells
 })
 // 没数据的日子（周末 / 还没持有）不铺底色，只有真实涨跌才上色，免得一整屏灰块
-const calCls = c => !c ? '' : c.p == null ? 'nodata' : c.p > 0 ? 'pos' : c.p < 0 ? 'neg' : 'flat'
+const mvCls = v => (v == null ? 'nodata' : v > 0 ? 'pos' : v < 0 ? 'neg' : 'flat')
+const calCls = c => (!c ? '' : mvCls(c.p))
 const selRow = computed(() => (selDate.value ? dayMap.value[selDate.value] : null))
 function shiftMonth(k) {
   const t = new Date(calY.value, calM.value - 1 + k, 1)
@@ -312,13 +321,18 @@ function loadDaily() {
       feeTotal.value = r.fee_total || 0
       feeKind.value = r.fee_kind || {}
       pages.value = 1
-      // 日历停在最后一条数据所在的月份
       const last = daily.value[daily.value.length - 1]
-      if (last) {
-        calY.value = +String(last.date).slice(0, 4)
-        calM.value = +String(last.date).slice(5, 7)
+      if (dp.value === 'day') {
+        // 日历停在最后一条数据所在的月份
+        if (last) {
+          calY.value = +String(last.date).slice(0, 4)
+          calM.value = +String(last.date).slice(5, 7)
+        }
+        pickDefaultDay()
+      } else {
+        // 周/月/年：选中最新一期（列表倒序，它在最上面）
+        selDate.value = last ? last.date : ''
       }
-      pickDefaultDay()
     })
     .catch(() => { /* 明细拿不到不影响其它内容 */ })
 }
@@ -328,15 +342,9 @@ function setPeriod(k) {
   dp.value = k
   loadDaily()
 }
-/** 周/月/年「看更早」：新行插在上方，同样要按按钮的 rect.top 还原，否则视线会跳。 */
+/** 周/月/年「看更早」：列表是倒序的，更早的期数追加在下方，视线不用挪。 */
 function morePeriod() {
-  const el = moreRef.value
-  const y = el ? el.getBoundingClientRect().top : 0
   pages.value++
-  nextTick(() => {
-    const dy = el ? el.getBoundingClientRect().top - y : 0
-    if (dy) window.scrollBy(0, dy)
-  })
 }
 
 const showDay = computed(() => h.value?.day)
@@ -427,23 +435,40 @@ const note = computed(() => sub.value === '累计盈亏'
   .g{ grid-column:1 / -1; grid-row:3; margin-top:16px; }
 }
 .chart-card{ padding-bottom:6px; }
-/* 每日明细：日期左对齐、数字右对齐，每行压薄 —— 几十行要能一眼扫完。
-   7 列只在宽屏全开；手机收起「净值 / 份额」（那是核对用的辅助列，收益和市价才是主数），
-   剩下 5 列在 375px 下放得下。日期严格写 2026/11/16，不简写。 */
+/* 收益明细整块：日视图是月历、周/月/年是格子，两者共用同一张「选中期明细条」。
+   日期严格写 2026/11/16，不简写。 */
 .day-card{ padding-bottom:8px; }
 /* 这一行现在有「标题 + 月份翻页 + 日/月/年」三段：标题不许被压缩换行，翻页和分段靠 auto 外距推到右边 */
 .day-card .ch{ display:flex; align-items:center; gap:8px; margin-bottom:10px; }
 .day-card .ch .st{ flex:none; white-space:nowrap; font-size:14px; font-weight:600; color:var(--ink); }
-.day-list{ width:100%; border-collapse:collapse; font-size:12.5px; }
-.day-list th{ padding:0 0 6px; font-size:11px; font-weight:500; color:var(--muted); text-align:right; white-space:nowrap; }
-.day-list th:first-child{ text-align:left; }
-.day-list td{ padding:6px 0; border-bottom:1px solid var(--line); text-align:right;
-  font-weight:600; font-variant-numeric:tabular-nums; white-space:nowrap; }
-.day-list td.d{ text-align:left; font-weight:400; color:var(--muted); }
-.day-list tr:last-child td{ border-bottom:none; }
-.day-list .mark{ margin-left:5px; padding:0 4px; border-radius:4px; font-size:10px; font-weight:500;
+/* 周 / 月 / 年：与日历同一套格子（期间 / 收益 / 收益率），不再退回 7 列表格 ——
+   表格在窄屏要么挤成一团、要么把「费用」裁到卡片外，和日历放在一起也像两个页面的东西。 */
+.pgrid{ display:grid; gap:6px; }
+/* 必须 minmax(0,1fr)：1fr 的默认最小宽度是 auto，某一格文字长（如「2026年第47周」）
+   会把那一列撑到 101px，四列就不等宽了（实测 73.6 / 74.3 / 74.1 / 101.3）。 */
+.pgrid.g4{ grid-template-columns:repeat(4,minmax(0,1fr)); }
+.pgrid.g3{ grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+.pcell{ display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px;
+  position:relative; min-width:0; min-height:66px; padding:7px 4px; border-radius:9px;
+  background:#F7F8FA; cursor:pointer; }
+/* 有买卖的那一期：右上角一个小圆点。原来把「买入」塞进标题行，把「2026年第47周」
+   挤成「2026年第44...」，两个信息互相抢地方，不如让标记不占文字宽度。 */
+.pcell .dot{ position:absolute; top:6px; right:6px; width:5px; height:5px; border-radius:50%; background:var(--brand); }
+.pcell.pos{ background:#FDECEC; } .pcell.neg{ background:#E7F6EC; }
+.pcell.sel{ box-shadow:inset 0 0 0 1.5px var(--brand); }
+.pcell .pd{ max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  font-size:10.5px; color:var(--sub); }
+.pcell .pd i{ margin-left:3px; padding:0 3px; border-radius:3px; font-size:9px; font-style:normal;
   color:var(--brand); background:var(--brand-soft); }
-.day-list td.fee{ color:var(--muted); font-weight:400; }
+.pcell .pv{ font-size:13px; font-weight:600; color:var(--ink); white-space:nowrap; }
+.pcell.pos .pv{ color:var(--up); } .pcell.neg .pv{ color:var(--down); }
+.pcell .pp{ font-size:10.5px; color:var(--muted); }
+.pcell.pos .pp{ color:var(--up); opacity:.85; } .pcell.neg .pp{ color:var(--down); opacity:.85; }
+/* 桌面卡片 936 宽：4 列会被拉到 221×66，格子扁得像横条、内容全飘在中间。
+   改成 6 列（约 150×66），和日视图日历的 7 列格子比例对得上，一行也能多放几期。 */
+@media (min-width:900px){
+  .pgrid.g4, .pgrid.g3{ grid-template-columns:repeat(6,minmax(0,1fr)); }
+}
 /* 日视图日历：与「市场 · 基金详情」的收益日历同一套视觉（周一起头的 7 列网格）。
    这一行有三段：标题 / 月份翻页 / 日周月年。翻页靠 margin-left:auto 顶到右边，
    但两个 auto 会平分剩余空间（月份跑到标题旁边、按钮单飞），所以「有 nav 时的 seg2」
@@ -508,25 +533,20 @@ const note = computed(() => sub.value === '累计盈亏'
 .day-card .fee-sum b{ color:var(--ink); font-weight:600; }
 .day-card .more-btn{ border:0; background:none; padding:4px 0; font-size:12px; color:var(--brand); cursor:pointer; }
 @media (max-width: 700px){
-  /* 7 列的表在手机容易被内容撑宽（实测过：某一行 colspan 的 max-content 会被整串算进
-     第一列，表格撑到 411px 而卡片只有 366px → 整页横向溢出 49px）。周/月/年这张表
-     改用 fixed，忽略内容宽度、按表头百分比分。 */
-  .day-list{ table-layout:fixed; }
-  .day-list .c-nv, .day-list .c-sh, .day-list .c-fee{ display:none; }
-  /* 4 个可见列必须写满 100%：fixed 布局下没写宽度的列会和「已被 display:none 的列」
-     平分剩余空间，实测收益/收益率只剩 32px，数字直接压在一起。 */
-  .day-list th:first-child{ width:34%; }
-  .day-list .c-px{ width:18%; }
-  .day-list th:nth-child(5), .day-list th:nth-child(6){ width:24%; }
-  .day-list .mark{ display:block; margin:1px 0 0; padding:0 3px; width:fit-content; }
   /* 日历格子在小屏更窄：日期 + 收益率两行还要塞得进 44px 高 */
   .cell{ min-height:44px; border-radius:8px; }
   .grid7{ gap:4px; }
   .dd, .dv{ font-size:11px; }
+  /* 周/月/年的格子同理收一圈，4 列下每格约 80px，「-983.73」放得下 */
+  .pcell{ min-height:60px; padding:6px 3px; }
+  .pcell .pv{ font-size:12px; }
+  .pcell .pd, .pcell .pp{ font-size:10px; }
   /* 标题 + 月份 + 日周月年 一行放不下 390：按钮和月份各收一圈内边距，别让「月」被挤到下一行 */
   .day-card .ch .seg2 button{ padding:4px 9px; font-size:12px; }
   .day-card .ch .nav b{ font-size:11.5px; }
   .day-card .ch .nav :deep(.van-icon){ padding:2px; }
+  /* 明细条四格在 390 下也够，只把字号压一点 */
+  .sd-g b{ font-size:12px; }
 }
 /* 视觉定义在 style.css 的 .mode-seg（与 .seg2 同一套），这里只管外边距 */
 .mode-seg{ margin:2px 0 4px; }
