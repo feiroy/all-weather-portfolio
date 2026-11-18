@@ -27,8 +27,10 @@
                那两个价格在下面栅格里并排摆着，多写一行只会把大数字挤散 -->
           <div class="mv num">¥{{ money(h.mv) }}<PremiumTag v-if="q && !h.otc" :q="q" class="mvpq" /></div>
           <div class="g">
-            <div><span>今日收益</span><b class="num" :class="tone(showDay)">{{ signed(showDay) }}</b></div>
-            <div><span>今日收益率</span><b class="num" :class="tone(showDayPct)">{{ pct(showDayPct) }}</b></div>
+            <!-- 今天净值还没出时 day/day_pct 是 0（不是「涨跌为零」），照原样写「+0.00」
+                 就是在撒谎 —— 直接显示「待更新」（2026-11-18 用户要求） -->
+            <div><span>今日收益</span><b class="num" :class="h.day_state ? 'pend' : tone(showDay)">{{ h.day_state || signed(showDay) }}</b></div>
+            <div><span>今日收益率</span><b class="num" :class="h.day_state ? 'pend' : tone(showDayPct)">{{ h.day_state || pct(showDayPct) }}</b></div>
             <div><span>持有收益</span><b class="num" :class="tone(h.hold)">{{ signed(h.hold) }}</b></div>
             <div><span>持有收益率</span><b class="num" :class="tone(h.hold_pct)">{{ pct(h.hold_pct) }}</b></div>
             <div><span>{{ h.otc ? '份额' : '股数' }}</span><b class="num">{{ qty(h.shares, h.unit) }}</b></div>
@@ -252,6 +254,8 @@ const note = computed(() => sub.value === '累计盈亏'
 @media (max-width:420px){ .g span{ font-size:11px; } .g b{ font-size:13.5px; } }
 .g span{ display:block; font-size:12px; color:var(--muted); }
 .g b{ display:block; font-size:14px; font-weight:600; margin-top:3px; }
+/* 「待更新」是状态不是数字：不上涨跌色，压成次要灰，避免被当成 +0.00 的收益 */
+.g b.pend{ color:var(--muted); font-weight:500; }
 /* 净值日 / 行情时间：格子底下一行更小的灰字，把「两个价不同日」写清楚 */
 .g .qd{ display:block; margin-top:1px; font-size:10.5px; font-style:normal; line-height:1.3;
   color:var(--muted); opacity:.9; letter-spacing:-.2px; white-space:nowrap; }

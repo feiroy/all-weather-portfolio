@@ -79,3 +79,29 @@ def test_otc_never_uses_live_quote():
         pytest.skip("这个账户没有场外持仓")
     _pin_spot(P, {otc: {"price": 1.0, "chg": 0.0, "at": P.last.timestamp() + 15 * 3600}})
     assert P.live_px_day(otc, P.last) is False
+
+
+# ---------------------------------------------------------------- 头卡别把「还没出」当 0
+def test_holding_day_state_matches_by_day():
+    """基金详情头卡的今日收益：待更新时 state 必须带出来，前端才敢写「待更新」。"""
+    P = _portfolio()
+    for it in P.items():
+        h = P.holding(it)
+        if not h["held"]:
+            continue
+        row = P.by_day.get(P.last, {}).get(h["code"])
+        expect = row[2] if row else ""
+        assert h["day_state"] == expect, f"{h['code']}: {h['day_state']!r} != {expect!r}"
+        # 待更新那格给的是 0（不是涨跌为零），必须靠 state 遮住
+        if expect:
+            assert h["day"] == 0.0
+
+
+def test_summary_today_state_counts_pending():
+    """账户合计：有持仓没出净值 → today_state=待更新 + today_pending 只数，别把 0 当结论。"""
+    P = _portfolio()
+    s = P.summary()
+    pend = [c for c, v in (P.by_day.get(P.last) or {}).items()
+            if v[2] and float(P.pos.get(c, 0) or 0) > 0]
+    assert s["today_pending"] == len(pend)
+    assert s["today_state"] == ("待更新" if pend else "")

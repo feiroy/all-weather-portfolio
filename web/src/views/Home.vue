@@ -22,9 +22,17 @@
                 <div class="k">总金额（元）<span class="asof">净值 {{ d.summary.asof.slice(5).replace('-', '/') }}<template v-if="d.summary.quote_at"> · 场内 {{ d.summary.quote_at }}</template></span></div>
                 <div class="total num">{{ money(d.summary.total) }}</div>
                 <div class="grid3">
+                  <!-- 还有持仓没出净值时，today 只是「已知那几只的和」，不能当结论摆出来 -->
                   <div><div class="k">今日收益</div>
-                    <div class="v num" :class="toneD(d.summary.today)">{{ signed(d.summary.today) }}</div>
-                    <div class="s num" :class="toneD(d.summary.today_pct)">{{ pct(d.summary.today_pct) }}</div></div>
+                    <template v-if="d.summary.today_state">
+                      <div class="v pend">{{ d.summary.today_state }}</div>
+                      <div class="s">{{ d.summary.today_pending }} 只未出净值</div>
+                    </template>
+                    <template v-else>
+                      <div class="v num" :class="toneD(d.summary.today)">{{ signed(d.summary.today) }}</div>
+                      <div class="s num" :class="toneD(d.summary.today_pct)">{{ pct(d.summary.today_pct) }}</div>
+                    </template>
+                  </div>
                   <div><div class="k">持有收益</div>
                     <div class="v num" :class="toneD(d.summary.pnl)">{{ signed(d.summary.pnl) }}</div>
                     <div class="s num" :class="toneD(d.summary.pnl_pct)">{{ pct(d.summary.pnl_pct) }}</div></div>
@@ -174,6 +182,8 @@ const statusLabel = computed(() => {
 .grid3 > div{ min-width:0; text-align:center; }
 .grid3 .v{ font-size:16px; font-weight:650; margin-top:3px; color:var(--ink); }
 .grid3 .s{ font-size:12px; color:var(--muted); margin-top:1px; }
+/* 净值没出时那格写「待更新」—— 是状态不是数字，不上涨跌色 */
+.grid3 .v.pend{ color:var(--muted); font-weight:500; font-size:15px; }
 /* 白底上必须明确的涨红跌绿；提高特异性覆盖 .grid3 .v 的 --ink */
 .hero .grid3 .v.up, .hero .grid3 .s.up, .hero .mh b.up{ color:var(--up) }
 .hero .grid3 .v.down, .hero .grid3 .s.down, .hero .mh b.down{ color:var(--down) }

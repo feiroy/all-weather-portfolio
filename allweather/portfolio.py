@@ -604,6 +604,9 @@ class Portfolio:
         # 页面就成了「今日收益 —、今日收益率 —」，用户以为算不出来。
         row = self.by_day.get(self.last, {}).get(str(code))
         day, day_pct = (row[0], row[1]) if row else (None, None)
+        # 今天净值还没出时，上面那两个数其实是「0（还没动）」—— 直接写「+0.00」就是在撒谎。
+        # 把状态一起给前端，让那两格显示「待更新」（2026-11-18 用户：数据没出来之前不要显示 0）。
+        day_state = (row[2] if row else "") if held else ""
         hold = it["mv"] - it["shares"] * it["cost"]
         return {"code": code, "name": str(it["f"].get("name") or FL.fund_name(code) or code),
                 "slot": HG.slot_label(self.holdings, it["slot"]), "otc": bool(it["otc"]),
@@ -613,7 +616,8 @@ class Portfolio:
                 # 「最新净值」那格显示 nav_px，「场内市价」显示 px，不能互相顶替
                 "nav_px": it.get("nav_px"), "spot": bool(it.get("spot")),
                 "cost": it["cost"], "mv": it["mv"], "day": day if held else None,
-                "day_pct": day_pct if held else None, "hold": hold if held else None,
+                "day_pct": day_pct if held else None, "day_state": day_state,
+                "hold": hold if held else None,
                 "hold_pct": (it["pl"] * 100 if (held and it["pl"] is not None) else None),
                 # 场内那几格的数字是按实时市价算的，日期得跟着一起给：页面写「最新净值
                 # 109.6706」是 11/16 的，「场内市价 110.11」是 11/17 13:02 的，两个价
@@ -639,7 +643,12 @@ class Portfolio:
     def summary(self) -> dict:
         p = self.plan
         prev = p["total"] - p["today"]
+        # 今天还有几只持仓没出净值：这时 today 只是「已知那几只的涨跌之和」，
+        # 不能让它平平地显示成 0（2026-11-18 用户：数据没出来之前显示待更新）。
+        last_day = self.by_day.get(self.last) or {}
+        pending = [c for c, v in last_day.items() if v[2] and float(self.pos.get(c, 0) or 0) > 0]
         return {"total": p["total"], "today": p["today"], "today_pct": (p["today"] / prev * 100) if prev > 0 else 0.0,
+                "today_state": "待更新" if pending else "", "today_pending": len(pending),
                 "pnl": p["pnl"], "pnl_pct": p["pnl_pct"] * 100, "cash": p["cash"],
                 "asof": f"{self.last:%Y-%m-%d}", "created": self.acct.get("created"),
                 # asof 是净值日，quote_at 是场内实时价的取数时间 —— 两者不是一天，
