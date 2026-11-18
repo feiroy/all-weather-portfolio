@@ -220,6 +220,22 @@ class Portfolio:
             pass
         return self.nav_on(code, day)
 
+    def live_px_day(self, code: str, day) -> bool:
+        """这一天的「实时市价」是不是就是当天的价（场内 ETF）。
+
+        收盘价序列（data/price_*.csv）要等行情落盘，总是比实时行情晚一步：15:00 收盘后
+        实时价已经是收盘价，但 `price_dates` 里还没有这一天。这时候收益其实已经算得出来，
+        不能因为「还没落盘」就显示待更新 —— 2026-11-18 用户：「净值都收到了，但是收益
+        算不出来？」。场外没有实时价，只能等净值，所以直接返回 False。
+        """
+        if self._is_otc(code):
+            return False
+        q = self.spot.get(str(code)) or {}
+        at = _at_ts(q.get("at"))
+        if at <= 0:
+            return False
+        return pd.Timestamp(at, unit="s").normalize() == pd.Timestamp(day).normalize()
+
     def price_dates(self, code: str) -> pd.DatetimeIndex:
         """真正有收盘价的日子（场内）；场外返回净值日期。`state` 用它判断当天有没有价。"""
         if self._is_otc(code):
@@ -305,7 +321,12 @@ class Portfolio:
                 pnl, base = b - a - f, a + max(f, 0.0)
                 raw = self.price_dates(code)
                 act = "" if abs(f) < 1e-9 else ("买入" if f > 0 else ("清仓" if code not in pos else "卖出"))
-                state = "" if (act or d in raw) else ("待更新" if (not len(raw) or d > raw[-1]) else "无净值")
+                # 「有价可算」= 有交易（当天必然有成交价）/ 净值已公布 / 收盘价已落盘 /
+                # 场内今天的实时价就是当天的价。只看收盘价序列会把「净值到了、收盘价还
+                # 没落盘」误判成待更新，把已经算好的那句收益藏起来（2026-11-18）。
+                has_px = (bool(act) or d in raw or d in self.raw_dates(code)
+                          or (is_last and self.live_px_day(code, d)))
+                state = "" if has_px else ("待更新" if (not len(raw) or d > raw[-1]) else "无净值")
                 day[code] = (pnl, (pnl / base * 100) if base > 0 else None, state, act)
             self.by_day[d] = day
             prev_mv = cur_mv
