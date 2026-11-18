@@ -853,13 +853,11 @@ class Portfolio:
         if not rows:
             return {"items": [], "bad": [], "days": 0}
         nm = lambda r: str(r["f"].get("name") or r["code"])
-        big = max(rows, key=lambda r: float(r["w_now"] or 0))
         slot_w: dict[str, float] = {}
         for r in rows:
             slot_w[r["slot"]] = slot_w.get(r["slot"], 0.0) + float(r["w_now"] or 0)
-        sk, smax = max(slot_w.items(), key=lambda kv: kv[1])
         worst = min((r for r in rows if r.get("pl") is not None), key=lambda r: r["pl"], default=None)
-        dev = max((r for r in rows if r.get("slot_first")), key=lambda r: abs(float(r["dev"])), default=None)
+        dev = max((r for r in rows if r.get("slot_first")), key=lambda r: abs(float(r["dev"] or 0)), default=None)
         nav = self.daily["nav"].astype(float) if len(self.daily) else pd.Series(dtype=float)
         mdd = float((nav / nav.cummax() - 1).min()) if len(nav) > 1 else None
         items = []
@@ -867,23 +865,27 @@ class Portfolio:
         def add(label, now, line, over, why, bad):
             items.append({"label": label, "now": now, "line": line, "over": over if bad else "正常", "why": why, "bad": bool(bad)})
 
-        if any(sum(1 for r in rows if r["slot"] == k) > 1 for k in slot_w):
-            add("单只最大占比", f"{big['w_now'] * 100:.1f}%（{nm(big)}）", "25%", "偏高",
-                "一只基金的涨跌就能左右整个账户；想分散就给这个位置再挂一只同类基金", float(big["w_now"]) > 0.25)
-            add("单一位置最大占比", f"{smax * 100:.1f}%（{HG.slot_label(self.holdings, sk)}）", "50%", "偏高",
-                "整个位置同涨同跌，相当于半个账户压在一个资产上", smax > 0.50)
-        else:
-            add("最大仓位", f"{smax * 100:.1f}%（{nm(big)}）", "25%", "偏高",
-                "一只基金就占了账户这么多，它自己出问题等于账户出问题", smax > 0.25)
+        # 集中度按「策略目标」判，不按固定的 25% / 50%。
+        # 原来那条「最大仓位 25%」是把股票账户「别押单只个股」的常识搬过来了，但风险平价
+        # 本来就靠债券吃大头（sim-c01062 信用债 61.3%，策略目标 62.2%，偏离只有 −0.8pp），
+        # 用 25% 卡它等于天天红灯，还建议「再挂一只同类基金」——同一资产再拆一只，风险一分
+        # 没降，只多付一份管理费。真正该判的是「实际离目标有多远」，也就是这一条。
+        # 显示上把「谁 / 占多少 / 目标多少」写全，占比本身仍然一眼可见。
+        if dev is not None:
+            _d = float(dev["dev"])
+            cur = float(slot_w.get(dev["slot"], 0.0))
+            tgt = cur - _d
+            n_in = sum(1 for r in rows if r["slot"] == dev["slot"])
+            who = nm(dev) if n_in == 1 else f"{HG.slot_label(self.holdings, dev['slot'])}（{n_in} 只）"
+            add("最大偏离", f"{cur * 100:.1f}%（{who}，目标 {tgt * 100:.1f}%，{_d * 100:+.1f}pp）", "±5pp", "该调了",
+                "实际权重离策略目标已经到了这个程度，再放下去就是凭感觉持仓；调多少看「调仓」",
+                abs(_d) >= 0.05)
         # 账户不存钱（cash 恒 0），没有「现金占比」这项体检
         add("最大回撤", f"{mdd * 100:.2f}%（账户 {len(self.daily)} 天）" if mdd is not None else "—", "12%", "超线",
             "从最高点回落的最大幅度，越深越考验能不能拿住", mdd is not None and mdd <= -0.12)
         if worst is not None:
             add("单只最大浮亏", f"{worst['pl'] * 100:.2f}%（{nm(worst)}）", "15%", "超线",
                 "只说明这一只买贵了，不等于该卖；先看是整体下跌还是它自己的问题", float(worst["pl"]) <= -0.15)
-        if dev is not None:
-            add("偏离目标最大", f"{float(dev['dev']) * 100:+.1f}pp（{HG.slot_label(self.holdings, dev['slot'])}）", "±5pp",
-                "该调了", "和策略目标已经拉开距离；调多少看「调仓」", abs(float(dev["dev"])) >= 0.05)
         return {"items": items, "bad": [i for i in items if i["bad"]], "days": len(self.daily)}
 
     # ------------------------------------------------------------ 收益：每天的数 + 当日明细

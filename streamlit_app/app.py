@@ -5181,82 +5181,33 @@ def _acct_health_view() -> None:
 
     这一页曾经把「累计收益」「与基准差」也列进指标表 —— 那是「收益」和「对比」两页的结论，
     等于同一件事在三个地方各印一遍，所以看着不伦不类。现在只留账户层面的风险：
-    集中度（一只 / 一个位置吃多少）、回撤深不深、哪只在亏、偏离目标多少。
-    判断阈值写在行里（现状 / 提醒线 / 判断），越线才在结论卡里说一句「该怎么看」。
+    偏离目标、回撤深不深、哪只在亏。
+    阈值写在行里（现状 / 提醒线 / 判断），越线才在结论卡里说一句「该怎么看」。
     """
     st.markdown(
         '<div class="sec-head"><span class="t">体检 · 账户有没有风险</span>'
-        '<span class="r">集中度 / 回撤 / 单只浮亏 / 偏离目标</span></div>',
+        '<span class="r">偏离目标 / 回撤 / 单只浮亏</span></div>',
         unsafe_allow_html=True,
     )
-    _rows = [r for r in _plan["rows"] if float(r["shares"] or 0) > 0]
-    if not _rows:
+    # 判定和阈值统一在 Portfolio.health()（H5 体检页读的是同一份），这里只管渲染。
+    # 2026-11-18 之前这段自己复刻了一套阈值，两边已经漂移：H5 早已把「最大仓位 25%」
+    # 改成按策略目标判，这里还在拿固定 25% 卡，同一条在两个界面给出相反结论。
+    _h = PF.health()
+    if not _h["items"]:
         st.info("还没有持仓：先到「记录」补录成交，这里才有可体检的对象。")
         return
-    _m = _al["指标"]
-
-    def _nm(_r):
-        return str(_r["f"].get("name") or _r["code"])
-
-    # 集中的风险不在「哪只涨跌多少」，而在「一只 / 一个位置出问题能不能把账户拖下去」
-    _big = max(_rows, key=lambda r: float(r["w_now"] or 0))
-    _slot_w: dict[str, float] = {}
-    for _r in _rows:
-        _slot_w[_r["slot"]] = _slot_w.get(_r["slot"], 0.0) + float(_r["w_now"] or 0)
-    _slot_k, _slot_max = max(_slot_w.items(), key=lambda kv: kv[1]) if _slot_w else ("", 0.0)
-    _worst = min((r for r in _rows if r.get("pl") is not None), key=lambda r: r["pl"], default=None)
-    _dev = max((r for r in _rows if r.get("w_tgt") is not None and r.get("dev") is not None),
-               key=lambda r: abs(float(r["dev"])), default=None)
-    _cash_r = float(_m.get("现金占比") or 0)
-    _mdd = _m.get("最大回撤")
-    _days = len(_acct_daily) if len(_acct_daily) else 0
-
-    # ---- 逐项对阈值：越线的记进 _bad，结论卡只讲这几条 ----
+    _days = int(_h["days"] or 0)
     _tbl, _bad = [], []
     _MUT = 'color:var(--muted)'
     _WRN = 'color:var(--amber)'
 
-    def _row(label, now, line, over, why, advice, bad):
-        """一行检查：现状 / 提醒线 / 判断；越线时把「为什么算越线、去哪处理」攒给结论卡。"""
-        _tbl.append([label, now, line,
-                     f'<span style="{_WRN}">{over}</span>' if bad else f'<span style="{_MUT}">正常</span>'])
-        if bad:
-            _bad.append({"t": f"{label} {now}", "m": f"提醒线 {line}：{why}{advice}"})
-
-    # 一个位置里挂了多只基金时，「单只」和「单一位置」是两个数，分别列；
-    # 只挂一只时两个数一模一样，列两行就是自己抄自己
-    _multi = any(sum(1 for r in _rows if r["slot"] == k) > 1 for k in _slot_w)
-    if _multi:
-        _row("单只最大占比", f"{_big['w_now']*100:.1f}%（{_nm(_big)}）", "25%", "偏高",
-             "一只基金的涨跌就能左右整个账户", "；想分散到「选基配置」给这个位置再挂一只同类基金",
-             float(_big["w_now"] or 0) > 0.25)
-        _row("单一位置最大占比", f"{_slot_max*100:.1f}%（{HG.SLOT_LABEL.get(_slot_k, _slot_k)}）", "50%", "偏高",
-             "整个位置同涨同跌，相当于半个账户压在一个资产上", "；压不压看「调仓」给的目标比例",
-             _slot_max > 0.50)
-    else:
-        _row("最大仓位", f"{_slot_max*100:.1f}%（{_nm(_big)} · 位置「{HG.SLOT_LABEL.get(_slot_k, _slot_k)}」）",
-             "25%", "偏高",
-             "一只基金就占了账户这么多，它自己出问题等于账户出问题",
-             "；接受也行（这是策略定的比例），想稳一点就给这个位置再挂一只同类基金分摊",
-             _slot_max > 0.25)
-    # 现金：只在账上真有闲钱时才列（卖出回款 / 转入还没买）。全买成基金是常态，
-    # 原来那条「< 3% 偏少」在支付宝场外基金这里不成立 —— 卖出 T+1 到账再买就是正常流程
-    if _cash_r >= 0.005:
-        _row("现金占比", f"{_cash_r*100:.1f}%", "15%", "偏多",
-             "卖出回款或转入的钱还没买成基金，闲着拖低收益",
-             "；到「调仓 · 新钱怎么分」按目标比例买掉", _cash_r > 0.15)
-    _row("最大回撤",
-         (f"{_mdd*100:.2f}%（账户 {_days} 天）" if _mdd is not None else "—"), "12%", "超线",
-         "净值从最高点回落的最大幅度，越深越考验能不能拿住", "；扛不住就降波动，别硬撑",
-         (_mdd is not None and _mdd <= -0.12))
-    if _worst is not None:
-        _row("单只最大浮亏", f"{_worst['pl']*100:.2f}%（{_nm(_worst)}）", "15%", "超线",
-             "只说明「这一只买贵了」，不等于该卖", "；先判断是整体下跌还是这只自己的问题",
-             float(_worst["pl"]) <= -0.15)
-    if _dev is not None:
-        _row("偏离目标最大", f"{float(_dev['dev'])*100:+.1f}pp（{_nm(_dev)}）", "±5pp", "该调了",
-             "和策略目标已经拉开距离，再放下去就是「凭感觉持仓」", "；调多少看「调仓」",
-             abs(float(_dev["dev"])) >= 0.05)
+    for _it in _h["items"]:
+        _tbl.append([_it["label"], _it["now"], _it["line"],
+                     f'<span style="{_WRN}">{_it["over"]}</span>' if _it["bad"]
+                     else f'<span style="{_MUT}">正常</span>'])
+        if _it["bad"]:
+            _bad.append({"t": f'{_it["label"]} {_it["now"]}',
+                         "m": f'提醒线 {_it["line"]}：{_it["why"]}'})
 
     # ---- 结论卡：全正常只报平安，越线才说「越了哪条、去哪处理」 ----
     if not _bad:
@@ -5526,7 +5477,7 @@ def _pg_assets() -> None:
             "账户视图", ["持仓", "收益", "对比", "体检"], default="持仓", key="acct_view",
             label_visibility="collapsed",
             help="持仓：手里有什么、占多少；收益：按年 / 按月赚了多少钱和收益率；"
-                 "对比：跟项目默认基金、策略理论各差多少；体检：集中度、回撤、单只浮亏、偏离目标。",
+                 "对比：跟项目默认基金、策略理论各差多少；体检：偏离目标、回撤、单只浮亏。",
         ) or "持仓"
 
     if _av == "持仓":
