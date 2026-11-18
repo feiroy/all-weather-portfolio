@@ -22,16 +22,16 @@
                 <div class="k">总金额（元）<span class="asof">净值 {{ d.summary.asof.slice(5).replace('-', '/') }}<template v-if="d.summary.quote_at"> · 场内 {{ d.summary.quote_at }}</template></span></div>
                 <div class="total num">{{ money(d.summary.total) }}</div>
                 <div class="grid3">
-                  <!-- 还有持仓没出净值时，today 只是「已知那几只的和」，不能当结论摆出来 -->
+                  <!-- 三态：全没出 → 「待更新」；出了一部分 → 照常给数 + 小字几只没更新；
+                       都出了 → 正常。today 只是「已知那几只的和」时不能当结论摆出来 -->
                   <div><div class="k">今日收益</div>
-                    <template v-if="d.summary.today_state">
-                      <div class="v pend">{{ d.summary.today_state }}</div>
-                      <div class="s">{{ d.summary.today_pending }} 只未出净值</div>
-                    </template>
-                    <template v-else>
-                      <div class="v num" :class="toneD(d.summary.today)">{{ signed(d.summary.today) }}</div>
-                      <div class="s num" :class="toneD(d.summary.today_pct)">{{ pct(d.summary.today_pct) }}</div>
-                    </template>
+                    <div class="v num" :class="d.summary.today_state === '待更新' ? 'pend' : toneD(d.summary.today)">
+                      {{ d.summary.today_state === '待更新' ? '待更新' : signed(d.summary.today) }}</div>
+                    <div class="s num" :class="d.summary.today_state === '待更新' ? '' : toneD(d.summary.today_pct)">
+                      <template v-if="d.summary.today_state === '待更新'">{{ d.summary.today_pending }} 只未出净值</template>
+                      <template v-else-if="d.summary.today_pending">{{ pct(d.summary.today_pct) }} · {{ d.summary.today_pending }} 只未更新</template>
+                      <template v-else>{{ pct(d.summary.today_pct) }}</template>
+                    </div>
                   </div>
                   <div><div class="k">持有收益</div>
                     <div class="v num" :class="toneD(d.summary.pnl)">{{ signed(d.summary.pnl) }}</div>

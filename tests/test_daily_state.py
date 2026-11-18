@@ -98,10 +98,12 @@ def test_holding_day_state_matches_by_day():
 
 
 def test_summary_today_state_counts_pending():
-    """账户合计：有持仓没出净值 → today_state=待更新 + today_pending 只数，别把 0 当结论。"""
+    """账户合计三态：全没出 → 待更新；出一部分 → 部分；都出了 → 空。"""
     P = _portfolio()
     s = P.summary()
     pend = [c for c, v in (P.by_day.get(P.last) or {}).items()
             if v[2] and float(P.pos.get(c, 0) or 0) > 0]
+    held_n = sum(1 for c in P.pos if float(P.pos.get(c, 0) or 0) > 0)
     assert s["today_pending"] == len(pend)
-    assert s["today_state"] == ("待更新" if pend else "")
+    want = "" if not pend else ("待更新" if len(pend) >= held_n else "部分")
+    assert s["today_state"] == want

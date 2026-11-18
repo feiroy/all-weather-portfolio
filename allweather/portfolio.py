@@ -663,8 +663,12 @@ class Portfolio:
         # 不能让它平平地显示成 0（2026-11-18 用户：数据没出来之前显示待更新）。
         last_day = self.by_day.get(self.last) or {}
         pending = [c for c, v in last_day.items() if v[2] and float(self.pos.get(c, 0) or 0) > 0]
+        held_n = sum(1 for c in self.pos if float(self.pos.get(c, 0) or 0) > 0)
+        # 三态，别一刀切：全都没出 = 「待更新」；出了一部分 = 照常给数 + 小字说明几只没更新；
+        # 都出了 = 正常（2026-11-18 用户：「要展示也行，但后面需要有小字，展示是部分基金未更新」）
+        today_state = "" if not pending else ("待更新" if len(pending) >= held_n else "部分")
         return {"total": p["total"], "today": p["today"], "today_pct": (p["today"] / prev * 100) if prev > 0 else 0.0,
-                "today_state": "待更新" if pending else "", "today_pending": len(pending),
+                "today_state": today_state, "today_pending": len(pending),
                 "pnl": p["pnl"], "pnl_pct": p["pnl_pct"] * 100, "cash": p["cash"],
                 "asof": f"{self.last:%Y-%m-%d}", "created": self.acct.get("created"),
                 # asof 是净值日，quote_at 是场内实时价的取数时间 —— 两者不是一天，
