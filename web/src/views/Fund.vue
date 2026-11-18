@@ -455,11 +455,12 @@ const note = computed(() => sub.value === '累计盈亏'
 /* 有买卖的那一期：右上角一个小圆点。原来把「买入」塞进标题行，把「2026年第47周」
    挤成「2026年第44...」，两个信息互相抢地方，不如让标记不占文字宽度。
    实心 = 买入，空心 = 卖出/清仓：不给字也分得出方向，日历格子（49px 宽）同样用它。 */
-.cell .dot, .pcell .dot{ position:absolute; top:5px; right:5px; width:5px; height:5px;
+.cell .dot, .pcell .dot{ position:absolute; top:5px; right:5px; width:6px; height:6px;
   border-radius:50%; background:var(--brand); }
 /* 大格子（月/年）边角更松，圆点往里挪一点，别像贴在圆角上 */
 .pcell .dot{ top:7px; right:7px; }
-.cell .dot.sell, .pcell .dot.sell{ background:transparent; box-shadow:inset 0 0 0 1.5px var(--brand); }
+/* 空心圈（卖出）：5px 时实心/空心在手机上分不出来，圆点给到 6px、描边 1.8px */
+.cell .dot.sell, .pcell .dot.sell{ background:transparent; box-shadow:inset 0 0 0 1.8px var(--brand); }
 .pcell.pos{ background:#FDECEC; } .pcell.neg{ background:#E7F6EC; }
 .pcell.sel{ box-shadow:inset 0 0 0 1.5px var(--brand); }
 .pcell .pd{ max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
@@ -544,9 +545,9 @@ const note = computed(() => sub.value === '累计盈亏'
 .day-card .fee-sum b{ color:var(--ink); font-weight:600; }
 /* 图例：● 买入 ○ 卖出（和格子右上角的记号同一套视觉） */
 .cal-key{ display:inline-flex; align-items:center; font-size:10.5px; color:var(--muted); white-space:nowrap; }
-.cal-key .kdot{ width:5px; height:5px; margin:0 3px 0 7px; border-radius:50%; background:var(--brand); }
+.cal-key .kdot{ width:6px; height:6px; margin:0 3px 0 7px; border-radius:50%; background:var(--brand); }
 .cal-key .kdot:first-child{ margin-left:0; }
-.cal-key .kdot.sell{ background:transparent; box-shadow:inset 0 0 0 1.2px var(--brand); }
+.cal-key .kdot.sell{ background:transparent; box-shadow:inset 0 0 0 1.5px var(--brand); }
 .day-card .more-btn{ border:0; background:none; padding:4px 0; font-size:12px; color:var(--brand); cursor:pointer; }
 @media (max-width: 700px){
   /* 日历格子在小屏更窄：日期 + 收益率两行还要塞得进 44px 高 */
