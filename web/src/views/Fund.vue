@@ -73,9 +73,9 @@
           <div class="ch">
             <div class="st">{{ dpTitle }}</div>
             <div class="nav" v-if="dp === 'day'">
-              <van-icon name="arrow-left" @click="calStep(-1)" :class="{ dis: !canCalStep(-1) }" />
-              <b class="num">{{ calY }}年{{ calM }}月</b>
-              <van-icon name="arrow" @click="calStep(1)" :class="{ dis: !canCalStep(1) }" />
+              <van-icon name="arrow-left" @click="calStep(-1)" :class="{ dis: !canCalStep(-1) }" title="上一个月" />
+              <b class="num pick" @click="mpShow = true">{{ calY }}年{{ calM }}月<van-icon name="arrow-down" /></b>
+              <van-icon name="arrow" @click="calStep(1)" :class="{ dis: !canCalStep(1) }" title="下一个月" />
             </div>
             <span class="seg2" role="group" aria-label="时间粒度">
               <button v-for="p in PERIODS" :key="p.k" :class="{ on: dp === p.k }"
@@ -95,20 +95,39 @@
               </div>
             </div>
             <div class="sel-day" v-if="selRow">
-              <div class="l1">
-                <span class="sd num">{{ selRow.label }}</span>
+              <div class="sd-h">
+                <span class="sd-date num">{{ selRow.label }}</span>
+                <span class="sd-wk">{{ weekdayOf(selRow.date) }}</span>
                 <span v-if="selRow.act" class="mark">{{ selRow.act }}</span>
-                <b class="num" :class="tone(selRow.pnl)">{{ selRow.state || signed(selRow.pnl) }}</b>
-                <b class="num" :class="tone(selRow.pct)">{{ selRow.state ? '' : pct(selRow.pct) }}</b>
+                <!-- 收益和收益率不能并排放两个裸数字（CLAUDE.md「H5 数值排版」）：带上「收益」标签、比率挂括号 -->
+                <span class="sd-pnl">
+                  <span class="k">收益</span>
+                  <b class="num" :class="tone(selRow.pnl)">{{ selRow.state || signed(selRow.pnl) }}</b>
+                  <b class="num" :class="tone(selRow.pct)">{{ (selRow.state || selRow.pct == null) ? '' : `（${pct(selRow.pct)}）` }}</b>
+                </span>
               </div>
-              <div class="l2">
-                <span>净值 <b class="num">{{ selRow.nav == null ? '—' : selRow.nav.toFixed(4) }}</b></span>
-                <span>市价 <b class="num">{{ selRow.px == null ? '—' : selRow.px.toFixed(3) }}</b></span>
-                <span>份额 <b class="num">{{ qty(selRow.shares, h.unit) }}</b></span>
-                <span>费用 <b class="num">{{ selRow.fee ? money(selRow.fee) : '—' }}</b></span>
+              <div class="sd-g">
+                <div><span>净值</span><b class="num">{{ selRow.nav == null ? '—' : selRow.nav.toFixed(4) }}</b></div>
+                <div><span>市价</span><b class="num">{{ selRow.px == null ? '—' : selRow.px.toFixed(3) }}</b></div>
+                <div><span>份额</span><b class="num">{{ qty(selRow.shares, h.unit) }}</b></div>
+                <div><span>费用</span><b class="num">{{ selRow.fee ? money(selRow.fee) : '—' }}</b></div>
               </div>
             </div>
-            <div class="cal-note" v-else>点日历里的某一天看当天明细</div>
+            <div class="cal-note" v-else>点日历里有颜色的那天，看当天的收益和净值</div>
+
+            <!-- 点月份直接选：翻页箭头一格格挪，月份多了就烦；这里把有记录的月份连当月合计一起列出来 -->
+            <van-popup v-model:show="mpShow" position="bottom" round class="mp-pop">
+              <div class="mp">
+                <div class="mp-h">选择月份<span class="mp-n">{{ monthList.length }} 个月有记录</span></div>
+                <div class="mp-list">
+                  <button v-for="m in monthList" :key="m.k" :class="{ on: m.k === curMonthKey }"
+                          @click="gotoMonth(m.k)">
+                    <span>{{ m.label }}<i>{{ m.n }} 期</i></span>
+                    <b class="num" :class="tone(m.pnl)">{{ signed(m.pnl) }}</b>
+                  </button>
+                </div>
+              </div>
+            </van-popup>
           </template>
           <!-- 周 / 月 / 年：期数少，仍是表格式，一次 12 期、不够再往回翻 -->
           <table v-else class="day-list">
@@ -165,7 +184,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { showFailToast } from 'vant'
+import { showFailToast, showToast } from 'vant'
 import { get, peek } from '../api'
 import { money, signed, pct, tone, qty } from '../fmt'
 import PremiumTag from '../components/PremiumTag.vue'
@@ -237,12 +256,44 @@ function shiftMonth(k) {
   return `${t.getFullYear()}-${pad2(t.getMonth() + 1)}`
 }
 const canCalStep = k => calMonths.value.includes(shiftMonth(k))
+// 箭头禁用时点了什么都不发生，用户会以为坏了（2026-11-18：「月份点不动」）。
+// 这个账户 11/16 才建仓，前后确实只有 11 月一个月，但这件事得说出来。
+const firstCal = computed(() => calMonths.value[0] || '')
 function calStep(k) {
-  if (!canCalStep(k)) return
+  if (!canCalStep(k)) {
+    const m = String(k < 0 ? firstCal.value : lastCal.value).replace('-', '年') + '月'
+    showToast({ message: k < 0 ? `${m} 是这个账户最早的月份了` : `${m} 已经是最后一个月了`, position: 'bottom' })
+    return
+  }
   const t = new Date(calY.value, calM.value - 1 + k, 1)
   calY.value = t.getFullYear()
   calM.value = t.getMonth() + 1
   pickDefaultDay()          // 翻到哪个月就选那个月最后一条记录，下面的明细跟着走
+}
+const WK = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+const weekdayOf = ds => (ds ? WK[new Date(ds + 'T00:00:00').getDay()] : '')
+
+// 点月份弹出来的选择面板：有记录的月份 + 当月收益合计（直接求和，线性可加）
+const mpShow = ref(false)
+const curMonthKey = computed(() => `${calY.value}-${pad2(calM.value)}`)
+const monthList = computed(() => {
+  const by = {}
+  for (const r of daily.value) {
+    const k = String(r.date).slice(0, 7)
+    const g = by[k] || (by[k] = { k, n: 0, pnl: 0 })
+    g.n++
+    g.pnl += Number(r.pnl || 0)
+  }
+  return Object.values(by)
+    .sort((a, b) => (a.k < b.k ? 1 : -1))          // 近的月份在上
+    .map(g => ({ ...g, label: `${g.k.slice(0, 4)}年${Number(g.k.slice(5, 7))}月`,
+                 pnl: Math.round(g.pnl * 100) / 100 }))
+})
+function gotoMonth(k) {
+  calY.value = +k.slice(0, 4)
+  calM.value = +k.slice(5, 7)
+  pickDefaultDay()
+  mpShow.value = false
 }
 /** 切到这个月时默认选中当月最后一条有数据的记录（通常就是今天），下面直接给明细 */
 function pickDefaultDay() {
@@ -402,7 +453,12 @@ const note = computed(() => sub.value === '累计盈亏'
 .day-card .ch .nav + .seg2{ margin-left:8px; }
 .day-card .ch .nav b{ font-weight:600; color:var(--ink); white-space:nowrap; text-align:center; }
 .day-card .ch .nav :deep(.van-icon){ cursor:pointer; padding:4px; color:var(--muted); font-size:13px; }
-.day-card .ch .nav :deep(.dis){ opacity:.25; cursor:default; }
+/* 不能翻的方向：淡色 + not-allowed，点下去用 toast 说明为什么（静默无反应会被当成坏了） */
+.day-card .ch .nav :deep(.dis){ opacity:.35; cursor:not-allowed; }
+/* 月份本身可点：直接弹月份列表，不用一格格挪 */
+.day-card .ch .nav .pick{ display:inline-flex; align-items:center; gap:2px; cursor:pointer; padding:2px 4px; border-radius:6px; }
+.day-card .ch .nav .pick:active{ background:#F1F3F6; }
+.day-card .ch .nav .pick :deep(.van-icon){ font-size:11px; padding:0; }
 .wk{ display:grid; grid-template-columns:repeat(7,1fr); margin:0 0 4px; font-size:11px; color:var(--muted); text-align:center; }
 .grid7{ display:grid; grid-template-columns:repeat(7,1fr); gap:6px; }
 /* 没数据的日子（周末 / 还没到 / 未持有）不铺底色，只有真实涨跌才上色，免得一整屏灰块 */
@@ -415,17 +471,38 @@ const note = computed(() => sub.value === '累计盈亏'
 .cell.nodata .dd{ color:#B6BFCC; }
 .cell.sel{ box-shadow:inset 0 0 0 1.5px var(--brand); }
 .dd{ font-size:11.5px; color:var(--sub); } .dv{ font-size:11.5px; font-weight:600; }
-/* 选中那天的明细：一行日期+收益+收益率，一行核对用的净值/市价/份额/费用 */
-.sel-day{ margin-top:10px; padding:9px 11px; border-radius:12px; background:#F7F8FA; }
-.sel-day .l1{ display:flex; align-items:baseline; gap:8px; font-size:12.5px; }
-.sel-day .l1 .sd{ color:var(--muted); }
-.sel-day .l1 b{ margin-left:auto; font-weight:600; }
-.sel-day .l1 b + b{ margin-left:8px; }
-.sel-day .mark{ padding:0 4px; border-radius:4px; font-size:10px; font-weight:500;
+/* 选中那天的明细：上一行日期 + 收益（带标签、比率挂括号），下一行四个核对字段
+   等宽排开。原来把「+23.65 +0.04%」两个裸数字并排扔在右边，既不合规范也读不出谁是收益。 */
+.sel-day{ margin-top:10px; padding:10px 12px 11px; border-radius:12px; background:#F7F8FA; }
+.sd-h{ display:flex; align-items:baseline; gap:6px; font-size:12.5px; }
+.sd-date{ font-weight:600; color:var(--ink); }
+.sd-wk{ color:var(--muted); }
+.sd-h .mark{ padding:0 4px; border-radius:4px; font-size:10px; font-weight:500;
   color:var(--brand); background:var(--brand-soft); }
-.sel-day .l2{ display:flex; flex-wrap:wrap; gap:4px 14px; margin-top:6px; font-size:11.5px; color:var(--muted); }
-.sel-day .l2 b{ color:var(--ink); font-weight:600; font-variant-numeric:tabular-nums; }
+.sd-pnl{ margin-left:auto; white-space:nowrap; }
+.sd-pnl .k{ margin-right:5px; font-size:11.5px; color:var(--muted); }
+.sd-pnl b{ font-weight:600; }
+.sd-pnl b + b{ margin-left:0; font-weight:500; }
+.sd-g{ display:grid; grid-template-columns:repeat(4,1fr); gap:8px;
+  margin-top:9px; padding-top:9px; border-top:1px solid var(--line); }
+.sd-g > div{ min-width:0; text-align:center; }
+.sd-g span{ display:block; font-size:11px; color:var(--muted); }
+.sd-g b{ display:block; margin-top:2px; font-size:12.5px; font-weight:600; color:var(--ink);
+  font-variant-numeric:tabular-nums; white-space:nowrap; }
 .cal-note{ margin-top:10px; font-size:11.5px; color:var(--muted); }
+/* 月份选择面板：一行一个月，右边给当月收益合计 */
+.mp{ padding:2px 0 10px; }
+.mp-h{ display:flex; align-items:baseline; gap:8px; padding:13px 16px 8px;
+  font-size:13px; font-weight:600; color:var(--ink); }
+.mp-h .mp-n{ font-size:11.5px; font-weight:400; color:var(--muted); }
+.mp-list{ max-height:56vh; overflow-y:auto; }
+.mp-list button{ display:flex; align-items:center; width:100%; padding:11px 16px; border:0;
+  background:none; font:inherit; font-size:13px; color:var(--ink); text-align:left; cursor:pointer; }
+.mp-list button.on{ background:var(--brand-soft); color:var(--brand); font-weight:600; }
+.mp-list button span{ flex:1; min-width:0; }
+.mp-list button i{ margin-left:6px; font-style:normal; font-size:11px; color:var(--muted); }
+.mp-list button.on i{ color:var(--brand); opacity:.85; }
+.mp-list button b{ font-weight:600; font-variant-numeric:tabular-nums; }
 .day-card .foot{ display:flex; align-items:center; justify-content:space-between; gap:10px;
   margin:10px 0 2px; font-size:11.5px; color:var(--muted); }
 .day-card .fee-sum b{ color:var(--ink); font-weight:600; }
