@@ -592,9 +592,9 @@ async def holding_chart(request, aid, P, a):
 
     # 默认「买卖点」
     if view == "price":
-        # 场内 ETF 的二级市场收盘价（data/price_*.csv）。场外基金没有这个序列 ——
-        # 申购赎回都按净值成交，前端会把这个页签藏掉，走不到这里。
-        px = HG.price_series(code)
+        # 场内 ETF 的二级市场收盘价（data/price_*.csv）+ 今天这一笔实时价。
+        # 场外基金没有这个序列 —— 申购赎回都按净值成交，前端会把这个页签藏掉，走不到这里。
+        px = P.price_series_live(code)
         if len(px) < 2:
             return HTMLResponse(_frame_notice(
                 "这只基金没有场内市价历史（场外按净值成交），看「净值走势」就行。"))

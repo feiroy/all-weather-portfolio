@@ -236,6 +236,25 @@ class Portfolio:
             return False
         return pd.Timestamp(at, unit="s").normalize() == pd.Timestamp(day).normalize()
 
+    def price_series_live(self, code: str) -> pd.Series:
+        """场内收盘价序列 + 当天的实时价（收盘价 CSV 落盘晚，图不能因此少一天）。
+
+        `price_*.csv` 由行情任务批量写，比实时行情慢一步：头上「场内市价 110.65（11/18 21:05）」
+        已经有了，市价走势却停在 11/17 —— 用户看到的就是「图怎么没画出来」（2026-11-18）。
+        """
+        s = HG.price_series(code)
+        if self._is_otc(code):
+            return s
+        q = self.spot.get(str(code)) or {}
+        px = float(q.get("price") or 0)
+        at = _at_ts(q.get("at"))
+        if px <= 0 or at <= 0:
+            return s
+        day = pd.Timestamp(at, unit="s").normalize()
+        if len(s) and day <= s.index[-1]:
+            return s
+        return pd.concat([s, pd.Series([px], index=pd.DatetimeIndex([day]))])
+
     def price_dates(self, code: str) -> pd.DatetimeIndex:
         """真正有收盘价的日子（场内）；场外返回净值日期。`state` 用它判断当天有没有价。"""
         if self._is_otc(code):
