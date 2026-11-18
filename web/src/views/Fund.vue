@@ -91,29 +91,15 @@
               <div v-for="(c, k) in calCells" :key="k" class="cell"
                    :class="[calCls(c), { empty: !c, sel: c && c.date === selDate }]"
                    @click="c && c.r && (selDate = c.date)">
-                <template v-if="c"><span class="dd">{{ c.d }}</span><span class="dv num">{{ c.p == null ? '' : pct(c.p) }}</span></template>
+                <template v-if="c">
+                  <!-- 有买卖的那天右上角打个记号：实心 = 买入，空心 = 卖出/清仓。
+                       这里不放「买」字，49px 的格子里会把收益率挤成两行。 -->
+                  <span v-if="c.r && c.r.act" class="dot" :class="actCls(c.r.act)" :title="`当天有${c.r.act}`"></span>
+                  <span class="dd">{{ c.d }}</span><span class="dv num">{{ c.p == null ? '' : pct(c.p) }}</span>
+                </template>
               </div>
             </div>
-            <div class="sel-day" v-if="selRow">
-              <div class="sd-h">
-                <span class="sd-date num">{{ selRow.label }}</span>
-                <span class="sd-wk">{{ weekdayOf(selRow.date) }}</span>
-                <span v-if="selRow.act" class="mark">{{ selRow.act }}</span>
-                <!-- 收益和收益率不能并排放两个裸数字（CLAUDE.md「H5 数值排版」）：带上「收益」标签、比率挂括号 -->
-                <span class="sd-pnl">
-                  <span class="k">收益</span>
-                  <b class="num" :class="tone(selRow.pnl)">{{ selRow.state || signed(selRow.pnl) }}</b>
-                  <b class="num" :class="tone(selRow.pct)">{{ (selRow.state || selRow.pct == null) ? '' : `（${pct(selRow.pct)}）` }}</b>
-                </span>
-              </div>
-              <div class="sd-g">
-                <div><span>净值</span><b class="num">{{ selRow.nav == null ? '—' : selRow.nav.toFixed(4) }}</b></div>
-                <div><span>市价</span><b class="num">{{ selRow.px == null ? '—' : selRow.px.toFixed(3) }}</b></div>
-                <div><span>份额</span><b class="num">{{ qty(selRow.shares, h.unit) }}</b></div>
-                <div><span>费用</span><b class="num">{{ selRow.fee ? money(selRow.fee) : '—' }}</b></div>
-              </div>
-            </div>
-            <div class="cal-note" v-else>点日历里有颜色的那天，看当天的收益和净值</div>
+            <div class="cal-note" v-if="!selRow">点日历里有颜色的那天，看当天的收益和净值</div>
 
             <!-- 点月份直接选：翻页箭头一格格挪，月份多了就烦；这里把有记录的月份连当月合计一起列出来 -->
             <van-popup v-model:show="mpShow" position="bottom" round class="mp-pop">
@@ -135,32 +121,33 @@
             <div class="pgrid" :class="dp === 'week' ? 'g4' : 'g3'">
               <div v-for="r in dailyShown" :key="r.date" class="pcell"
                    :class="[mvCls(r.pnl), { sel: r.date === selDate }]" @click="selDate = r.date">
-                <span v-if="r.act" class="dot" :title="`这一期有${r.act}`"></span>
+                <span v-if="r.act" class="dot" :class="actCls(r.act)" :title="`这一期有${r.act}`"></span>
                 <span class="pd">{{ r.label }}</span>
                 <b class="pv num">{{ r.state || signed(r.pnl) }}</b>
                 <span class="pp num">{{ (r.state || r.pct == null) ? '' : pct(r.pct) }}</span>
               </div>
             </div>
-            <div class="sel-day" v-if="selRow">
-              <div class="sd-h">
-                <span class="sd-date num">{{ selRow.label }}</span>
-                <span v-if="selRow.act" class="mark">{{ selRow.act }}</span>
-                <span class="sd-pnl">
-                  <span class="k">收益</span>
-                  <b class="num" :class="tone(selRow.pnl)">{{ selRow.state || signed(selRow.pnl) }}</b>
-                  <b class="num" :class="tone(selRow.pct)">{{ (selRow.state || selRow.pct == null) ? '' : `（${pct(selRow.pct)}）` }}</b>
-                </span>
-              </div>
-              <div class="sd-g">
-                <div><span>净值</span><b class="num">{{ selRow.nav == null ? '—' : selRow.nav.toFixed(4) }}</b></div>
-                <div><span>市价</span><b class="num">{{ selRow.px == null ? '—' : selRow.px.toFixed(3) }}</b></div>
-                <div><span>份额</span><b class="num">{{ qty(selRow.shares, h.unit) }}</b></div>
-                <div><span>费用</span><b class="num">{{ selRow.fee ? money(selRow.fee) : '—' }}</b></div>
-              </div>
-            </div>
           </template>
+          <!-- 选中期明细：**一行**放完。不写日期和星期 —— 上面选中的格子本身就是那一天，
+               再写一遍「2026/11/18 周三」既占掉 88px（390 下这行只有 318px）又没什么信息。
+               日视图和周/月/年共用这一份，不再各写一遍（改一处漏一处就是这么来的）。 -->
+          <div class="sel-day" v-if="selRow">
+            <span v-if="selRow.act" class="mark" :class="actCls(selRow.act)">{{ selRow.act }}</span>
+            <!-- 收益和收益率不能并排放两个裸数字（CLAUDE.md「H5 数值排版」）：留「收益」标签 + 数值。
+                 收益率不再重复写在条里 —— 上面选中的格子里就是它，两处都写既重复又占 40px。 -->
+            <span class="sd-pnl">
+              <i class="k">收益</i>
+              <b class="num" :class="tone(selRow.pnl)">{{ selRow.state || signed(selRow.pnl) }}</b>
+            </span>
+            <span class="kv kvs"><i>{{ selPx.k }}</i><b class="num">{{ selPx.v }}</b></span>
+            <span class="kv"><i>份额</i><b class="num">{{ qty(selRow.shares, h.unit) }}</b></span>
+            <!-- 费用只在买卖当天有值，其余日子整列都是「—」，占宽度不给信息 -->
+            <span class="kv" v-if="selRow.fee"><i>费用</i><b class="num">{{ money(selRow.fee) }}</b></span>
+          </div>
           <div class="foot">
             <span class="fee-sum">累计费用 <b class="num">{{ money(feeTotal) }}</b><template v-if="feeKindText">（{{ feeKindText }}）</template></span>
+            <!-- 格子右上角的圆点是什么意思，得有一句解释：没有买卖的那屏不显示，不白占地方 -->
+            <span class="cal-key" v-if="hasAct"><i class="kdot buy"></i>买入<i class="kdot sell"></i>卖出</span>
             <button v-if="dp !== 'day' && daily.length > dailyShown.length"
                     type="button" class="more-btn" @click="morePeriod">
               看更早的 {{ Math.min(LIMIT, daily.length - dailyShown.length) }} 期
@@ -258,8 +245,25 @@ const calCells = computed(() => {
 })
 // 没数据的日子（周末 / 还没持有）不铺底色，只有真实涨跌才上色，免得一整屏灰块
 const mvCls = v => (v == null ? 'nodata' : v > 0 ? 'pos' : v < 0 ? 'neg' : 'flat')
+// 买卖记号：实心 = 买入，空心 = 卖出/清仓；同一天有买有卖（act = 买入/卖出）按买入算实心。
+// 日历格子、周月年格子、明细条胶囊共用一个函数，免得三处各判一次、判出三种口径。
+const actCls = a => (String(a || '').includes('买') ? 'buy' : 'sell')
+// 当前这一屏有没有成交：没有就不显示「● 买入 ○ 卖出」这行图例
+const hasAct = computed(() => (dp.value === 'day'
+  ? calCells.value.some(c => c && c.r && c.r.act)
+  : dailyShown.value.some(r => r.act)))
 const calCls = c => (!c ? '' : mvCls(c.p))
 const selRow = computed(() => (selDate.value ? dayMap.value[selDate.value] : null))
+// 明细条只给**当天真正用来计价的那个价**：场内是市价、场外是净值（后端 px_kind 已标明，
+// 场内没行情时也会退回净值）。两个价并排摆着既占宽度（390 下这行只有 316px），
+// 也容易拿错价去对账 —— 场外的 px 其实就是净值四舍五入到 3 位（1.8178 → 1.818）。
+const selPx = computed(() => {
+  const r = selRow.value
+  if (!r) return { k: '净值', v: '—' }
+  const isPx = r.px_kind === '市价'
+  const v = isPx ? r.px : r.nav
+  return { k: isPx ? '市价' : '净值', v: v == null ? '—' : v.toFixed(isPx ? 3 : 4) }
+})
 function shiftMonth(k) {
   const t = new Date(calY.value, calM.value - 1 + k, 1)
   return `${t.getFullYear()}-${pad2(t.getMonth() + 1)}`
@@ -279,9 +283,6 @@ function calStep(k) {
   calM.value = t.getMonth() + 1
   pickDefaultDay()          // 翻到哪个月就选那个月最后一条记录，下面的明细跟着走
 }
-const WK = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
-const weekdayOf = ds => (ds ? WK[new Date(ds + 'T00:00:00').getDay()] : '')
-
 // 点月份弹出来的选择面板：有记录的月份 + 当月收益合计（直接求和，线性可加）
 const mpShow = ref(false)
 const curMonthKey = computed(() => `${calY.value}-${pad2(calM.value)}`)
@@ -452,8 +453,13 @@ const note = computed(() => sub.value === '累计盈亏'
   position:relative; min-width:0; min-height:66px; padding:7px 4px; border-radius:9px;
   background:#F7F8FA; cursor:pointer; }
 /* 有买卖的那一期：右上角一个小圆点。原来把「买入」塞进标题行，把「2026年第47周」
-   挤成「2026年第44...」，两个信息互相抢地方，不如让标记不占文字宽度。 */
-.pcell .dot{ position:absolute; top:6px; right:6px; width:5px; height:5px; border-radius:50%; background:var(--brand); }
+   挤成「2026年第44...」，两个信息互相抢地方，不如让标记不占文字宽度。
+   实心 = 买入，空心 = 卖出/清仓：不给字也分得出方向，日历格子（49px 宽）同样用它。 */
+.cell .dot, .pcell .dot{ position:absolute; top:5px; right:5px; width:5px; height:5px;
+  border-radius:50%; background:var(--brand); }
+/* 大格子（月/年）边角更松，圆点往里挪一点，别像贴在圆角上 */
+.pcell .dot{ top:7px; right:7px; }
+.cell .dot.sell, .pcell .dot.sell{ background:transparent; box-shadow:inset 0 0 0 1.5px var(--brand); }
 .pcell.pos{ background:#FDECEC; } .pcell.neg{ background:#E7F6EC; }
 .pcell.sel{ box-shadow:inset 0 0 0 1.5px var(--brand); }
 .pcell .pd{ max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
@@ -487,7 +493,7 @@ const note = computed(() => sub.value === '累计盈亏'
 .wk{ display:grid; grid-template-columns:repeat(7,1fr); margin:0 0 4px; font-size:11px; color:var(--muted); text-align:center; }
 .grid7{ display:grid; grid-template-columns:repeat(7,1fr); gap:6px; }
 /* 没数据的日子（周末 / 还没到 / 未持有）不铺底色，只有真实涨跌才上色，免得一整屏灰块 */
-.cell{ display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
+.cell{ position:relative; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
   min-height:46px; border-radius:9px; background:transparent; cursor:default; }
 .cell.empty{ background:transparent; cursor:default; }
 .cell.pos{ background:#FDECEC; cursor:pointer; } .cell.neg{ background:#E7F6EC; cursor:pointer; }
@@ -496,24 +502,29 @@ const note = computed(() => sub.value === '累计盈亏'
 .cell.nodata .dd{ color:#B6BFCC; }
 .cell.sel{ box-shadow:inset 0 0 0 1.5px var(--brand); }
 .dd{ font-size:11.5px; color:var(--sub); } .dv{ font-size:11.5px; font-weight:600; }
-/* 选中那天的明细：上一行日期 + 收益（带标签、比率挂括号），下一行四个核对字段
-   等宽排开。原来把「+23.65 +0.04%」两个裸数字并排扔在右边，既不合规范也读不出谁是收益。 */
-.sel-day{ margin-top:10px; padding:10px 12px 11px; border-radius:12px; background:#F7F8FA; }
-.sd-h{ display:flex; align-items:baseline; gap:6px; font-size:12.5px; }
-.sd-date{ font-weight:600; color:var(--ink); }
-.sd-wk{ color:var(--muted); }
-.sd-h .mark{ padding:0 4px; border-radius:4px; font-size:10px; font-weight:500;
+/* 选中期明细：**一行**放完（买卖 · 收益 · 净值 · 市价 · 份额 · 费用）。
+   两行版本（上面日期+收益、下面四个等分格）把卡片撑高一截，而这几个只是核对字段：
+   横着读一遍比上下跳着看快，手机上也能同屏看见日历和明细。日期/星期不写 ——
+   选中的格子就是那一天，写出来白占 88px。
+   390 下这一行只有 318px，六段必须挤：字号跟着视口走（10~12px），间距收到 6px。 */
+.sel-day{ display:flex; align-items:baseline; gap:0 6px; min-width:0; overflow-x:auto;
+  margin-top:10px; padding:9px 10px; border-radius:10px; background:#F7F8FA;
+  font-size:clamp(10px, 2.7vw, 12px); scrollbar-width:none; }
+.sel-day::-webkit-scrollbar{ display:none; }
+.sel-day .mark{ padding:0 4px; border-radius:4px; font-size:9.5px; font-weight:500; white-space:nowrap;
   color:var(--brand); background:var(--brand-soft); }
-.sd-pnl{ margin-left:auto; white-space:nowrap; }
-.sd-pnl .k{ margin-right:5px; font-size:11.5px; color:var(--muted); }
+.sel-day .mark.sell{ color:var(--down); background:#E7F6EC; }
+/* 收益 + 括号里的收益率：同一组，中间不留额外间距，别读成两个独立数字 */
+.sd-pnl{ white-space:nowrap; }
+.sd-pnl .k{ margin-right:4px; font-size:9.5px; font-style:normal; color:var(--muted); }
 .sd-pnl b{ font-weight:600; }
-.sd-pnl b + b{ margin-left:0; font-weight:500; }
-.sd-g{ display:grid; grid-template-columns:repeat(4,1fr); gap:8px;
-  margin-top:9px; padding-top:9px; border-top:1px solid var(--line); }
-.sd-g > div{ min-width:0; text-align:center; }
-.sd-g span{ display:block; font-size:11px; color:var(--muted); }
-.sd-g b{ display:block; margin-top:2px; font-size:12.5px; font-weight:600; color:var(--ink);
-  font-variant-numeric:tabular-nums; white-space:nowrap; }
+.sd-pnl b + b{ font-weight:500; }
+/* 核对字段：小号灰标签 + 紧挨着的数值，横排一行 */
+.kv{ display:inline-flex; align-items:baseline; gap:3px; white-space:nowrap; }
+/* 核对字段整组靠右：左边「买卖 · 收益」是结论，右边这几个是对账用的状态，中间留白比挤在左边好读 */
+.kv.kvs{ margin-left:auto; }
+.kv i{ font-style:normal; font-size:9.5px; color:var(--muted); }
+.kv b{ font-weight:600; color:var(--ink); font-variant-numeric:tabular-nums; }
 .cal-note{ margin-top:10px; font-size:11.5px; color:var(--muted); }
 /* 月份选择面板：一行一个月，右边给当月收益合计 */
 .mp{ padding:2px 0 10px; }
@@ -531,6 +542,11 @@ const note = computed(() => sub.value === '累计盈亏'
 .day-card .foot{ display:flex; align-items:center; justify-content:space-between; gap:10px;
   margin:10px 0 2px; font-size:11.5px; color:var(--muted); }
 .day-card .fee-sum b{ color:var(--ink); font-weight:600; }
+/* 图例：● 买入 ○ 卖出（和格子右上角的记号同一套视觉） */
+.cal-key{ display:inline-flex; align-items:center; font-size:10.5px; color:var(--muted); white-space:nowrap; }
+.cal-key .kdot{ width:5px; height:5px; margin:0 3px 0 7px; border-radius:50%; background:var(--brand); }
+.cal-key .kdot:first-child{ margin-left:0; }
+.cal-key .kdot.sell{ background:transparent; box-shadow:inset 0 0 0 1.2px var(--brand); }
 .day-card .more-btn{ border:0; background:none; padding:4px 0; font-size:12px; color:var(--brand); cursor:pointer; }
 @media (max-width: 700px){
   /* 日历格子在小屏更窄：日期 + 收益率两行还要塞得进 44px 高 */
@@ -545,8 +561,10 @@ const note = computed(() => sub.value === '累计盈亏'
   .day-card .ch .seg2 button{ padding:4px 9px; font-size:12px; }
   .day-card .ch .nav b{ font-size:11.5px; }
   .day-card .ch .nav :deep(.van-icon){ padding:2px; }
-  /* 明细条四格在 390 下也够，只把字号压一点 */
-  .sd-g b{ font-size:12px; }
+  /* 明细条一行在 390 下要挤下六段：字号由 clamp 跟着视口走，这里只再收一圈内边距 */
+  .sel-day{ gap:0 5px; padding:8px 9px; }
+  .sel-day .kv i, .sel-day .sd-pnl .k{ font-size:9px; }
+  .sel-day .mark{ font-size:9px; padding:0 3px; }
 }
 /* 视觉定义在 style.css 的 .mode-seg（与 .seg2 同一套），这里只管外边距 */
 .mode-seg{ margin:2px 0 4px; }
