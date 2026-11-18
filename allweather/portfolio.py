@@ -191,6 +191,22 @@ class Portfolio:
                 self._rawcache[code] = pd.DatetimeIndex([])
         return self._rawcache[code]
 
+    def nav_published(self, code: str) -> pd.Series:
+        """只保留**真正公布过净值**的那些日子（把面板 ffill 出来的点全部去掉）。
+
+        净值面板为了对齐交易日会一路 ffill：场外基金当天净值 21:00 后才出，图就会多出
+        一段「把昨天复制成今天」的水平线，tooltip 还把 11/17 的净值标成 11/18
+        —— 2026-11-18 用户：「都没数据的情况下你不能瞎画，把 17 号的结果当成 18 号的结果」。
+
+        估值（px_on / nav_on）仍然用 ffill 后的面板：份额要按最新净值计价，
+        没有新净值时沿用上一份是对的。**画图**才需要这份「只有真数据」的序列。
+        """
+        col = self.nav(code)
+        raw = self.raw_dates(code)
+        if not len(col) or not len(raw):
+            return col
+        return col.loc[col.index.isin(raw)]
+
     def nav_on(self, code: str, day) -> float | None:
         col = self.nav(code)
         if not len(col):

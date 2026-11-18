@@ -560,7 +560,9 @@ async def holding_chart(request, aid, P, a):
     if it is None:
         return HTMLResponse(_frame_notice("这只基金不在当前账户里。"))
     unit = P.holding(it).get("unit") or HG.default_unit(code)
-    nv = P.nav(code)
+    # 画图用「只有真净值」的序列：面板 ffill 出来的今天不是今天的数据，
+    # 画上去就是把昨天复制成今天（2026-11-18 用户要求）
+    nv = P.nav_published(code)
 
     # 与 app.py::_code_trades 同口径：日期 2026/10/27、份额单位、逐笔份额与成交净值
     trades = []

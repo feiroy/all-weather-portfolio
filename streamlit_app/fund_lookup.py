@@ -248,8 +248,12 @@ def is_stale(code: str) -> bool:
     gap = (expect - d.index[-1]).days
     if gap > 7:
         return True                      # 断档了，别管刚才是谁写的文件，直接补
+    # 只落后一天 = 「今天的净值还没出」，这时候要盯得紧：20:30~22:00 各家陆续公布，
+    # 1 小时的宽限会让 21:06 拉空一次就卡到 22:06 才重试（2026-11-18 用户问
+    # 「到底几点才能更新所有的数据」）。落后更多天说明是别的原因，维持 1 小时，别打接口。
+    grace = pd.Timedelta(minutes=10) if gap <= 1 else pd.Timedelta(hours=1)
     age = pd.Timestamp.now() - pd.Timestamp.fromtimestamp(p.stat().st_mtime)
-    return age > pd.Timedelta(hours=1)
+    return age > grace
 
 
 def ensure_fresh(code: str) -> tuple[bool, str]:
