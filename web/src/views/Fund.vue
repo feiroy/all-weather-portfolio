@@ -84,21 +84,11 @@
           </div>
           <!-- 日：一个月一屏的日历，可左右翻月。逐日台账是只增不减的，平铺列表跑一年就是
                250 行；日历永远只有 5~6 行格子，翻月的成本是一下点击。点某天在下面看那天的
-               明细（净值/市价/份额/收益/费用），核对用的字段一个不少。 -->
+               明细（净值/市价/份额/收益/费用）。
+               格子本身用 `ReturnCal`（全站唯一一份日历实现，和市场 · 基金详情、收益明细同一套）。 -->
           <template v-if="dp === 'day'">
-            <div class="wk"><span v-for="w in WEEK" :key="w">{{ w }}</span></div>
-            <div class="grid7">
-              <div v-for="(c, k) in calCells" :key="k" class="cell"
-                   :class="[calCls(c), { empty: !c, sel: c && c.date === selDate }]"
-                   @click="c && c.r && (selDate = c.date)">
-                <template v-if="c">
-                  <!-- 有买卖的那天右上角打个记号：实心 = 买入，空心 = 卖出/清仓。
-                       这里不放「买」字，49px 的格子里会把收益率挤成两行。 -->
-                  <span v-if="c.r && c.r.act" class="dot" :class="actCls(c.r.act)" :title="`当天有${c.r.act}`"></span>
-                  <span class="dd">{{ c.d }}</span><span class="dv num">{{ c.p == null ? '' : pct(c.p) }}</span>
-                </template>
-              </div>
-            </div>
+            <ReturnCal mode="日" :cells="calView" :fmt="calFmt" :sel="selDate" clickable
+                       @select="c => (selDate = c.key)" />
             <div class="cal-note" v-if="!selRow">点日历里有颜色的那天，看当天的收益和净值</div>
 
             <!-- 点月份直接选：翻页箭头一格格挪，月份多了就烦；这里把有记录的月份连当月合计一起列出来 -->
@@ -115,18 +105,11 @@
               </div>
             </van-popup>
           </template>
-          <!-- 周 / 月 / 年：与日视图同一套格子语言（期间 + 收益 + 收益率），不退回 7 列表格。
-               表格在窄屏要么被挤扁、要么把「费用」列裁在卡片外；格子点开就是同一张明细条。 -->
+          <!-- 周 / 月 / 年：同一套格子，只是格子里装的是「期间 + 收益 + 收益率」。
+               点开就是同一张明细条。 -->
           <template v-else>
-            <div class="pgrid" :class="dp === 'week' ? 'g4' : 'g3'">
-              <div v-for="r in dailyShown" :key="r.date" class="pcell"
-                   :class="[mvCls(r.pnl), { sel: r.date === selDate }]" @click="selDate = r.date">
-                <span v-if="r.act" class="dot" :class="actCls(r.act)" :title="`这一期有${r.act}`"></span>
-                <span class="pd">{{ r.label }}</span>
-                <b class="pv num">{{ r.state || signed(r.pnl) }}</b>
-                <span class="pp num">{{ (r.state || r.pct == null) ? '' : pct(r.pct) }}</span>
-              </div>
-            </div>
+            <ReturnCal :mode="PERIOD_CN[dp]" :cells="calView" :fmt="calFmt" :sub-fmt="calSub"
+                       :sel="selDate" clickable @select="c => (selDate = c.key)" />
           </template>
           <!-- 选中期明细：**一行**放完。不写日期和星期 —— 上面选中的格子本身就是那一天，
                再写一遍「2026/11/18 周三」既占掉 88px（390 下这行只有 318px）又没什么信息。
@@ -182,6 +165,7 @@ import { showFailToast, showToast } from 'vant'
 import { get, peek } from '../api'
 import { money, signed, pct, tone, qty } from '../fmt'
 import PremiumTag from '../components/PremiumTag.vue'
+import ReturnCal from '../components/ReturnCal.vue'
 
 const route = useRoute(), router = useRouter()
 const aid = route.params.aid, code = route.params.code
@@ -221,7 +205,8 @@ const dailyShown = computed(() => daily.value.slice(-LIMIT * pages.value).revers
 // 逐日台账只增不减，平铺列表跑一年 250 行；日历永远只有 5~6 行格子。
 // 格子的收益率直接用后端给的 pct（市值变化 − 净流入 算出来的），**不是**净值比值——
 // 账户口径要扣掉买入卖出，用净值相除会把建仓当天的成本算成收益。
-const WEEK = ['一', '二', '三', '四', '五', '六', '日']
+// 格子本身由 `ReturnCal.vue` 画（全站唯一一份日历实现），这里只负责喂数据。
+const PERIOD_CN = { day: '日', week: '周', month: '月', year: '年' }
 const pad2 = n => String(n).padStart(2, '0')
 const dayMap = computed(() => Object.fromEntries(daily.value.map(r => [r.date, r])))
 /** 有数据的月份（升序），翻月的边界靠它判断：没持仓的月份不给翻，免得翻到一片空白 */
@@ -243,16 +228,25 @@ const calCells = computed(() => {
   }
   return cells
 })
-// 没数据的日子（周末 / 还没持有）不铺底色，只有真实涨跌才上色，免得一整屏灰块
-const mvCls = v => (v == null ? 'nodata' : v > 0 ? 'pos' : v < 0 ? 'neg' : 'flat')
+// 喂给 ReturnCal 的格子：日视图一格一天（含「待更新」），周/月/年一格一期
+const calView = computed(() => (dp.value === 'day'
+  ? calCells.value.map(c => (c ? {
+      key: c.date, d: c.d, v: c.p, p: c.p,
+      state: (c.r && c.r.state) || '', act: (c.r && c.r.act) || '',
+    } : null))
+  : dailyShown.value.map(r => ({
+      key: r.date, label: r.label, v: r.pnl, p: r.pct, state: r.state || '', act: r.act || '',
+    }))))
+const calFmt = c => c.state || (dp.value === 'day'
+  ? (c.p == null ? '' : pct(c.p))
+  : signed(c.v))
+// 周/月/年同时给收益率（第二行小字）：期间收益额和收益率要能一起看
+const calSub = c => ((c.state || c.p == null) ? '' : pct(c.p))
 // 买卖记号：实心 = 买入，空心 = 卖出/清仓；同一天有买有卖（act = 买入/卖出）按买入算实心。
-// 日历格子、周月年格子、明细条胶囊共用一个函数，免得三处各判一次、判出三种口径。
+// 日历格子里的圆点由 ReturnCal 按同一个规则画，明细条胶囊也用它，免得三处各判一次。
 const actCls = a => (String(a || '').includes('买') ? 'buy' : 'sell')
 // 当前这一屏有没有成交：没有就不显示「● 买入 ○ 卖出」这行图例
-const hasAct = computed(() => (dp.value === 'day'
-  ? calCells.value.some(c => c && c.r && c.r.act)
-  : dailyShown.value.some(r => r.act)))
-const calCls = c => (!c ? '' : mvCls(c.p))
+const hasAct = computed(() => calView.value.some(c => c && c.act))
 const selRow = computed(() => (selDate.value ? dayMap.value[selDate.value] : null))
 // 明细条只给**当天真正用来计价的那个价**：场内是市价、场外是净值（后端 px_kind 已标明，
 // 场内没行情时也会退回净值）。两个价并排摆着既占宽度（390 下这行只有 316px），
@@ -442,40 +436,6 @@ const note = computed(() => sub.value === '累计盈亏'
 /* 这一行现在有「标题 + 月份翻页 + 日/月/年」三段：标题不许被压缩换行，翻页和分段靠 auto 外距推到右边 */
 .day-card .ch{ display:flex; align-items:center; gap:8px; margin-bottom:10px; }
 .day-card .ch .st{ flex:none; white-space:nowrap; font-size:14px; font-weight:600; color:var(--ink); }
-/* 周 / 月 / 年：与日历同一套格子（期间 / 收益 / 收益率），不再退回 7 列表格 ——
-   表格在窄屏要么挤成一团、要么把「费用」裁到卡片外，和日历放在一起也像两个页面的东西。 */
-.pgrid{ display:grid; gap:6px; }
-/* 必须 minmax(0,1fr)：1fr 的默认最小宽度是 auto，某一格文字长（如「2026年第47周」）
-   会把那一列撑到 101px，四列就不等宽了（实测 73.6 / 74.3 / 74.1 / 101.3）。 */
-.pgrid.g4{ grid-template-columns:repeat(4,minmax(0,1fr)); }
-.pgrid.g3{ grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
-.pcell{ display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px;
-  position:relative; min-width:0; min-height:66px; padding:7px 4px; border-radius:9px;
-  background:#F7F8FA; cursor:pointer; }
-/* 有买卖的那一期：右上角一个小圆点。原来把「买入」塞进标题行，把「2026年第47周」
-   挤成「2026年第44...」，两个信息互相抢地方，不如让标记不占文字宽度。
-   实心 = 买入，空心 = 卖出/清仓：不给字也分得出方向，日历格子（49px 宽）同样用它。 */
-.cell .dot, .pcell .dot{ position:absolute; top:5px; right:5px; width:6px; height:6px;
-  border-radius:50%; background:var(--brand); }
-/* 大格子（月/年）边角更松，圆点往里挪一点，别像贴在圆角上 */
-.pcell .dot{ top:7px; right:7px; }
-/* 空心圈（卖出）：5px 时实心/空心在手机上分不出来，圆点给到 6px、描边 1.8px */
-.cell .dot.sell, .pcell .dot.sell{ background:transparent; box-shadow:inset 0 0 0 1.8px var(--brand); }
-.pcell.pos{ background:#FDECEC; } .pcell.neg{ background:#E7F6EC; }
-.pcell.sel{ box-shadow:inset 0 0 0 1.5px var(--brand); }
-.pcell .pd{ max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-  font-size:10.5px; color:var(--sub); }
-.pcell .pd i{ margin-left:3px; padding:0 3px; border-radius:3px; font-size:9px; font-style:normal;
-  color:var(--brand); background:var(--brand-soft); }
-.pcell .pv{ font-size:13px; font-weight:600; color:var(--ink); white-space:nowrap; }
-.pcell.pos .pv{ color:var(--up); } .pcell.neg .pv{ color:var(--down); }
-.pcell .pp{ font-size:10.5px; color:var(--muted); }
-.pcell.pos .pp{ color:var(--up); opacity:.85; } .pcell.neg .pp{ color:var(--down); opacity:.85; }
-/* 桌面卡片 936 宽：4 列会被拉到 221×66，格子扁得像横条、内容全飘在中间。
-   改成 6 列（约 150×66），和日视图日历的 7 列格子比例对得上，一行也能多放几期。 */
-@media (min-width:900px){
-  .pgrid.g4, .pgrid.g3{ grid-template-columns:repeat(6,minmax(0,1fr)); }
-}
 /* 日视图日历：与「市场 · 基金详情」的收益日历同一套视觉（周一起头的 7 列网格）。
    这一行有三段：标题 / 月份翻页 / 日周月年。翻页靠 margin-left:auto 顶到右边，
    但两个 auto 会平分剩余空间（月份跑到标题旁边、按钮单飞），所以「有 nav 时的 seg2」
@@ -491,18 +451,6 @@ const note = computed(() => sub.value === '累计盈亏'
 .day-card .ch .nav .pick{ display:inline-flex; align-items:center; gap:2px; cursor:pointer; padding:2px 4px; border-radius:6px; }
 .day-card .ch .nav .pick:active{ background:#F1F3F6; }
 .day-card .ch .nav .pick :deep(.van-icon){ font-size:11px; padding:0; }
-.wk{ display:grid; grid-template-columns:repeat(7,1fr); margin:0 0 4px; font-size:11px; color:var(--muted); text-align:center; }
-.grid7{ display:grid; grid-template-columns:repeat(7,1fr); gap:6px; }
-/* 没数据的日子（周末 / 还没到 / 未持有）不铺底色，只有真实涨跌才上色，免得一整屏灰块 */
-.cell{ position:relative; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
-  min-height:46px; border-radius:9px; background:transparent; cursor:default; }
-.cell.empty{ background:transparent; cursor:default; }
-.cell.pos{ background:#FDECEC; cursor:pointer; } .cell.neg{ background:#E7F6EC; cursor:pointer; }
-.cell.flat{ background:#F4F6F9; cursor:pointer; }
-.cell.pos .dv{ color:var(--up); } .cell.neg .dv{ color:var(--down); }
-.cell.nodata .dd{ color:#B6BFCC; }
-.cell.sel{ box-shadow:inset 0 0 0 1.5px var(--brand); }
-.dd{ font-size:11.5px; color:var(--sub); } .dv{ font-size:11.5px; font-weight:600; }
 /* 选中期明细：**一行**放完（买卖 · 收益 · 净值 · 市价 · 份额 · 费用）。
    两行版本（上面日期+收益、下面四个等分格）把卡片撑高一截，而这几个只是核对字段：
    横着读一遍比上下跳着看快，手机上也能同屏看见日历和明细。日期/星期不写 ——
@@ -550,14 +498,6 @@ const note = computed(() => sub.value === '累计盈亏'
 .cal-key .kdot.sell{ background:transparent; box-shadow:inset 0 0 0 1.5px var(--brand); }
 .day-card .more-btn{ border:0; background:none; padding:4px 0; font-size:12px; color:var(--brand); cursor:pointer; }
 @media (max-width: 700px){
-  /* 日历格子在小屏更窄：日期 + 收益率两行还要塞得进 44px 高 */
-  .cell{ min-height:44px; border-radius:8px; }
-  .grid7{ gap:4px; }
-  .dd, .dv{ font-size:11px; }
-  /* 周/月/年的格子同理收一圈，4 列下每格约 80px，「-983.73」放得下 */
-  .pcell{ min-height:60px; padding:6px 3px; }
-  .pcell .pv{ font-size:12px; }
-  .pcell .pd, .pcell .pp{ font-size:10px; }
   /* 标题 + 月份 + 日周月年 一行放不下 390：按钮和月份各收一圈内边距，别让「月」被挤到下一行 */
   .day-card .ch .seg2 button{ padding:4px 9px; font-size:12px; }
   .day-card .ch .nav b{ font-size:11.5px; }

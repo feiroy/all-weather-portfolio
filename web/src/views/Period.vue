@@ -41,21 +41,9 @@
                 <b class="num" :class="tone(curSum.p)">{{ pct(curSum.p) }}</b>
               </div>
               <p v-if="mode !== '日'" class="cal-note">账户自 {{ firstDate }} 起有数据，更早的期间显示「—」；点有数据的格子可下钻</p>
-              <template v-if="mode === '日'">
-                <div class="wk"><span v-for="w in '一二三四五六日'" :key="w">{{ w }}</span></div>
-                <div class="grid7">
-                  <div v-for="(c, k) in dayCells" :key="k" class="cell" :class="[c ? (c.v == null ? 'none' : c.v > 0 ? 'pos' : c.v < 0 ? 'neg' : '') : '', { sel: c && c.date === sel, empty: !c }]"
-                       @click="c && c.v != null && (sel = c.date)">
-                    <template v-if="c"><span class="dd">{{ c.d }}</span><span class="dv num">{{ c.v == null ? '' : cu === '¥' ? short(c.v) : pctS(c.p) }}</span></template>
-                  </div>
-                </div>
-              </template>
-              <div v-else class="grid3">
-                <div v-for="c in periodCells" :key="c.key" class="cell big" :class="c.v == null ? 'empty' : c.v > 0 ? 'pos' : c.v < 0 ? 'neg' : ''"
-                     @click="c.v != null && drill(c)">
-                  <span class="dd">{{ c.label }}</span><span class="dv num">{{ c.v == null ? '—' : cu === '¥' ? signed(c.v, 0) : pct(c.p) }}</span>
-                </div>
-              </div>
+              <!-- 格子用 ReturnCal（全站唯一一份日历实现），这里只喂数据 -->
+              <ReturnCal :mode="mode" :cells="calCells" :fmt="calFmt" :sel="mode === '日' ? sel : ''"
+                         clickable @select="onPick" />
               <p class="cal-tip" v-if="mode === '日'">点日历里任意一天，下面展开每只基金各赚多少</p>
             </div>
           </div>
@@ -88,6 +76,7 @@ import { money, signed, pct, tone } from '../fmt'
 import SubBar from '../components/SubBar.vue'
 import LineChart from '../components/LineChart.vue'
 import RangeBar from '../components/RangeBar.vue'
+import ReturnCal from '../components/ReturnCal.vue'
 import { tipRows } from '../utils/chartTheme'
 import { dateText } from '../utils/chartAxis'
 import { aggregate, rangeStartIndex, RANGE_KEYS } from '../utils/series'
@@ -195,6 +184,17 @@ function step(k) {
   else cur.value = { y: y + k, m }
 }
 function drill(c) { if (mode.value === '年') { cur.value = { y: c.y, m: cur.value.m }; mode.value = '月' } else { cur.value = { y: c.y, m: c.m }; mode.value = '日' } }
+// 喂给 ReturnCal 的格子：日 = 一格一天，月/年 = 一格一期（期间对象要带上 y/m 才能下钻）
+const calCells = computed(() => (mode.value === '日'
+  ? dayCells.value.map(c => (c ? { key: c.date, d: c.d, v: c.v, p: c.p } : null))
+  : periodCells.value.map(c => ({ key: `${c.label}|${c.y}|${c.m || ''}`, label: c.label, v: c.v, p: c.p, y: c.y, m: c.m }))))
+const calFmt = c => (mode.value === '日'
+  ? (c.v == null ? '' : cu.value === '¥' ? short(c.v) : pctS(c.p))
+  : (c.v == null ? '—' : cu.value === '¥' ? signed(c.v, 0) : pct(c.p)))
+function onPick(c) {
+  if (mode.value === '日') sel.value = c.key
+  else drill(c)
+}
 const selDay = computed(() => byDay.value.get(sel.value)?.v)
 // 选中那天的收益率：账户净值相对前一交易日的涨跌，与每只基金那行的 % 同一口径
 const selPct = computed(() => byDay.value.get(sel.value)?.p)
@@ -220,19 +220,6 @@ void money
 .nav .van-icon{ cursor:pointer; padding:4px; } .nav .dis{ opacity:.25; cursor:default; }
 .sumline{ font-size:12.5px; color:var(--sub); margin:10px 0 4px; display:flex; gap:10px; align-items:baseline; }
 .sumline b{ font-size:14px; }
-.wk{ display:grid; grid-template-columns:repeat(7,1fr); font-size:11px; color:var(--muted); text-align:center; margin:8px 0 4px; }
-.grid7{ display:grid; grid-template-columns:repeat(7,1fr); gap:4px; }
-.grid3{ display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-top:10px; }
-.cell{ border-radius:8px; background:#F7F8FA; min-height:46px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; cursor:pointer; border:1.5px solid transparent; }
-.cell.big{ min-height:58px; }
-.cell.empty{ background:transparent; cursor:default; }
-/* 有日期但那天没有净值：压淡底色，别让空格子铺满后抢走有收益那几天的注意力 */
-.cell.none{ background:#FCFCFD; }
-.cell.pos{ background:#FDECEC; } .cell.pos .dv{ color:var(--up); }
-.cell.neg{ background:#E7F6EC; } .cell.neg .dv{ color:var(--down); }
-.cell.sel{ border-color:var(--brand); }
-.dd{ font-size:11.5px; color:var(--sub); } .dv{ font-size:11px; font-weight:600; }
-.cell.big .dd{ font-size:12.5px; } .cell.big .dv{ font-size:13px; }
 .det .ch{ padding-bottom:8px; border-bottom:1px solid var(--line); font-size:15px; }
 .drow{ display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid var(--line); cursor:pointer; }
 .drow:last-of-type{ border-bottom:0; }
@@ -242,16 +229,4 @@ void money
 /* 曲线与日历在同一张卡里；日历是卡内一个居中的浅灰内嵌模块，不加任何两侧内容 */
 .trend-div{ height:1px; background:var(--line); margin:16px 0 14px; }
 .cal-tip{ font-size:11.5px; color:var(--muted); text-align:center; line-height:1.6; margin:12px 0 0; }
-@media (min-width:900px){
-  /* 日历铺满整张卡；格子变宽后同步加高、放大字号，避免变成一排扁横条 */
-  .cal-inner{ max-width:none; margin:0; background:transparent; border:0; padding:0; }
-  .cal .sumline{ justify-content:center; }
-  .cal .wk{ font-size:12px; margin:10px 0 6px; }
-  .cal .grid7{ gap:8px; }
-  .cal .grid3{ gap:10px; }
-  .cal .cell{ min-height:78px; border-radius:10px; gap:6px; }
-  .cal .cell.big{ min-height:88px; }
-  .cal .dd{ font-size:13px; } .cal .dv{ font-size:14px; }
-  .cal .cell.big .dd{ font-size:14px; } .cal .cell.big .dv{ font-size:16px; }
-}
 </style>

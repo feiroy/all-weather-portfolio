@@ -96,17 +96,8 @@
                 </div>
                 <span class="seg2"><button v-for="m in ['日','月','年']" :key="m" :class="{ on: calMode === m }" @click="calMode = m">{{ m }}</button></span>
               </div>
-              <div class="wk" v-if="calMode === '日'"><span v-for="w in '一二三四五六日'" :key="w">{{ w }}</span></div>
-              <div class="grid7" v-if="calMode === '日'">
-                <div v-for="(c, k) in cal.cells" :key="k" class="cell" :class="[cellCls(c), { empty: !c }]">
-                  <template v-if="c"><span class="dd">{{ c.d }}</span><span class="dv num">{{ c.p == null ? '' : pctS(c.p) }}</span></template>
-                </div>
-              </div>
-              <div class="grid3" v-else>
-                <div v-for="(c, k) in cal.cells" :key="k" class="cell big" :class="cellCls(c)">
-                  <span class="dd">{{ c.label }}</span><span class="dv num">{{ c.p == null ? '—' : pctS(c.p) }}</span>
-                </div>
-              </div>
+              <!-- 格子用 ReturnCal（全站唯一一份日历实现），这里只喂数据，不接点击 -->
+              <ReturnCal :mode="calMode" :cells="calView" :fmt="calFmt" />
             </div>
 
             <!-- ⑤ 基金档案：长文本（经理/公司/完整费率）全部收在最后，键值两列对齐 -->
@@ -194,6 +185,7 @@ import { tone } from '../fmt'
 import SubBar from '../components/SubBar.vue'
 import RangeBar from '../components/RangeBar.vue'
 import MultiLine from '../components/MultiLine.vue'
+import ReturnCal from '../components/ReturnCal.vue'
 import { aggregate, sliceRange, rangeStartIndex, rangeReturn, rangeMaxDrawdown, RANGE_KEYS } from '../utils/series'
 import { cumulativeReturn, drawdown, stats, calendarCells } from '../utils/fundSeries'
 import { CHART, SERIES_COLORS } from '../utils/chartTheme'
@@ -329,7 +321,12 @@ function calStep(k) {
     calY.value = t.getFullYear(); calM.value = t.getMonth() + 1
   } else calY.value += k
 }
-const cellCls = c => !c ? '' : c.p == null ? 'nodata' : c.p > 0 ? 'pos' : c.p < 0 ? 'neg' : 'flat'
+// 喂给 ReturnCal 的格子（这一页只看不动，不接点击）
+const calView = computed(() => cal.value.cells.map((c, k) => (c
+  ? { key: c.date || c.label || k, d: c.d, label: c.label, v: c.p, p: c.p }
+  : null)))
+// 日视图有数据的日才写百分比，其余留空；月/年没有数据写「—」
+const calFmt = c => (c.p == null ? (calMode.value === '日' ? '' : '—') : pctS(c.p))
 
 // 多只对比：与单只同一套版式——一张联动图（区间涨跌 + 回撤）+ 阶段涨幅表
 const picked = ref(JSON.parse(localStorage.getItem('aw-cmp') || '[]'))
@@ -467,20 +464,6 @@ const cmpStageRows = computed(() => picked.value.map(p => {
 .nav{ display:flex; align-items:center; gap:4px; font-size:13px; margin-left:auto; }
 .nav + .seg2{ margin-left:8px; }
 .nav .van-icon{ cursor:pointer; padding:4px; } .nav .dis{ opacity:.25; cursor:default; }
-.wk{ display:grid; grid-template-columns:repeat(7,1fr); font-size:11px; color:var(--muted); text-align:center; margin:0 0 4px; }
-.grid7{ display:grid; grid-template-columns:repeat(7,1fr); gap:6px; }
-.grid3{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
-/* 没数据的日子（周末 / 还没到）不铺底色，只有真实涨跌才上色，免得一整屏灰块 */
-.cell{ border-radius:9px; background:transparent; min-height:44px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; }
-.cell.big{ min-height:58px; }
-.cell.empty{ background:transparent; }
-.cell.flat{ background:#F4F6F9; }
-.cell.nodata .dd{ color:#B6BFCC; }
-.cell.pos{ background:#FDECEC; } .cell.pos .dv{ color:var(--up); }
-.cell.neg{ background:#E7F6EC; } .cell.neg .dv{ color:var(--down); }
-.dd{ font-size:11.5px; color:var(--sub); } .dv{ font-size:11.5px; font-weight:600; }
-.cell.big .dd{ font-size:12.5px; } .cell.big .dv{ font-size:13px; }
-
 /* ⑤ 基金档案：标签列固定宽、值左对齐，两组并排；费率占整行 */
 .kv{ display:grid; grid-template-columns:64px 1fr 64px 1fr; column-gap:12px; row-gap:9px; margin:0; font-size:12.5px; line-height:1.5; }
 .kv dt{ color:var(--muted); }
@@ -515,7 +498,6 @@ const cmpStageRows = computed(() => picked.value.map(p => {
   .navv{ font-size:28px; }
   .kv{ grid-template-columns:64px 1fr; }
   .kv dd.wide{ grid-column:2; }
-  .cell{ min-height:42px; } .dv{ font-size:10px; }
 }
 @media (max-width:400px){
   .kpi4 b{ font-size:14px; }
