@@ -127,16 +127,29 @@ def replay_advice(strategy_col: str, start, rebal_dates, nav_getter=None) -> pd.
         wh = pd.read_csv(fp, index_col=0, parse_dates=True).sort_index()
     except Exception:  # noqa: BLE001
         return pd.Series(dtype=float)
-    if wh.empty:
+    return replay_weights(wh, start, rebal_dates, nav_getter)
+
+
+def replay_weights(wh: pd.DataFrame, start, rebal_dates, nav_getter=None,
+                   prices: pd.DataFrame | None = None) -> pd.Series:
+    """「调仓日 → 权重」表 + 默认 ETF → 按我的调仓日重放（`replay_advice` 的通用版）。
+
+    为什么单独抽出来：内置三策略的权重历史存在 output/weight_history_*.csv，自定义策略
+    没有这个文件，权重是现算的（引擎 track_weights 给的 weight_df）—— 两者除了来源不同，
+    重放规则完全一样，不能再抄一份（2026-11-18 用户：跟随自定义策略时「和基准比」只剩一条线）。
+    """
+    if wh is None or not len(wh):
         return pd.Series(dtype=float)
+    wh = wh.sort_index()
     last_w = wh.iloc[-1].reindex(wh.columns).fillna(0.0).astype(float)
     assets = [c for c in wh.columns if float(last_w[c] or 0) > 0] or list(wh.columns)
 
-    panel = None
-    if nav_getter is not None:
+    panel = prices
+    if panel is None and nav_getter is not None:
         navs = {}
         for a in assets:
-            code = ETF_META.get(a, {}).get("code", "")
+            # 内置资产 key → ETF_META 默认代码；自定义基金本身就是 6 位代码，直接用它自己
+            code = ETF_META.get(a, {}).get("code", "") or (str(a) if str(a).isdigit() and len(str(a)) == 6 else "")
             ser = nav_getter(code) if code else None
             if ser is not None and len(ser):
                 navs[a] = ser

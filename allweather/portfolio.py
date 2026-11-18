@@ -648,6 +648,9 @@ class Portfolio:
         d = self.daily
         if len(d) < 2:
             return {"dates": [], "ret": [], "money": []}
+        # 今天一条真实数据都没出时，最后一行只是昨天的复制，别画成「今天走平」
+        if len(d) > 2 and self.summary().get("today_state") == "待更新":
+            d = d.iloc[:-1]
         nav, pnl = d["nav"].astype(float), d["pnl"].astype(float)
         i0 = int(nav.index.searchsorted(nav.index[-1] - pd.DateOffset(months=1), side="right")) - 1
         i0 = max(0, min(i0, len(nav) - 2))

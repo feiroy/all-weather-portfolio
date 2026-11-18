@@ -271,6 +271,50 @@ def _drifted(rets: pd.DataFrame, w0: pd.Series) -> pd.Series:
     return pd.Series(h, index=w0.index)
 
 
+def strategy_curve(rec: dict, panel: pd.DataFrame | None = None):
+    """自定义策略的全历史理论净值 + 每次调仓的目标权重（和实盘同一套参数）。
+
+    账户页「和基准比」要的两条基准里，自定义策略原来一条都拿不到 —— 内置三策略的
+    净值在 output/nv_curves.csv、权重在 weight_history_*.csv，自定义策略这两样都得现算
+    （2026-11-18 用户：跟随自定义策略时那个页面只剩「我的账户」一条线）。
+
+    Returns:
+        (净值 Series（起点 1.0）, 权重 DataFrame｜None)
+    """
+    from allweather.data import load_panel
+
+    if panel is None:
+        panel = load_panel()
+    method = str(rec.get("method") or "fixed").lower()
+    freq = str(rec.get("freq") or "M").upper()
+    prep = prepare_funds(rec.get("funds") or [], panel, str(rec.get("start") or "2015-01-01"))
+    keys, rets = prep["keys"], prep["fund_rets"][prep["keys"]]
+    w0 = pd.Series({k: float(prep["wmap"][k]) for k in keys}, dtype=float)
+    w0 = w0 / float(w0.sum())
+    if method == "fixed":
+        nv = fixed_weight_backtest(rets, w0, freq if freq in ("M", "Q", "N") else "M")
+        # 固定权重只有一套目标权重：重放时每个调仓日复位到它，给一行就够
+        wh = pd.DataFrame([w0.values], index=[rets.index[0]], columns=keys)
+        return nv / float(nv.iloc[0]), wh
+    tm = {str(k): int(v) for k, v in (rec.get("trend_map") or {}).items() if int(v or 0) > 0}
+    kw = build_engine_kwargs(rets, method=method, rebal=freq,
+                             window=int(rec.get("window") or 20),
+                             max_w=float(rec.get("max_w") or 0.25),
+                             min_w=float(rec.get("min_w") if rec.get("min_w") is not None else 0.02),
+                             cash_ratio=float(rec.get("cash_ratio") or 0.0),
+                             trend_map=tm or None,
+                             safe_asset=str(rec.get("safe_asset") or "credit"),
+                             target_vol=rec.get("target_vol"),
+                             rp_buckets=rec.get("rp_buckets"))
+    kw.pop("_buckets_fallback", None)
+    from allweather.backtest import backtest
+    r = backtest(rets, **kw)
+    nv = r.nv
+    if nv is None or not len(nv):
+        raise ValueError("策略算不出净值曲线")
+    return nv / float(nv.iloc[0]), (r.weight_df if r.weight_df is not None and len(r.weight_df) else None)
+
+
 def live_custom_weights(rec: dict, panel: pd.DataFrame | None = None):
     """自定义策略「假如今天调仓」的目标权重 —— 实盘下单用。
 

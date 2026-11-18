@@ -796,6 +796,10 @@ async def compare(request, aid, P, a):
     col = BENCH_COL.get(stg, "")
     curves = {}
     mine = P.daily["nav"].astype(float) if len(P.daily) else pd.Series(dtype=float)
+    # 今天一条真实数据都没有时，账户净值最后一天只是昨天的复制 —— 不画，
+    # 免得图上多出一段「17 号平推到 18 号」的水平线（2026-11-18 用户要求）
+    if len(mine) > 1 and P.summary().get("today_state") == "待更新":
+        mine = mine.iloc[:-1]
     if len(mine) > 1:
         curves["我的账户"] = mine
     # 三条线：我的账户 / 默认基金·我的操作日 / 策略理论（标准执行）。
@@ -804,8 +808,24 @@ async def compare(request, aid, P, a):
     # （「项目默认基金·固定权重」那条已下线，它用今天这套权重往回套，没有执行意义。）
     tdays = sorted({pd.Timestamp(t["date"]) for t in (a.get("trades") or [])
                     if t.get("side") in ("买入", "卖出") and t.get("date")})
-    if col and len(tdays) > 1:
-        adv = BM.replay_advice(col, a.get("created"), tdays, nav_getter=HG.nav_series)
+    # 自定义策略没有 nv_curves.csv 那一列，也没有 weight_history_*.csv —— 现算一份，
+    # 否则「和基准比」在跟随自定义策略的账户上只剩「我的账户」一条线（2026-11-18）。
+    cust = None
+    if not col and str(stg).startswith("custom:"):
+        rec = ST.get(str(stg).split(":", 1)[1])
+        if rec:
+            try:
+                from allweather.custom_backtest import strategy_curve as _cust_curve
+                cust = _cust_curve(rec)
+            except Exception as e:  # noqa: BLE001 —— 基准算不出来不能让整页 500
+                print(f"[compare] 自定义策略基准算不出来：{e}")
+    # 建仓当天也算一次调仓日：只有一笔建仓时，这条线仍然回答「买默认 ETF 会怎样」，
+    # 原来要求 >1 天，只建过仓的账户就永远没有这条线（2026-11-18）
+    if (col or cust) and len(tdays) >= 1:
+        if col:
+            adv = BM.replay_advice(col, a.get("created"), tdays, nav_getter=HG.nav_series)
+        else:
+            adv = BM.replay_weights(cust[1], a.get("created"), tdays, nav_getter=HG.nav_series)
         if len(adv) > 1:
             ba = P.bench_index(adv)
             if len(ba) > 1:
@@ -818,7 +838,7 @@ async def compare(request, aid, P, a):
             theory["backtest_end"] = f"{nv[col].dropna().index[-1]:%Y-%m-%d}"
     except Exception:  # noqa: BLE001
         pass
-    full = BM.strategy_curve(col)
+    full = BM.strategy_curve(col) if col else (cust[0] if cust else None)
     if full is not None:
         theory["asof"] = f"{full.index[-1]:%Y-%m-%d}"
         created = a.get("created")
