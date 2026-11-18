@@ -87,8 +87,20 @@
               <th>收益率</th>
               <th class="c-fee">费用</th>
             </tr></thead>
-            <tbody>
-              <tr v-for="r in dailyShown" :key="r.date">
+            <!-- 日视图按自然月分组：只展开最近一个月，更早的月份收成一行摘要。
+                 逐日列表是随时间线性增长的，跑一年多就是 250 行、十几屏，翻都翻不动；
+                 按月折起来之后，多长都只有十几个月份头，点哪个月就看哪天。 -->
+            <tbody v-for="g in groups" :key="g.k">
+              <tr v-if="g.head" class="mon-h" :data-mon="g.k" @click="toggleMonth(g.k)">
+                <td colspan="7">
+                  <span class="mh">
+                    <span class="m1">{{ g.label }}<i>{{ g.n }} 期</i></span>
+                    <span class="m2 num" :class="tone(g.pnl)">{{ signed(g.pnl) }}<em v-if="g.pct != null">{{ pct(g.pct) }}</em></span>
+                    <van-icon :name="openMonth[g.k] ? 'arrow-up' : 'arrow-down'" />
+                  </span>
+                </td>
+              </tr>
+              <tr v-for="r in g.rows" v-show="!g.head || openMonth[g.k]" :key="r.date">
                 <td class="d">{{ r.label }}<span v-if="r.act" class="mark">{{ r.act }}</span></td>
                 <td class="c-nv">{{ r.nav == null ? '—' : r.nav.toFixed(4) }}</td>
                 <td class="c-px">{{ r.px == null ? '—' : r.px.toFixed(3) }}</td>
@@ -101,8 +113,13 @@
           </table>
           <div class="foot">
             <span class="fee-sum">累计费用 <b class="num">{{ money(feeTotal) }}</b><template v-if="feeKindText">（{{ feeKindText }}）</template></span>
-            <button v-if="daily.length > LIMIT" type="button" class="more-btn" @click="allDays = !allDays">
-              {{ allDays ? '收起' : '展开全部 ' + daily.length + ' 期' }}
+            <button v-if="dp !== 'day' && daily.length > dailyShown.length" ref="moreRef"
+                    type="button" class="more-btn" @click="morePeriod">
+              看更早的 {{ Math.min(LIMIT, daily.length - dailyShown.length) }} 期
+            </button>
+            <button v-else-if="dp === 'day' && groups.length > 1" type="button" class="more-btn"
+                    @click="toggleAllMonths">
+              {{ allOpen ? '只留最近一个月' : `展开全部 ${groups.length} 个月` }}
             </button>
           </div>
         </div>
@@ -128,7 +145,7 @@
   </div>
 </template>
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { showFailToast } from 'vant'
 import { get, peek } from '../api'
@@ -162,17 +179,75 @@ const dpTitle = computed(() => ({ day: '每日收益', week: '每周收益', mon
 const daily = ref([])
 const feeTotal = ref(0)
 const feeKind = ref({})
-const LIMIT = 40
-const allDays = ref(false)
-const dailyShown = computed(() => (allDays.value ? daily.value : daily.value.slice(-LIMIT)))
+// 周/月/年一次给多少期（日视图按月份分组，用不到这个窗口）
+const LIMIT = 12
+const pages = ref(1)
+const dailyShown = computed(() => daily.value.slice(-LIMIT * pages.value))
+const moreRef = ref(null)
+
+// ---- 日视图：按自然月分组 ----
+// 逐日明细本身是只增不减的台账，跑一年多就是 250 行。按月份折起来之后，
+// 页面上永远只有「最近一个月摊开 + 十几个月份头」，多长都一样高。
+// 月份合计：收益直接求和（线性、可加），收益率用该月第一行占用资金当分母，
+// 口径和聚合行一致，不是把每日收益率加起来（那样会随天数虚增）。
+const openMonth = ref({})
+const groups = computed(() => {
+  if (dp.value !== 'day') return [{ k: '_', head: false, rows: dailyShown.value }]
+  const by = {}, out = []
+  for (const r of daily.value) {
+    const k = String(r.date || '').slice(0, 7)       // 2026-11
+    let g = by[k]
+    if (!g) {
+      g = by[k] = { k, head: true, label: `${k.slice(0, 4)}年${Number(k.slice(5, 7))}月`,
+                    rows: [], n: 0, pnl: 0, base: 0, pct: null }
+      out.push(g)
+    }
+    g.rows.push(r)
+    g.n++
+    g.pnl += Number(r.pnl || 0)
+    if (!g.base && Number(r.base) > 0) g.base = Number(r.base)
+  }
+  for (const g of out) {
+    if (g.base > 0) g.pct = (g.pnl / g.base) * 100
+    g.pnl = Math.round(g.pnl * 100) / 100
+  }
+  return out.reverse()                               // 最近一个月在最上面
+})
+const allOpen = computed(() =>
+  groups.value.length > 0 && groups.value.every(g => !g.head || openMonth.value[g.k]))
+
+/** 展开/收起某个月份。行是在月份头**下面**增删的，收回视口上方的月份会把内容整体上移，
+ *  所以按被点那一行的 rect.top 还原，不能只记 scrollTop（会被夹到文档末尾）。 */
+function toggleMonth(k) {
+  const el = document.querySelector(`[data-mon="${k}"]`)
+  const y = el ? el.getBoundingClientRect().top : 0
+  openMonth.value = { ...openMonth.value, [k]: !openMonth.value[k] }
+  if (!el) return
+  nextTick(() => {
+    const dy = el.getBoundingClientRect().top - y
+    if (dy) window.scrollBy(0, dy)
+  })
+}
+function toggleAllMonths() {
+  const on = !allOpen.value
+  const next = {}
+  for (const g of groups.value) if (g.head) next[g.k] = on
+  openMonth.value = next
+}
 const feeKindText = computed(() =>
   Object.entries(feeKind.value).map(([k, v]) => `${k} ${money(v)}`).join(' · '))
+
 function loadDaily() {
   get(`/api/acct/${aid}/holding/${encodeURIComponent(code)}/daily?period=${dp.value}`)
     .then(r => {
       daily.value = r.rows || []
       feeTotal.value = r.fee_total || 0
       feeKind.value = r.fee_kind || {}
+      pages.value = 1
+      // 日视图默认只展开最近一个月，更早的月份收起 —— 这是「跑多久都不变长」的关键
+      const last = daily.value[daily.value.length - 1]
+      openMonth.value = (dp.value === 'day' && last)
+        ? { [String(last.date).slice(0, 7)]: true } : {}
     })
     .catch(() => { /* 明细拿不到不影响其它内容 */ })
 }
@@ -180,8 +255,17 @@ loadDaily()
 function setPeriod(k) {
   if (dp.value === k) return
   dp.value = k
-  allDays.value = false
   loadDaily()
+}
+/** 周/月/年「看更早」：新行插在上方，同样要按按钮的 rect.top 还原，否则视线会跳。 */
+function morePeriod() {
+  const el = moreRef.value
+  const y = el ? el.getBoundingClientRect().top : 0
+  pages.value++
+  nextTick(() => {
+    const dy = el ? el.getBoundingClientRect().top - y : 0
+    if (dy) window.scrollBy(0, dy)
+  })
 }
 
 const showDay = computed(() => h.value?.day)
@@ -288,13 +372,39 @@ const note = computed(() => sub.value === '累计盈亏'
 .day-list .mark{ margin-left:5px; padding:0 4px; border-radius:4px; font-size:10px; font-weight:500;
   color:var(--brand); background:var(--brand-soft); }
 .day-list td.fee{ color:var(--muted); font-weight:400; }
+/* 日视图的月份头：一行顶一个月，右边是该月收益合计 —— 跑一年多也只有十几个这样的头。
+   注意 flex 要挂在 td 里面的 .mh 上：直接给 td 设 display:flex 会让它不再是 table-cell，
+   colspan 失效（小屏 fixed 布局下 td 只剩第一列的宽度，月份和数字被挤成两行）。 */
+.day-list tr.mon-h td{ cursor:pointer; padding:9px 0 8px; border-bottom:1px solid var(--line); }
+.day-list tr.mon-h:first-child td{ padding-top:2px; }
+.day-list tr.mon-h .mh{ display:flex; align-items:center; gap:8px; }
+.day-list tr.mon-h .m1{ flex:1; text-align:left; font-size:12.5px; font-weight:600; color:var(--ink); }
+.day-list tr.mon-h .m1 i{ margin-left:6px; font-style:normal; font-weight:400; font-size:11px; color:var(--muted); }
+.day-list tr.mon-h .m2{ font-size:12.5px; font-weight:600; }
+.day-list tr.mon-h .m2 em{ margin-left:6px; font-style:normal; font-weight:500; font-size:11.5px; opacity:.85; }
+.day-list tr.mon-h :deep(.van-icon){ color:var(--muted); font-size:13px; }
 .day-card .foot{ display:flex; align-items:center; justify-content:space-between; gap:10px;
   margin:10px 0 2px; font-size:11.5px; color:var(--muted); }
 .day-card .fee-sum b{ color:var(--ink); font-weight:600; }
 .day-card .more-btn{ border:0; background:none; padding:4px 0; font-size:12px; color:var(--brand); cursor:pointer; }
 @media (max-width: 700px){
-  .day-list .c-nv, .day-list .c-sh{ display:none; }
+  /* table-layout:auto 下，月份头那一行（colspan=7 的 flex 单元格）的 max-content 宽
+     ——「2026年11月 13 期 +281.43 +0.17%」整串约 241px —— 会被算进第一列，表格被撑到
+     411px，而卡片只有 366px，整个页面横向溢出 49px（CDP 实测 scrollWidth 439 / clientWidth 390）。
+     fixed 布局忽略内容宽度、按表头百分比分，彻底不再被月份头带跑。 */
+  .day-list{ table-layout:fixed; }
+  .day-list .c-nv, .day-list .c-sh, .day-list .c-fee{ display:none; }
+  /* 4 个可见列必须写满 100%：fixed 布局下没写宽度的列会和「已被 display:none 的列」
+     平分剩余空间，实测收益/收益率只剩 32px，数字直接压在一起。 */
+  .day-list th:first-child{ width:34%; }
+  .day-list .c-px{ width:18%; }
+  .day-list th:nth-child(5), .day-list th:nth-child(6){ width:24%; }
   .day-list .mark{ display:block; margin:1px 0 0; padding:0 3px; width:fit-content; }
+  /* 月份头在 fixed 下也要能压缩：允许省略，否则数字长的时候会顶出去 */
+  .day-list tr.mon-h td{ overflow:hidden; }
+  .day-list tr.mon-h .m1, .day-list tr.mon-h .m2{ white-space:nowrap; }
+  .day-list tr.mon-h .m1{ overflow:hidden; text-overflow:ellipsis; }
+  .day-list tr.mon-h .m2{ flex-shrink:0; }
 }
 /* 视觉定义在 style.css 的 .mode-seg（与 .seg2 同一套），这里只管外边距 */
 .mode-seg{ margin:2px 0 4px; }
